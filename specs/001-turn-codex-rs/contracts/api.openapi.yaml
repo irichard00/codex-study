@@ -1,0 +1,697 @@
+openapi: 3.0.3
+info:
+  title: Codex Web API
+  description: REST API for Codex TypeScript Web Implementation
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000/api
+    description: Local development server
+
+paths:
+  /sessions:
+    post:
+      summary: Create new session
+      operationId: createSession
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - workspaceDir
+              properties:
+                workspaceDir:
+                  type: string
+                  description: Workspace directory path
+                configId:
+                  type: string
+                  format: uuid
+                  description: Configuration profile ID
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+
+    get:
+      summary: List active sessions
+      operationId: listSessions
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, idle, disconnected]
+      responses:
+        '200':
+          description: List of sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Session'
+
+  /sessions/{sessionId}:
+    get:
+      summary: Get session details
+      operationId: getSession
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Session'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    delete:
+      summary: End session
+      operationId: deleteSession
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '204':
+          description: Session ended
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /sessions/{sessionId}/agents:
+    post:
+      summary: Create agent for session
+      operationId: createAgent
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - model
+              properties:
+                model:
+                  type: string
+                  description: AI model identifier
+      responses:
+        '201':
+          description: Agent created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+
+  /sessions/{sessionId}/conversations:
+    get:
+      summary: Get conversation history
+      operationId: getConversations
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Conversation history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Conversation'
+
+    post:
+      summary: Send message to conversation
+      operationId: sendMessage
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - content
+              properties:
+                content:
+                  type: string
+                  description: Message content
+                attachments:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/Attachment'
+      responses:
+        '201':
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Message'
+
+  /sessions/{sessionId}/tasks:
+    get:
+      summary: List tasks for session
+      operationId: listTasks
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, running, completed, failed, cancelled]
+      responses:
+        '200':
+          description: List of tasks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Task'
+
+    post:
+      summary: Create new task
+      operationId: createTask
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - type
+                - input
+              properties:
+                type:
+                  $ref: '#/components/schemas/TaskType'
+                input:
+                  type: object
+                  description: Task-specific input data
+      responses:
+        '201':
+          description: Task created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+
+  /sessions/{sessionId}/files:
+    get:
+      summary: Browse files in workspace
+      operationId: browseFiles
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+            description: Directory path to browse
+      responses:
+        '200':
+          description: File listing
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FileInfo'
+
+  /sessions/{sessionId}/files/content:
+    get:
+      summary: Read file content
+      operationId: readFile
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+        - name: path
+          in: query
+          required: true
+          schema:
+            type: string
+            description: File path to read
+      responses:
+        '200':
+          description: File content
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  path:
+                    type: string
+                  content:
+                    type: string
+                  encoding:
+                    type: string
+
+    put:
+      summary: Write file content
+      operationId: writeFile
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - path
+                - content
+              properties:
+                path:
+                  type: string
+                content:
+                  type: string
+      responses:
+        '200':
+          description: File written
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FileOperation'
+
+  /sessions/{sessionId}/files/search:
+    post:
+      summary: Search files
+      operationId: searchFiles
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - query
+              properties:
+                query:
+                  type: string
+                  description: Search query
+                fuzzy:
+                  type: boolean
+                  default: true
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SearchResult'
+
+  /sessions/{sessionId}/mcp/connections:
+    get:
+      summary: List MCP connections
+      operationId: listMCPConnections
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: MCP connections
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MCPConnection'
+
+    post:
+      summary: Connect to MCP server
+      operationId: connectMCP
+      parameters:
+        - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - serverUrl
+              properties:
+                serverUrl:
+                  type: string
+                  format: uri
+      responses:
+        '201':
+          description: Connected to MCP server
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MCPConnection'
+
+  /configurations:
+    get:
+      summary: List configurations
+      operationId: listConfigurations
+      responses:
+        '200':
+          description: List of configurations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Configuration'
+
+    post:
+      summary: Create configuration
+      operationId: createConfiguration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigurationInput'
+      responses:
+        '201':
+          description: Configuration created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Configuration'
+
+  /health:
+    get:
+      summary: Health check
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [healthy]
+                  version:
+                    type: string
+                  uptime:
+                    type: number
+
+components:
+  parameters:
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    Session:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        userId:
+          type: string
+          format: uuid
+        workspaceDir:
+          type: string
+        config:
+          $ref: '#/components/schemas/Configuration'
+        createdAt:
+          type: string
+          format: date-time
+        lastActivityAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [active, idle, disconnected]
+
+    Configuration:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        sandboxMode:
+          type: string
+          enum: [read-only, workspace-write, danger-full-access]
+        mcpServers:
+          type: array
+          items:
+            type: object
+        notificationSettings:
+          type: object
+        authEnabled:
+          type: boolean
+        customSettings:
+          type: object
+
+    ConfigurationInput:
+      type: object
+      required:
+        - name
+      properties:
+        name:
+          type: string
+        sandboxMode:
+          type: string
+          enum: [read-only, workspace-write, danger-full-access]
+        mcpServers:
+          type: array
+          items:
+            type: object
+        authEnabled:
+          type: boolean
+
+    Agent:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        model:
+          type: string
+        status:
+          type: string
+          enum: [idle, thinking, executing, waiting_input, error]
+        currentTask:
+          $ref: '#/components/schemas/Task'
+        conversationId:
+          type: string
+          format: uuid
+
+    Conversation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
+        context:
+          type: object
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        role:
+          type: string
+          enum: [user, assistant, system]
+        content:
+          type: string
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Attachment'
+        timestamp:
+          type: string
+          format: date-time
+
+    Attachment:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [file, image, code]
+        name:
+          type: string
+        content:
+          type: string
+
+    Task:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        agentId:
+          type: string
+          format: uuid
+        type:
+          $ref: '#/components/schemas/TaskType'
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled]
+        input:
+          type: object
+        output:
+          type: object
+        error:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type: string
+          format: date-time
+
+    TaskType:
+      type: string
+      enum:
+        - file_read
+        - file_write
+        - file_search
+        - execute_command
+        - mcp_request
+        - code_generation
+
+    FileInfo:
+      type: object
+      properties:
+        name:
+          type: string
+        path:
+          type: string
+        type:
+          type: string
+          enum: [file, directory]
+        size:
+          type: integer
+        modifiedAt:
+          type: string
+          format: date-time
+
+    FileOperation:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        type:
+          type: string
+          enum: [read, write, delete, rename]
+        path:
+          type: string
+        status:
+          type: string
+          enum: [success, failed]
+        timestamp:
+          type: string
+          format: date-time
+
+    SearchResult:
+      type: object
+      properties:
+        path:
+          type: string
+        line:
+          type: integer
+        content:
+          type: string
+        score:
+          type: number
+
+    MCPConnection:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        sessionId:
+          type: string
+          format: uuid
+        serverUrl:
+          type: string
+          format: uri
+        status:
+          type: string
+          enum: [connecting, connected, disconnected, error]
+        capabilities:
+          type: array
+          items:
+            type: string
+        lastPingAt:
+          type: string
+          format: date-time
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+              details:
+                type: object
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error:
+                type: string
+
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+security:
+  - bearerAuth: []
