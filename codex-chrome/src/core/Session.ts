@@ -5,6 +5,8 @@
 
 import type { InputItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig, Event } from '../protocol/types';
 import type { HistoryEntry, EventMsg } from '../protocol/events';
+import type { MessageRecord, ConversationData } from '../types/storage';
+import { ConversationStore } from '../storage/ConversationStore';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
@@ -42,10 +44,14 @@ export class Session {
   private currentTurnItems: InputItem[] = [];
   private pendingInput: InputItem[] = [];
   private eventEmitter: ((event: Event) => Promise<void>) | null = null;
+  private conversationStore: ConversationStore | null = null;
+  private conversation: ConversationData | null = null;
+  private isPersistent: boolean = true;
   
-  constructor() {
+  constructor(isPersistent: boolean = true) {
     this.conversationId = `conv_${uuidv4()}`;
-    
+    this.isPersistent = isPersistent;
+
     // Initialize with default turn context
     this.turnContext = {
       cwd: '/',
@@ -54,6 +60,80 @@ export class Session {
       model: 'claude-3-sonnet',
       summary: { enabled: false },
     };
+  }
+
+  /**
+   * Initialize session with storage
+   */
+  async initialize(): Promise<void> {
+    if (!this.isPersistent) return;
+
+    this.conversationStore = new ConversationStore();
+    await this.conversationStore.initialize();
+
+    // Load or create conversation
+    const conversationId = await this.getOrCreateConversation();
+    this.conversation = await this.conversationStore.getConversation(conversationId);
+  }
+
+  /**
+   * Get or create a conversation in storage
+   */
+  private async getOrCreateConversation(): Promise<string> {
+    if (!this.conversationStore) {
+      return this.conversationId;
+    }
+
+    // Try to find an active conversation
+    const conversations = await this.conversationStore.listConversations(
+      { status: 'active' },
+      1
+    );
+
+    if (conversations.length > 0) {
+      // Use the most recent active conversation
+      const conv = conversations[0];
+      Object.assign(this, { conversationId: conv.id });
+
+      // Load messages from storage
+      const messages = await this.conversationStore.getMessages(conv.id);
+      this.history = messages.map(msg => ({
+        timestamp: msg.timestamp,
+        text: msg.content,
+        type: msg.role === 'user' ? 'user' as const : 'agent' as const
+      }));
+      this.messageCount = messages.length;
+
+      return conv.id;
+    }
+
+    // Create new conversation
+    const newConvId = await this.conversationStore.createConversation({
+      title: 'New Conversation',
+      status: 'active',
+      metadata: {
+        model: this.turnContext.model,
+        cwd: this.turnContext.cwd
+      }
+    });
+
+    Object.assign(this, { conversationId: newConvId });
+    return newConvId;
+  }
+
+  /**
+   * Save current session state to storage
+   */
+  async saveState(): Promise<void> {
+    if (!this.conversationStore || !this.conversation) return;
+
+    await this.conversationStore.updateConversation(this.conversation.id, {
+      metadata: {
+        ...this.conversation.metadata,
+        turnContext: this.turnContext,
+        lastUpdate: Date.now()
+      }
+    });
   }
 
   /**
@@ -76,9 +156,21 @@ export class Session {
   /**
    * Add a message to history
    */
-  addToHistory(entry: HistoryEntry): void {
+  async addToHistory(entry: HistoryEntry): Promise<void> {
     this.history.push(entry);
     this.messageCount++;
+
+    // Persist to storage if enabled
+    if (this.conversationStore && this.conversation) {
+      const messageRecord: Omit<MessageRecord, 'id'> = {
+        conversationId: this.conversation.id,
+        role: entry.type === 'user' ? 'user' : 'assistant',
+        content: entry.text,
+        timestamp: entry.timestamp,
+      };
+
+      await this.conversationStore.addMessage(this.conversation.id, messageRecord);
+    }
   }
 
   /**
@@ -260,7 +352,7 @@ export class Session {
           text = '[unknown input]';
       }
 
-      this.addToHistory({
+      await this.addToHistory({
         timestamp,
         text,
         type: 'user',
@@ -278,7 +370,7 @@ export class Session {
       if (item.role === 'assistant' || item.role === 'user') {
         const text = this.extractTextFromItem(item);
         if (text) {
-          this.addToHistory({
+          await this.addToHistory({
             timestamp,
             text,
             type: item.role === 'assistant' ? 'agent' : 'user',
@@ -421,5 +513,68 @@ export class Session {
         ],
       },
     ];
+  }
+
+  /**
+   * Search messages in conversation history
+   */
+  async searchMessages(query: string): Promise<any[]> {
+    if (!this.conversationStore) {
+      // Search in memory if no storage
+      return this.history.filter(entry =>
+        entry.text.toLowerCase().includes(query.toLowerCase())
+      );
+    }
+
+    const results = await this.conversationStore.searchMessages(query);
+    return results.map(r => ({
+      conversationId: r.conversationId,
+      messageId: r.messageId,
+      snippet: r.snippet,
+      timestamp: r.timestamp,
+      relevance: r.relevanceScore
+    }));
+  }
+
+  /**
+   * Export session with storage persistence
+   */
+  async exportWithStorage(): Promise<any> {
+    const baseExport = this.export();
+
+    if (!this.conversationStore) {
+      return baseExport;
+    }
+
+    const stats = await this.conversationStore.getStatistics();
+    return {
+      ...baseExport,
+      storageStats: stats,
+      persistent: this.isPersistent
+    };
+  }
+
+  /**
+   * Close session and cleanup resources
+   */
+  async close(): Promise<void> {
+    if (this.conversation && this.conversationStore) {
+      await this.conversationStore.updateConversation(this.conversation.id, {
+        status: 'inactive',
+        metadata: {
+          ...this.conversation.metadata,
+          closedAt: Date.now()
+        }
+      });
+
+      await this.conversationStore.close();
+    }
+  }
+
+  /**
+   * Get session ID (conversation ID)
+   */
+  getId(): string {
+    return this.conversationId;
   }
 }

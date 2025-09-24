@@ -3,11 +3,13 @@
  * Preserves the SQ/EQ (Submission Queue/Event Queue) architecture
  */
 
-import type { Submission, Op, Event } from '../protocol/types';
+import type { Submission, Op, Event, ResponseItem } from '../protocol/types';
 import type { EventMsg } from '../protocol/events';
 import { Session } from './Session';
 import { TaskRunner } from './TaskRunner';
 import { TurnManager } from './TurnManager';
+import { TurnContext } from './TurnContext';
+import { AgentTask } from './AgentTask';
 import { ApprovalManager } from './ApprovalManager';
 import { DiffTracker } from './DiffTracker';
 import { ToolRegistry } from '../tools/ToolRegistry';
@@ -16,6 +18,7 @@ import { v4 as uuidv4 } from 'uuid';
 
 /**
  * Main agent class managing the submission and event queues
+ * Enhanced with AgentTask integration for coordinated task execution
  */
 export class CodexAgent {
   private nextId: number = 1;
@@ -23,9 +26,10 @@ export class CodexAgent {
   private eventQueue: Event[] = [];
   private session: Session;
   private isProcessing: boolean = false;
-  // These will be initialized per task/turn as needed
-  // private taskRunner: TaskRunner;
-  // private turnManager: TurnManager;
+  private taskRunner: TaskRunner | null = null;
+  private turnManager: TurnManager | null = null;
+  private turnContext: TurnContext | null = null;
+  private activeTasks: Map<string, AgentTask> = new Map();
   private approvalManager: ApprovalManager;
   private diffTracker: DiffTracker;
   private toolRegistry: ToolRegistry;
@@ -204,10 +208,32 @@ export class CodexAgent {
   }
 
   /**
-   * Handle user turn with full context
+   * Handle user turn with full context using AgentTask
    */
   private async handleUserTurn(op: Extract<Op, { type: 'UserTurn' }>): Promise<void> {
     try {
+      // Initialize components if not already done
+      if (!this.turnContext) {
+        this.turnContext = new TurnContext({
+          cwd: op.cwd,
+          approval_policy: op.approval_policy,
+          sandbox_policy: op.sandbox_policy,
+          model: op.model,
+          effort: op.effort,
+          summary: op.summary,
+        });
+      } else {
+        // Update existing context
+        this.turnContext.updateContext({
+          cwd: op.cwd,
+          approval_policy: op.approval_policy,
+          sandbox_policy: op.sandbox_policy,
+          model: op.model,
+          effort: op.effort,
+          summary: op.summary,
+        });
+      }
+
       // Update session turn context
       this.session.updateTurnContext({
         cwd: op.cwd,
@@ -218,27 +244,58 @@ export class CodexAgent {
         summary: op.summary,
       });
 
-      // Process the input items through the session
-      for (const item of op.items) {
-        if (item.type === 'text') {
-          this.emitEvent({
-            type: 'AgentMessage',
-            data: {
-              message: `Processing: ${item.text}`,
-            },
-          });
-        }
+      // Initialize TaskRunner and TurnManager if needed
+      if (!this.taskRunner || !this.turnManager) {
+        this.turnManager = new TurnManager(
+          this.modelClientFactory.getClient(op.model),
+          this.toolRegistry,
+          this.approvalManager,
+          this.diffTracker
+        );
+
+        this.taskRunner = new TaskRunner(
+          this.session,
+          this.turnContext,
+          this.turnManager,
+          uuidv4(), // submission ID will be replaced
+          op.items,
+          { autoCompact: true }
+        );
       }
 
-      // For now, emit a simple completion
-      // TODO: Integrate with TaskRunner, TurnManager, ApprovalManager, and DiffTracker
-      // once the interfaces are properly aligned
-      this.emitEvent({
-        type: 'AgentMessage',
-        data: {
-          message: 'Task completed successfully. Full integration with new components is in progress.',
-        },
-      });
+      // Convert input items to ResponseItem format for AgentTask
+      const responseItems: ResponseItem[] = op.items.map(item => ({
+        role: 'user' as const,
+        content: item.type === 'text' ? item.text || '' : `[${item.type}]`,
+      }));
+
+      // Create lightweight AgentTask coordinator
+      const submissionId = uuidv4();
+      const agentTask = new AgentTask(
+        this.taskRunner,
+        this.session.getId(),
+        submissionId,
+        responseItems,
+        false // not review mode
+      );
+
+      this.activeTasks.set(submissionId, agentTask);
+
+      try {
+        // Run task through AgentTask coordinator
+        await agentTask.run();
+
+        // Emit completion
+        this.emitEvent({
+          type: 'AgentMessage',
+          data: {
+            message: 'Task completed successfully.',
+          },
+        });
+      } finally {
+        // Clean up
+        this.activeTasks.delete(submissionId);
+      }
 
     } catch (error) {
       console.error('Error in handleUserTurn:', error);
@@ -251,6 +308,17 @@ export class CodexAgent {
       });
 
       throw error;
+    }
+  }
+
+  /**
+   * Cancel a running task
+   */
+  cancelTask(submissionId: string): void {
+    const task = this.activeTasks.get(submissionId);
+    if (task) {
+      task.cancel();
+      this.activeTasks.delete(submissionId);
     }
   }
 

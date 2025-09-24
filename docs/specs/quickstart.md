@@ -1,529 +1,374 @@
-# Codex Chrome Extension - Quick Start Guide
+# Quickstart Guide: Implementing Missing Codex Chrome Components
 
 ## Overview
-Convert the Codex terminal agent to a Chrome extension, preserving the core SQ/EQ architecture and protocol from codex-rs.
+This guide walks through implementing the critical missing components for the codex-chrome extension. We already have ~80% of the infrastructure in place - this guide focuses ONLY on the missing pieces.
 
-## Project Setup
+## What's Already Implemented ✅
+- Chrome extension setup (Vite, TypeScript, Svelte)
+- Protocol types (Submission, Op, Event, EventMsg)
+- Basic infrastructure (CodexAgent, Session, MessageRouter, QueueProcessor)
+- Model clients (OpenAI, Anthropic)
+- Basic browser tools (TabTool, DOMTool, StorageTool, NavigationTool)
+- ApprovalManager and DiffTracker
+- UI components (sidepanel, popup)
 
-### 1. Initialize Project
+## What's Missing and Needs Implementation ❌
+1. **AgentTask** - Critical coordinator class
+2. **StreamProcessor** - Browser streaming handler
+3. **Enhanced Browser Tools** - Advanced automation
+4. **Persistence Layer** - IndexedDB storage
 
-```bash
-# Create directory
-mkdir codex-chrome
-cd codex-chrome
+## Quick Implementation Steps
 
-# Initialize with TypeScript
-npm init -y
-npm install --save-dev typescript@5.x vite@5.x @types/chrome
+### Step 1: Implement AgentTask (Priority 1)
 
-# Svelte and UI
-npm install svelte @sveltejs/vite-plugin-svelte tailwindcss
+The most critical missing component. This coordinates the entire task execution.
 
-# Validation and utilities
-npm install zod uuid
+```typescript
+// src/core/AgentTask.ts
+import type { Session } from './Session';
+import type { ResponseItem, Turn } from '../protocol/types';
+import { EventEmitter } from '../utils/EventEmitter';
 
-# Testing
-npm install --save-dev vitest @playwright/test
-```
+export class AgentTask {
+  private session: Session;
+  private submissionId: string;
+  private input: ResponseItem[];
+  private eventEmitter: EventEmitter;
+  private isReviewMode: boolean;
+  private currentTurnIndex = 0;
+  private maxTurns = 50;
+  private status: 'running' | 'completed' | 'failed' | 'cancelled' = 'running';
 
-### 2. TypeScript Configuration
+  constructor(
+    session: Session,
+    submissionId: string,
+    input: ResponseItem[],
+    eventEmitter: EventEmitter,
+    isReviewMode = false
+  ) {
+    this.session = session;
+    this.submissionId = submissionId;
+    this.input = input;
+    this.eventEmitter = eventEmitter;
+    this.isReviewMode = isReviewMode;
+  }
 
-```json
-// tsconfig.json
-{
-  "compilerOptions": {
-    "target": "ES2020",
-    "module": "ESNext",
-    "lib": ["ES2020", "DOM", "chrome"],
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "resolveJsonModule": true,
-    "moduleResolution": "node",
-    "types": ["chrome", "node", "vite/client"],
-    "paths": {
-      "@/*": ["./src/*"]
+  async run(): Promise<void> {
+    try {
+      this.eventEmitter.emit('TaskStarted', {
+        submission_id: this.submissionId,
+        turn_type: this.isReviewMode ? 'review' : 'user'
+      });
+
+      await this.runTurnLoop();
+
+      this.status = 'completed';
+      this.eventEmitter.emit('TaskComplete', {
+        submission_id: this.submissionId
+      });
+    } catch (error) {
+      this.status = 'failed';
+      this.handleError(error);
     }
-  },
-  "include": ["src/**/*"],
-  "exclude": ["node_modules", "dist"]
+  }
+
+  private async runTurnLoop(): Promise<void> {
+    while (this.currentTurnIndex < this.maxTurns && this.status === 'running') {
+      if (this.shouldAutoCompact()) {
+        await this.compactContext();
+      }
+
+      const turn = await this.session.turnManager.createTurn(this.input);
+      await this.session.turnManager.executeTurn(turn);
+
+      this.currentTurnIndex++;
+
+      if (await this.isTaskComplete()) {
+        break;
+      }
+    }
+  }
+
+  private shouldAutoCompact(): boolean {
+    const tokenUsage = this.session.getTokenUsage();
+    return tokenUsage.used / tokenUsage.max > 0.75;
+  }
+
+  private async compactContext(): Promise<void> {
+    // Implement context compaction
+    this.eventEmitter.emit('CompactionEvent', {
+      turn_index: this.currentTurnIndex,
+      timestamp: Date.now()
+    });
+  }
+
+  // ... rest of implementation
 }
 ```
 
-### 3. Chrome Manifest V3
+### Step 2: Wire AgentTask into TaskRunner
 
-```json
-// manifest.json
-{
-  "manifest_version": 3,
-  "name": "Codex Chrome Agent",
-  "version": "1.0.0",
-  "description": "AI-powered browser automation preserving codex-rs architecture",
-
-  "permissions": [
-    "tabs",
-    "activeTab",
-    "storage",
-    "scripting",
-    "webNavigation"
-  ],
-
-  "host_permissions": ["<all_urls>"],
-
-  "background": {
-    "service_worker": "dist/background/index.js",
-    "type": "module"
-  },
-
-  "action": {
-    "default_title": "Open Codex Agent",
-    "default_popup": "dist/popup/index.html"
-  },
-
-  "side_panel": {
-    "default_path": "dist/sidepanel/index.html"
-  },
-
-  "content_scripts": [{
-    "matches": ["<all_urls>"],
-    "js": ["dist/content/index.js"],
-    "run_at": "document_idle"
-  }],
-
-  "web_accessible_resources": [{
-    "resources": ["dist/assets/*"],
-    "matches": ["<all_urls>"]
-  }]
-}
-```
-
-### 4. Project Structure
-
-```
-codex-chrome/
-├── src/
-│   ├── protocol/           # Port from codex-rs/protocol
-│   │   ├── types.ts       # Submission, Op, Event, EventMsg
-│   │   ├── events.ts      # All event type definitions
-│   │   └── constants.ts   # Protocol constants
-│   │
-│   ├── core/              # Port from codex-rs/core
-│   │   ├── CodexAgent.ts  # Main agent (replacing Codex struct)
-│   │   ├── Session.ts     # Session management
-│   │   ├── Queue.ts       # SQ/EQ implementation
-│   │   └── Tools.ts       # Tool registry
-│   │
-│   ├── background/        # Service worker
-│   │   ├── index.ts       # Main background script
-│   │   ├── MessageHandler.ts
-│   │   └── StorageManager.ts
-│   │
-│   ├── sidepanel/         # Svelte UI
-│   │   ├── App.svelte     # Main component
-│   │   ├── index.html
-│   │   └── components/
-│   │
-│   ├── content/           # Content scripts
-│   │   ├── index.ts
-│   │   ├── DOMInteractor.ts
-│   │   └── DataExtractor.ts
-│   │
-│   └── tools/             # Browser tools
-│       ├── TabManager.ts
-│       ├── PageInteractor.ts
-│       └── Navigator.ts
-│
-├── dist/                  # Build output
-├── tests/
-├── manifest.json
-├── package.json
-├── tsconfig.json
-└── vite.config.ts
-```
-
-## Core Implementation
-
-### 1. Port Protocol Types (Preserve Exact Names)
+Update the existing TaskRunner to use AgentTask:
 
 ```typescript
-// src/protocol/types.ts - Direct port from Rust
+// src/core/TaskRunner.ts (update existing)
+import { AgentTask } from './AgentTask';
 
-export interface Submission {
-  id: string;
-  op: Op;
+export class TaskRunner {
+  async runTask(submission: Submission): Promise<void> {
+    const agentTask = new AgentTask(
+      this.session,
+      submission.id,
+      this.parseInput(submission),
+      this.eventEmitter,
+      this.isReviewMode(submission)
+    );
+
+    this.currentTask = agentTask;
+    await agentTask.run();
+  }
 }
-
-export interface Event {
-  id: string;
-  msg: EventMsg;
-}
-
-export type Op =
-  | { type: 'Interrupt' }
-  | { type: 'UserInput'; items: InputItem[] }
-  | { type: 'UserTurn'; items: InputItem[]; cwd: string; /* ... */ }
-  // ... exact same as Rust enum
-
-export type EventMsg =
-  | { type: 'TaskStarted'; data: TaskStartedEvent }
-  | { type: 'AgentMessage'; data: AgentMessageEvent }
-  // ... exact same as Rust enum
 ```
 
-### 2. Implement Core Agent (Preserving Architecture)
+### Step 3: Implement StreamProcessor
+
+Handle browser streaming efficiently:
 
 ```typescript
-// src/core/CodexAgent.ts - Port of codex.rs Codex struct
+// src/core/StreamProcessor.ts
+export class StreamProcessor {
+  private buffer: Uint8Array[] = [];
+  private status: 'idle' | 'streaming' | 'paused' | 'completed' = 'idle';
+  private updateCallbacks: ((update: UIUpdate) => void)[] = [];
 
-import { Submission, Event, Op, EventMsg } from '@/protocol/types';
+  async start(stream: ReadableStream): Promise<void> {
+    const reader = stream.getReader();
+    this.status = 'streaming';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        await this.processChunk(value);
+
+        if (this.shouldApplyBackpressure()) {
+          this.pause();
+          await this.waitForBuffer();
+          this.resume();
+        }
+      }
+
+      this.status = 'completed';
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  // ... implementation
+}
+```
+
+### Step 4: Add Enhanced Browser Tools
+
+Create advanced tools that extend the existing ones:
+
+```typescript
+// src/tools/WebScrapingTool.ts
+import { BaseTool } from './BaseTool';
+
+export class WebScrapingTool extends BaseTool {
+  name = 'web_scraping';
+  description = 'Extract structured data from web pages';
+
+  async execute(params: ScrapingParams): Promise<any> {
+    const tab = await chrome.tabs.get(params.tabId);
+
+    // Inject content script if needed
+    await chrome.scripting.executeScript({
+      target: { tabId: params.tabId },
+      func: this.extractData,
+      args: [params.pattern]
+    });
+
+    // ... implementation
+  }
+
+  private extractData(pattern: ScrapingPattern): any {
+    // Runs in page context
+    const elements = document.querySelectorAll(pattern.selector);
+    return Array.from(elements).map(el => ({
+      text: el.textContent,
+      html: el.innerHTML,
+      attributes: Object.fromEntries(
+        Array.from(el.attributes).map(a => [a.name, a.value])
+      )
+    }));
+  }
+}
+```
+
+### Step 5: Implement Persistence Layer
+
+Add IndexedDB storage for conversations:
+
+```typescript
+// src/storage/ConversationStore.ts
+export class ConversationStore {
+  private db: IDBDatabase | null = null;
+
+  async initialize(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open('CodexConversations', 1);
+
+      request.onupgradeneeded = (event) => {
+        const db = (event.target as IDBOpenDBRequest).result;
+
+        // Create stores
+        if (!db.objectStoreNames.contains('conversations')) {
+          const store = db.createObjectStore('conversations', { keyPath: 'id' });
+          store.createIndex('updated', 'updated');
+        }
+
+        if (!db.objectStoreNames.contains('messages')) {
+          const store = db.createObjectStore('messages', { keyPath: 'id' });
+          store.createIndex('conversationId', 'conversationId');
+        }
+      };
+
+      request.onsuccess = () => {
+        this.db = request.result;
+        resolve();
+      };
+
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  // ... CRUD operations
+}
+```
+
+## Integration Checklist
+
+### 1. Update CodexAgent.ts
+```typescript
+// Add AgentTask to the main agent
+import { AgentTask } from './AgentTask';
 
 export class CodexAgent {
-  private nextId: number = 1;
-  private submissionQueue: Submission[] = [];
-  private eventQueue: Event[] = [];
-  private session: Session;
+  // ... existing code
 
-  constructor() {
-    this.session = new Session();
-  }
-
-  // Main entry point - same as Rust
-  async submitOperation(op: Op): Promise<string> {
-    const id = `sub_${this.nextId++}`;
-    const submission: Submission = { id, op };
-
-    this.submissionQueue.push(submission);
-    await this.processQueue();
-
-    return id;
-  }
-
-  async getNextEvent(): Promise<Event | null> {
-    return this.eventQueue.shift() || null;
-  }
-
-  private async processQueue(): Promise<void> {
-    while (this.submissionQueue.length > 0) {
-      const submission = this.submissionQueue.shift()!;
-      await this.handleSubmission(submission);
+  async processSubmission(submission: Submission): Promise<void> {
+    if (submission.op.type === 'UserTurn') {
+      // Use AgentTask instead of direct TaskRunner
+      const task = new AgentTask(
+        this.session,
+        submission.id,
+        this.parseInput(submission.op),
+        this.eventEmitter
+      );
+      await task.run();
     }
-  }
-
-  private async handleSubmission(submission: Submission): Promise<void> {
-    // Emit TaskStarted event
-    this.emitEvent({
-      type: 'TaskStarted',
-      data: {
-        submission_id: submission.id,
-        turn_type: 'user'
-      }
-    });
-
-    try {
-      // Process based on Op type
-      switch (submission.op.type) {
-        case 'UserInput':
-          await this.handleUserInput(submission.op.items);
-          break;
-        case 'UserTurn':
-          await this.handleUserTurn(submission.op);
-          break;
-        // ... handle other ops
-      }
-
-      // Emit TaskComplete
-      this.emitEvent({
-        type: 'TaskComplete',
-        data: { submission_id: submission.id }
-      });
-    } catch (error) {
-      // Emit Error event
-      this.emitEvent({
-        type: 'Error',
-        data: {
-          code: 'PROCESSING_ERROR',
-          message: error.message
-        }
-      });
-    }
-  }
-
-  private emitEvent(msg: EventMsg): void {
-    const event: Event = {
-      id: `evt_${this.nextId++}`,
-      msg
-    };
-    this.eventQueue.push(event);
-
-    // Notify listeners (Chrome runtime)
-    chrome.runtime.sendMessage({
-      type: 'EVENT',
-      payload: event
-    });
+    // ... handle other operations
   }
 }
 ```
 
-### 3. Session Management
-
+### 2. Register New Tools
 ```typescript
-// src/core/Session.ts - Port of Session struct
+// src/tools/index.ts
+import { WebScrapingTool } from './WebScrapingTool';
+import { FormAutomationTool } from './FormAutomationTool';
+import { NetworkInterceptTool } from './NetworkInterceptTool';
 
-export class Session {
-  conversationId: string;
-  turnContext: TurnContext;
-  state: SessionState;
-  toolRegistry: ToolRegistry;
-
-  constructor() {
-    this.conversationId = generateId();
-    this.turnContext = getDefaultTurnContext();
-    this.state = { status: 'idle', history: [] };
-    this.toolRegistry = new ToolRegistry();
-
-    this.registerChromeTools();
-  }
-
-  private registerChromeTools(): void {
-    // Register browser-specific tools
-    this.toolRegistry.register(new TabManagementTool());
-    this.toolRegistry.register(new PageInteractionTool());
-    this.toolRegistry.register(new DataExtractionTool());
-    this.toolRegistry.register(new NavigationTool());
-  }
-
-  async executeTool(name: string, params: any): Promise<ToolResult> {
-    const tool = this.toolRegistry.getTool(name);
-    if (!tool) {
-      throw new Error(`Tool not found: ${name}`);
-    }
-    return await tool.execute(params);
-  }
+export function registerAdvancedTools(registry: ToolRegistry): void {
+  registry.register(new WebScrapingTool());
+  registry.register(new FormAutomationTool());
+  registry.register(new NetworkInterceptTool());
 }
 ```
 
-### 4. Background Service Worker
-
+### 3. Initialize Storage on Extension Start
 ```typescript
-// src/background/index.ts
+// src/background/service-worker.ts
+import { ConversationStore } from '../storage/ConversationStore';
+import { CacheManager } from '../storage/CacheManager';
 
-import { CodexAgent } from '@/core/CodexAgent';
+// On extension startup
+chrome.runtime.onInstalled.addListener(async () => {
+  const store = new ConversationStore();
+  await store.initialize();
 
-const agent = new CodexAgent();
-
-// Handle messages from sidepanel/popup
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'SUBMISSION') {
-    agent.submitOperation(message.op)
-      .then(id => sendResponse({ success: true, id }))
-      .catch(err => sendResponse({ success: false, error: err.message }));
-    return true; // Keep channel open
-  }
-
-  if (message.type === 'GET_EVENT') {
-    agent.getNextEvent()
-      .then(event => sendResponse(event))
-      .catch(err => sendResponse({ error: err.message }));
-    return true;
-  }
-});
-
-// Initialize on install
-chrome.runtime.onInstalled.addListener(() => {
-  console.log('Codex Chrome Agent installed');
+  const cache = new CacheManager();
+  await cache.initialize();
 });
 ```
 
-### 5. Side Panel UI (Svelte)
+## Testing the Implementation
 
-```svelte
-<!-- src/sidepanel/App.svelte -->
-<script lang="ts">
-  import { onMount } from 'svelte';
-  import type { Op, Event } from '@/protocol/types';
+### Test AgentTask Integration
+```bash
+# Run existing tests to ensure nothing breaks
+npm test
 
-  let input = '';
-  let events: Event[] = [];
-  let processing = false;
-
-  async function sendInput() {
-    if (!input.trim() || processing) return;
-
-    processing = true;
-
-    // Create UserInput op
-    const op: Op = {
-      type: 'UserInput',
-      items: [{
-        type: 'text',
-        content: input
-      }]
-    };
-
-    // Send to background
-    const response = await chrome.runtime.sendMessage({
-      type: 'SUBMISSION',
-      op
-    });
-
-    if (response.success) {
-      input = '';
-      pollForEvents();
-    }
-
-    processing = false;
-  }
-
-  async function pollForEvents() {
-    const event = await chrome.runtime.sendMessage({
-      type: 'GET_EVENT'
-    });
-
-    if (event) {
-      events = [...events, event];
-
-      // Continue polling if task not complete
-      if (event.msg.type !== 'TaskComplete') {
-        setTimeout(pollForEvents, 100);
-      }
-    }
-  }
-
-  onMount(() => {
-    // Start event polling
-    pollForEvents();
-  });
-</script>
-
-<div class="p-4 h-screen flex flex-col">
-  <h1 class="text-xl font-bold mb-4">Codex Agent</h1>
-
-  <div class="flex-1 overflow-y-auto mb-4">
-    {#each events as event}
-      <div class="mb-2 p-2 bg-gray-100 rounded">
-        <span class="text-xs text-gray-500">{event.msg.type}</span>
-        {#if event.msg.type === 'AgentMessage'}
-          <p>{event.msg.data.message}</p>
-        {/if}
-      </div>
-    {/each}
-  </div>
-
-  <div class="flex gap-2">
-    <input
-      bind:value={input}
-      on:keydown={(e) => e.key === 'Enter' && sendInput()}
-      class="flex-1 p-2 border rounded"
-      placeholder="Enter command..."
-      disabled={processing}
-    />
-    <button
-      on:click={sendInput}
-      class="px-4 py-2 bg-blue-500 text-white rounded"
-      disabled={processing}
-    >
-      Send
-    </button>
-  </div>
-</div>
+# Add new test for AgentTask
+npm test -- AgentTask
 ```
 
-## Tool Implementation Example
+### Manual Testing Steps
+1. Load extension in Chrome developer mode
+2. Open side panel
+3. Start a conversation that requires multiple turns
+4. Verify AgentTask coordinates properly
+5. Check IndexedDB in DevTools for persistence
 
-```typescript
-// src/tools/TabManager.ts
+## Common Issues and Solutions
 
-export class TabManagementTool implements Tool {
-  name = 'tab_management';
-  description = 'Manage browser tabs';
+### Issue: AgentTask not coordinating turns
+**Solution**: Ensure TaskRunner is updated to use AgentTask instead of direct turn execution.
 
-  async execute(params: any): Promise<ToolResult> {
-    const { action, ...options } = params;
+### Issue: Streaming responses not showing in UI
+**Solution**: Connect StreamProcessor to UI update system via EventEmitter.
 
-    try {
-      switch (action) {
-        case 'open':
-          const tab = await chrome.tabs.create({
-            url: options.url,
-            active: options.active
-          });
-          return { success: true, data: tab };
+### Issue: IndexedDB quota exceeded
+**Solution**: Implement cleanup in ConversationStore for old conversations.
 
-        case 'close':
-          await chrome.tabs.remove(options.tabId);
-          return { success: true };
+## Next Steps
 
-        case 'getAll':
-          const tabs = await chrome.tabs.query({});
-          return { success: true, data: tabs };
+1. **Implement AgentTask first** - It's the critical missing piece
+2. **Test with existing infrastructure** - Ensure compatibility
+3. **Add StreamProcessor** - Improve UI responsiveness
+4. **Enhance tools incrementally** - Start with WebScrapingTool
+5. **Add persistence last** - Once core functionality works
 
-        default:
-          throw new Error(`Unknown action: ${action}`);
-      }
-    } catch (error) {
-      return {
-        success: false,
-        error: error.message
-      };
-    }
-  }
-}
-```
-
-## Testing
-
-```typescript
-// tests/protocol.test.ts
-import { describe, it, expect } from 'vitest';
-import { CodexAgent } from '@/core/CodexAgent';
-
-describe('CodexAgent', () => {
-  it('preserves SQ/EQ architecture', async () => {
-    const agent = new CodexAgent();
-
-    // Submit operation
-    const id = await agent.submitOperation({
-      type: 'UserInput',
-      items: [{ type: 'text', content: 'test' }]
-    });
-
-    expect(id).toMatch(/^sub_/);
-
-    // Get events
-    const event = await agent.getNextEvent();
-    expect(event?.msg.type).toBe('TaskStarted');
-  });
-});
-```
-
-## Key Migration Rules
-
-1. **Preserve ALL type names** from Rust protocol
-2. **Maintain SQ/EQ pattern** with same message flow
-3. **Keep function names** where applicable (submitOperation, getNextEvent, etc.)
-4. **Replace file ops** with browser ops (tabs, DOM, storage)
-5. **Adapt sandbox** for browser security model
-
-## Development Workflow
+## Quick Commands
 
 ```bash
-# Development
-npm run dev
-
-# Build extension
+# Build the extension
 npm run build
 
 # Run tests
 npm test
 
-# Load in Chrome
-1. Open chrome://extensions/
-2. Enable Developer mode
-3. Load unpacked → select `codex-chrome` folder
+# Watch mode for development
+npm run dev
+
+# Type check
+npm run type-check
 ```
 
-## Debugging
+## Resources
 
-- Service worker console: chrome://extensions/ → Inspect views
-- Content script: Regular DevTools in web page
-- Side panel: Right-click → Inspect
+- [AgentTask Contract](./contracts/AgentTask.md) - Full API specification
+- [Data Model](./data-model-missing.md) - Complete type definitions
+- [Research](./research.md) - Analysis of missing components
+- [Original codex-rs](../../codex-rs/core/src/codex.rs) - Reference implementation
+
+## Support
+
+For issues or questions:
+- Check the [implementation plan](./implementation-plan.md)
+- Review the [contracts](./contracts/) for API details
+- Reference the original codex-rs code for behavior

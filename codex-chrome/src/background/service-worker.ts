@@ -9,12 +9,19 @@ import type { Submission, Event } from '../protocol/types';
 import { validateSubmission } from '../protocol/schemas';
 import { ModelClientFactory } from '../models/ModelClientFactory';
 import { ToolRegistry } from '../tools/ToolRegistry';
+import { ConversationStore } from '../storage/ConversationStore';
+import { CacheManager } from '../storage/CacheManager';
+import { StorageQuotaManager } from '../storage/StorageQuotaManager';
+import { registerBasicTools, registerAdvancedTools } from '../tools';
 
 // Global instances
 let agent: CodexAgent | null = null;
 let router: MessageRouter | null = null;
 let modelClientFactory: ModelClientFactory | null = null;
 let toolRegistry: ToolRegistry | null = null;
+let conversationStore: ConversationStore | null = null;
+let cacheManager: CacheManager | null = null;
+let storageQuotaManager: StorageQuotaManager | null = null;
 
 /**
  * Initialize the service worker
@@ -45,6 +52,9 @@ async function initialize(): Promise<void> {
 
   // Initialize browser-specific tools
   await initializeBrowserTools();
+
+  // Initialize storage layer
+  await initializeStorage();
 
   console.log('Service worker initialized');
 }
@@ -414,6 +424,10 @@ async function initializeBrowserTools(): Promise<void> {
 
   const agentToolRegistry = agent.getToolRegistry();
 
+  // Register all tools
+  registerBasicTools(agentToolRegistry);
+  registerAdvancedTools(agentToolRegistry);
+
   // Register browser tools in the agent's tool registry
   const browserTools = [
     'browser_action',
@@ -434,6 +448,50 @@ async function initializeBrowserTools(): Promise<void> {
       console.log(`Registering browser tool: ${toolName}`);
     }
   }
+}
+
+/**
+ * Initialize storage layer
+ */
+async function initializeStorage(): Promise<void> {
+  console.log('Initializing storage layer...');
+
+  // Initialize conversation store
+  conversationStore = new ConversationStore();
+  await conversationStore.initialize();
+
+  // Initialize cache manager
+  cacheManager = new CacheManager({
+    maxSize: 50 * 1024 * 1024, // 50MB
+    defaultTTL: 3600000, // 1 hour
+    evictionPolicy: 'lru'
+  });
+
+  // Initialize storage quota manager
+  storageQuotaManager = new StorageQuotaManager(conversationStore, cacheManager);
+  await storageQuotaManager.initialize();
+
+  // Check storage quota
+  const quota = await storageQuotaManager.getQuota();
+  console.log(`Storage usage: ${quota.percentage.toFixed(2)}% (${quota.usage} / ${quota.quota} bytes)`);
+
+  // Request persistent storage if not already granted
+  if (!quota.persistent) {
+    const granted = await storageQuotaManager.requestPersistentStorage();
+    if (granted) {
+      console.log('Persistent storage granted');
+    } else {
+      console.log('Persistent storage denied');
+    }
+  }
+
+  // Wire storage to agent session if agent is initialized
+  if (agent) {
+    const session = agent.getSession();
+    await session.initialize();
+  }
+
+  console.log('Storage layer initialized');
 }
 
 /**
@@ -471,7 +529,7 @@ function setupPeriodicTasks(): void {
   // Process event queue periodically
   setInterval(async () => {
     if (!agent || !router) return;
-    
+
     // Get next event from agent
     const event = await agent.getNextEvent();
     if (event) {
@@ -479,27 +537,67 @@ function setupPeriodicTasks(): void {
       await router.broadcast(MessageType.EVENT, event);
     }
   }, 100); // Check every 100ms
-  
-  // Cleanup old data periodically
-  setInterval(async () => {
-    const storage = await chrome.storage.local.get(null);
-    const now = Date.now();
-    const keysToRemove: string[] = [];
-    
-    // Remove old temporary data (older than 24 hours)
-    for (const key in storage) {
-      if (key.startsWith('temp_')) {
-        const data = storage[key];
-        if (data.timestamp && now - data.timestamp > 24 * 60 * 60 * 1000) {
-          keysToRemove.push(key);
+
+  // Cleanup old data and manage storage periodically
+  chrome.alarms.create('storage-cleanup', { periodInMinutes: 60 });
+  chrome.alarms.create('cache-cleanup', { periodInMinutes: 30 });
+  chrome.alarms.create('quota-check', { periodInMinutes: 10 });
+
+  // Handle alarms
+  chrome.alarms.onAlarm.addListener(async (alarm) => {
+    switch (alarm.name) {
+      case 'storage-cleanup':
+        await performStorageCleanup();
+        break;
+      case 'cache-cleanup':
+        if (cacheManager) {
+          const removed = await cacheManager.cleanup();
+          console.log(`Cache cleanup: ${removed} expired entries removed`);
         }
+        break;
+      case 'quota-check':
+        if (storageQuotaManager) {
+          const shouldCleanup = await storageQuotaManager.shouldCleanup();
+          if (shouldCleanup) {
+            const results = await storageQuotaManager.cleanup(70);
+            console.log('Quota cleanup results:', results);
+          }
+        }
+        break;
+    }
+  });
+}
+
+/**
+ * Perform storage cleanup
+ */
+async function performStorageCleanup(): Promise<void> {
+  const storage = await chrome.storage.local.get(null);
+  const now = Date.now();
+  const keysToRemove: string[] = [];
+
+  // Remove old temporary data (older than 24 hours)
+  for (const key in storage) {
+    if (key.startsWith('temp_')) {
+      const data = storage[key];
+      if (data.timestamp && now - data.timestamp > 24 * 60 * 60 * 1000) {
+        keysToRemove.push(key);
       }
     }
-    
-    if (keysToRemove.length > 0) {
-      await chrome.storage.local.remove(keysToRemove);
+  }
+
+  if (keysToRemove.length > 0) {
+    await chrome.storage.local.remove(keysToRemove);
+    console.log(`Storage cleanup: ${keysToRemove.length} temporary items removed`);
+  }
+
+  // Clean old conversations if storage is available
+  if (conversationStore) {
+    const deleted = await conversationStore.cleanup(30);
+    if (deleted > 0) {
+      console.log(`Conversation cleanup: ${deleted} old conversations removed`);
     }
-  }, 60 * 60 * 1000); // Every hour
+  }
 }
 
 /**
@@ -524,6 +622,8 @@ chrome.runtime.onSuspend.addListener(async () => {
 
   // Cleanup resources
   if (agent) {
+    const session = agent.getSession();
+    await session.close();
     await agent.cleanup();
   }
 
@@ -533,6 +633,18 @@ chrome.runtime.onSuspend.addListener(async () => {
 
   if (toolRegistry) {
     toolRegistry.clear();
+  }
+
+  if (conversationStore) {
+    await conversationStore.close();
+  }
+
+  if (cacheManager) {
+    cacheManager.destroy();
+  }
+
+  if (storageQuotaManager) {
+    storageQuotaManager.destroy();
   }
 });
 

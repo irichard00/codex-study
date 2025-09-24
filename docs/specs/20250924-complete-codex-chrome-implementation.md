@@ -1,287 +1,286 @@
-# Feature Specification: Complete Codex Chrome Implementation
+# Feature Specification: Chrome Extension Specific Implementation
 
 ## Overview
-Complete the conversion of codex-rs terminal agent to Chrome extension by implementing the missing core functionality, particularly the `run_task()` method and its dependent systems including model client integration, tool execution, and turn management.
+Complete the codex-chrome extension by implementing missing core classes from codex-rs and focusing on browser-specific automation tools, while removing unnecessary terminal-based features like file system operations, MCP protocol support, and patch/diff systems that are not applicable to a Chrome extension context.
 
 ## Background
-The codex-chrome extension has been partially converted from codex-rs, preserving the SQ/EQ (Submission Queue/Event Queue) architecture. However, the core agent logic that actually processes tasks and interacts with AI models is missing. The current implementation has:
-- Protocol types and message passing infrastructure
-- Chrome extension boilerplate (service worker, content script, side panel)
-- Basic queue processing structure
-
-What's missing is the actual task execution logic that makes the agent functional.
+The current codex-chrome implementation has the basic architecture (SQ/EQ pattern, model clients, some browser tools) but is missing critical core classes like `AgentTask` that coordinate the actual agent behavior. Additionally, as a Chrome extension, the focus should be on browser automation rather than file system operations or terminal commands. The extension should leverage Chrome APIs for web interaction, data extraction, form filling, and browser navigation rather than trying to replicate terminal-based coding tools.
 
 ## Requirements
 
 ### Functional Requirements
-- Implement `run_task()` equivalent functionality that processes user inputs through AI model
-- Integrate model client for API communication (OpenAI/Anthropic/etc.)
-- Implement tool execution system for browser operations
-- Add turn management and conversation history
-- Implement approval/review workflow for sensitive operations
-- Add diff tracking for changes made during task execution
-- Support streaming responses from AI models
-- Handle task interruption and error recovery
+- Port missing core classes from codex-rs (AgentTask, proper Turn coordination)
+- Enhance browser-specific tool implementations (advanced DOM manipulation, web scraping, form automation)
+- Implement browser-native features (tab management, cookie handling, network interception)
+- Add web-specific AI assistance (content summarization, data extraction, form filling)
+- Implement proper streaming and real-time response handling in browser context
+- Add browser storage for conversation persistence (IndexedDB)
+- Support multiple tabs and cross-tab coordination
+- Implement content script injection for page interaction
 
 ### Non-Functional Requirements
-- Maintain compatibility with Chrome Extension Manifest V3 security model
-- Ensure all file/shell operations are replaced with browser-safe alternatives
-- Preserve the SQ/EQ architecture from codex-rs
-- Support asynchronous, non-blocking operations
-- Implement proper error handling and retry logic
-- Maintain type safety with TypeScript
+- Full Chrome Extension Manifest V3 compliance
+- Respect same-origin policy and CORS restrictions
+- Minimize memory footprint for browser performance
+- Ensure responsive UI during AI operations
+- Secure handling of sensitive web data
+- Support offline mode with cached responses
+- Maintain under 10MB extension size
+- Sub-second response time for browser operations
 
 ## Technical Design
 
 ### Architecture
-The complete implementation follows a layered architecture:
-
-1. **Protocol Layer** ( Completed)
-   - Types: Submission, Op, Event, EventMsg
-   - Schemas and validation
-
-2. **Core Agent Layer** (  Partially Complete)
-   - CodexAgent class with queue management
-   - Session management
-   - Missing: Task execution logic
-
-3. **Model Integration Layer** (L Missing)
-   - Model client for API calls
-   - Prompt construction
-   - Response parsing
-   - Token counting and usage tracking
-
-4. **Tools Layer** (L Missing)
-   - Browser operation tools (replacing shell/file tools)
-   - Tool registration and discovery
-   - Tool execution and result handling
-
-5. **Chrome Extension Layer** ( Completed)
-   - Background service worker
-   - Content script
-   - Side panel UI
+The Chrome extension architecture focuses on browser-specific capabilities:
+1. **Core Agent Layer** - Missing classes like AgentTask for coordination
+2. **Browser Tools Layer** - Enhanced web automation tools
+3. **Content Script Layer** - Page interaction and data extraction
+4. **Storage Layer** - Browser-native persistence (IndexedDB, chrome.storage)
+5. **UI Layer** - Side panel, popup, and overlay components
 
 ### Components
 
-#### Missing Core Components:
+#### Missing Core Classes to Port
+1. **AgentTask**
+   - Coordinates multiple turns in response to user input
+   - Manages task lifecycle and state
+   - Handles cancellation and error recovery
+   - Emits progress events
 
-1. **ModelClient**
-   - Purpose: Handle communication with AI model APIs
-   - Responsibilities:
-     - API authentication and configuration
-     - Request/response formatting
-     - Streaming support
-     - Rate limiting and retry logic
-     - Token usage tracking
+2. **Turn** (enhanced implementation)
+   - Proper turn sequencing
+   - Tool call coordination
+   - Response streaming management
+   - Context preservation
 
-2. **TaskRunner** (equivalent to run_task)
-   - Purpose: Execute a complete task from user input to completion
-   - Responsibilities:
-     - Build prompt with context
-     - Call model API
-     - Process tool calls
-     - Handle approvals
-     - Manage conversation turns
-     - Track changes/diffs
+3. **StreamProcessor**
+   - Handle streaming responses in browser context
+   - Manage chunked data efficiently
+   - Update UI progressively
 
-3. **TurnManager** (equivalent to run_turn)
-   - Purpose: Handle individual conversation turns
-   - Responsibilities:
-     - Construct turn input
-     - Execute model call
-     - Process response
-     - Handle tool invocations
-     - Update history
+#### Browser-Specific Tools (Enhanced)
+1. **WebScrapingTool**
+   - Advanced CSS/XPath selectors
+   - Data extraction patterns
+   - Table parsing
+   - Pagination handling
 
-4. **ToolsRegistry**
-   - Purpose: Manage available tools for browser operations
-   - Responsibilities:
-     - Register browser-specific tools
-     - Tool discovery and listing
-     - Tool validation
-     - Tool execution dispatch
+2. **FormAutomationTool**
+   - Smart form detection
+   - Field type recognition
+   - Validation handling
+   - Multi-step form support
 
-5. **BrowserTools** (replacing shell/file tools)
-   - Tab manipulation (create, close, navigate)
-   - DOM interaction (click, type, extract)
-   - Storage operations (local/session storage)
-   - Network inspection
-   - Screenshot capture
-   - Clipboard operations
+3. **NetworkInterceptTool**
+   - Monitor network requests
+   - Modify headers
+   - Cache responses
+   - API mocking
 
-6. **ApprovalManager**
-   - Purpose: Handle user approval for sensitive operations
-   - Responsibilities:
-     - Queue approval requests
-     - Display approval UI
-     - Process approval decisions
-     - Enforce sandbox policies
+4. **BrowserAutomationTool**
+   - Complex navigation sequences
+   - Wait conditions
+   - Screenshot with annotations
+   - Video recording
 
-7. **DiffTracker**
-   - Purpose: Track changes made during task execution
-   - Responsibilities:
-     - Monitor DOM changes
-     - Track storage modifications
-     - Record navigation history
-     - Generate change summaries
+5. **DataExtractionTool**
+   - Structured data extraction
+   - Pattern recognition
+   - Content classification
+   - Export to various formats
+
+6. **WebAssistantTool**
+   - Page summarization
+   - Content translation
+   - Link validation
+   - Accessibility checking
+
+#### Storage & Persistence
+1. **ConversationStore**
+   - IndexedDB for large data
+   - chrome.storage.sync for settings
+   - Efficient indexing
+   - Query optimization
+
+2. **CacheManager**
+   - Response caching
+   - Offline mode support
+   - TTL management
+   - Size limits
 
 ### Data Model
 
 ```typescript
-// Model Integration Types
-interface ModelClient {
-  provider: ModelProvider;
-  apiKey: string;
-  model: string;
-  temperature: number;
-  maxTokens: number;
-  streamingEnabled: boolean;
-}
-
-interface ModelProvider {
-  type: 'openai' | 'anthropic' | 'google' | 'local';
-  endpoint: string;
-  headers: Record<string, string>;
-}
-
-interface TurnContext {
-  client: ModelClient;
-  conversationHistory: ResponseItem[];
-  tools: Tool[];
-  approvalPolicy: ApprovalPolicy;
-  sandboxPolicy: SandboxPolicy;
-}
-
-interface Tool {
-  name: string;
-  description: string;
-  parameters: JsonSchema;
-  execute: (params: any) => Promise<ToolResult>;
-}
-
-interface ToolResult {
-  success: boolean;
-  output?: any;
-  error?: string;
-}
-
-interface TaskExecution {
-  taskId: string;
-  status: 'running' | 'completed' | 'failed' | 'interrupted';
+// Missing core class - AgentTask
+interface AgentTask {
+  id: string;
+  sessionId: string;
+  submissionId: string;
   turns: Turn[];
-  totalTokens: number;
-  changes: DiffSummary;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  context: TaskContext;
+  startTime: number;
+  endTime?: number;
+  error?: Error;
 }
 
+// Enhanced Turn for browser context
 interface Turn {
-  input: ResponseItem[];
-  output: ResponseItem[];
+  id: string;
+  taskId: string;
+  input: TurnInput;
+  output?: TurnOutput;
   toolCalls: ToolCall[];
-  tokenUsage: TokenUsage;
+  status: 'pending' | 'running' | 'completed' | 'failed';
+  tabContext?: TabContext;
+}
+
+// Browser-specific contexts
+interface TabContext {
+  tabId: number;
+  url: string;
+  title: string;
+  windowId: number;
+  screenshot?: string;
+}
+
+// Web scraping patterns
+interface ScrapingPattern {
+  name: string;
+  selector: string;
+  type: 'css' | 'xpath';
+  extract: 'text' | 'html' | 'attribute' | 'all';
+  transform?: (data: any) => any;
+}
+
+// Form automation
+interface FormAutomationTask {
+  url: string;
+  fields: FormField[];
+  submitButton?: string;
+  waitAfterSubmit?: number;
+  validateBeforeSubmit?: boolean;
+}
+
+// Browser storage schema
+interface StorageSchema {
+  conversations: {
+    [id: string]: Conversation;
+  };
+  settings: UserSettings;
+  cache: {
+    [key: string]: CachedResponse;
+  };
+  tools: {
+    patterns: ScrapingPattern[];
+    automations: FormAutomationTask[];
+  };
 }
 ```
 
 ## Implementation Plan
 
-### Phase 1: Model Integration
-- Create ModelClient class for API communication
-- Implement API providers (OpenAI, Anthropic)
-- Add streaming response support
-- Implement token counting and usage tracking
-- Add retry logic with exponential backoff
+### Phase 1: Core Class Implementation
+- Implement AgentTask class with proper lifecycle management
+- Enhance Turn class with browser context support
+- Add StreamProcessor for efficient streaming
+- Create proper event emission for UI updates
+- Implement cancellation and cleanup logic
 
-### Phase 2: Task Execution Core
-- Implement TaskRunner class (run_task equivalent)
-- Implement TurnManager class (run_turn equivalent)
-- Add prompt construction logic
-- Implement conversation history management
-- Add turn-based execution flow
+### Phase 2: Enhanced Browser Tools
+- Upgrade existing browser tools with advanced features
+- Implement WebScrapingTool with pattern library
+- Create FormAutomationTool with smart detection
+- Add NetworkInterceptTool for API monitoring
+- Implement DataExtractionTool with export capabilities
 
-### Phase 3: Browser Tools System
-- Create ToolsRegistry for tool management
-- Implement browser-specific tools:
-  - TabTool (navigate, create, close tabs)
-  - DOMTool (click, type, extract data)
-  - StorageTool (read/write browser storage)
-  - NetworkTool (inspect requests)
-  - ScreenshotTool (capture screenshots)
-- Add tool validation and error handling
+### Phase 3: Storage & Persistence
+- Implement IndexedDB storage layer
+- Create efficient query system
+- Add caching mechanism
+- Implement data migration
+- Create backup/restore functionality
 
-### Phase 4: Approval and Safety
-- Implement ApprovalManager
-- Create approval UI in side panel
-- Add sandbox policy enforcement
-- Implement sensitive operation detection
-- Add user confirmation flows
+### Phase 4: Advanced Features
+- Add multi-tab coordination
+- Implement cross-frame communication
+- Create browser action workflows
+- Add macro recording/playback
+- Implement smart suggestions
 
-### Phase 5: Change Tracking
-- Implement DiffTracker
-- Add DOM mutation monitoring
-- Track storage changes
-- Generate change summaries
-- Add undo/rollback capability
+### Phase 5: UI Components
+- Create overlay injection system
+- Implement floating assistant
+- Add visual feedback for operations
+- Create configuration UI
+- Implement keyboard shortcuts
 
-### Phase 6: Integration and Testing
-- Wire TaskRunner into CodexAgent
-- Update message router for new events
+### Phase 6: Integration & Polish
+- Wire all components together
 - Add comprehensive error handling
-- Implement task interruption
-- Add integration tests
+- Implement performance optimizations
+- Create user onboarding
+- Add analytics and telemetry
 
 ## Testing Strategy
 
-1. **Unit Tests**
-   - Test each component in isolation
-   - Mock API responses
-   - Test error conditions
-   - Validate type safety
+### Unit Tests
+- Test AgentTask lifecycle
+- Test Turn coordination
+- Test browser tool operations
+- Test storage operations
 
-2. **Integration Tests**
-   - Test complete task execution flow
-   - Test tool invocation chains
-   - Test approval workflows
-   - Test error recovery
+### Integration Tests
+- Test multi-turn conversations
+- Test tool chaining
+- Test cross-tab operations
+- Test storage persistence
 
-3. **End-to-End Tests**
-   - Test real browser operations
-   - Test with actual API calls (test mode)
-   - Test user interaction flows
-   - Test extension installation and setup
+### Browser Tests
+- Test content script injection
+- Test CORS handling
+- Test permission management
+- Test extension lifecycle
 
-4. **Performance Tests**
-   - Measure response latency
-   - Test streaming performance
-   - Monitor memory usage
-   - Test with large conversation histories
+### Performance Tests
+- Memory usage monitoring
+- Response time measurement
+- Storage efficiency
+- Network optimization
 
 ## Success Criteria
 
-1. **Functional Completeness**
-   - Can execute user tasks through AI model
-   - All browser tools are functional
-   - Approval system works correctly
-   - Change tracking is accurate
+### Core Functionality
+- AgentTask properly coordinates multi-turn operations
+- All browser tools functioning reliably
+- Smooth streaming responses in UI
+- Persistent conversation storage
+- Cross-tab coordination working
 
-2. **Performance Metrics**
-   - First response within 2 seconds
-   - Streaming updates at 30+ tokens/second
-   - Memory usage under 100MB
-   - No blocking of browser UI thread
+### Browser-Specific Success
+- Can automate complex web workflows
+- Extracts structured data accurately
+- Fills forms intelligently
+- Handles dynamic content
+- Respects browser security model
 
-3. **Reliability**
-   - 99% task completion rate
-   - Proper error recovery
-   - No data loss on interruption
-   - Graceful degradation on API failures
+### Performance Metrics
+- Page interaction < 50ms
+- Storage operations < 100ms
+- Memory usage < 100MB
+- Extension size < 10MB
+- Startup time < 500ms
 
-4. **User Experience**
-   - Clear task progress indication
-   - Responsive UI during execution
-   - Meaningful error messages
-   - Intuitive approval flows
+### User Experience
+- Intuitive browser automation
+- Clear visual feedback
+- Helpful error messages
+- Smooth animations
+- Keyboard accessible
 
-5. **Security**
-   - All sensitive operations require approval
-   - Sandbox policies are enforced
-   - No exposure of API keys
-   - No unauthorized browser access
+### Quality Metrics
+- 90%+ browser API coverage
+- Zero permission violations
+- Full Manifest V3 compliance
+- Comprehensive error handling
+- Clean uninstall

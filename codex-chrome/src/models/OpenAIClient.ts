@@ -12,6 +12,7 @@ import {
   type Message,
   type ToolCall,
 } from './ModelClient';
+import { StreamProcessor } from '../core/StreamProcessor';
 
 /**
  * OpenAI-specific request format
@@ -126,6 +127,10 @@ export class OpenAIClient extends ModelClient {
   private readonly apiKey: string;
   private readonly baseUrl: string;
   private readonly organization?: string;
+  private streamProcessor: StreamProcessor | null = null;
+  private currentModel: string = 'gpt-4o';
+  private reasoningEffort: any = null;
+  private reasoningSummary: any = { enabled: false };
 
   constructor(
     apiKey: string,
@@ -414,5 +419,102 @@ export class OpenAIClient extends ModelClient {
 
     // Network errors are generally retryable
     return error.name === 'TypeError' && error.message.includes('fetch');
+  }
+
+  /**
+   * Stream completion with StreamProcessor integration
+   */
+  async *streamCompletion(request: CompletionRequest): AsyncGenerator<any> {
+    this.validateRequest(request);
+
+    const openaiRequest = this.convertToOpenAIRequest({ ...request, stream: true });
+    const response = await this.makeStreamRequest(openaiRequest);
+
+    if (!response.body) {
+      throw new ModelClientError('Stream response body is null');
+    }
+
+    // Initialize StreamProcessor for this stream
+    this.streamProcessor = new StreamProcessor('model');
+    await this.streamProcessor.start(response.body);
+
+    // Yield chunks from the StreamProcessor
+    for await (const chunk of this.streamProcessor.getChunks()) {
+      yield chunk;
+    }
+  }
+
+  /**
+   * Stream with direct StreamProcessor access for UI updates
+   */
+  async streamWithProcessor(
+    request: CompletionRequest,
+    onUpdate?: (update: any) => void
+  ): Promise<StreamProcessor> {
+    this.validateRequest(request);
+
+    const openaiRequest = this.convertToOpenAIRequest({ ...request, stream: true });
+    const response = await this.makeStreamRequest(openaiRequest);
+
+    if (!response.body) {
+      throw new ModelClientError('Stream response body is null');
+    }
+
+    const processor = new StreamProcessor('model');
+
+    // Set up UI update callback if provided
+    if (onUpdate) {
+      processor.onUpdate(onUpdate);
+    }
+
+    await processor.start(response.body);
+    return processor;
+  }
+
+  getModel(): string {
+    return this.currentModel;
+  }
+
+  setModel(model: string): void {
+    this.currentModel = model;
+  }
+
+  getContextWindow(): number | undefined {
+    // Return context window sizes for known models
+    const contextWindows: Record<string, number> = {
+      'gpt-4': 8192,
+      'gpt-4-32k': 32768,
+      'gpt-4-turbo': 128000,
+      'gpt-4o': 128000,
+      'gpt-3.5-turbo': 4096,
+      'gpt-3.5-turbo-16k': 16384,
+    };
+    return contextWindows[this.currentModel];
+  }
+
+  getReasoningEffort(): any {
+    return this.reasoningEffort;
+  }
+
+  setReasoningEffort(effort: any): void {
+    this.reasoningEffort = effort;
+  }
+
+  getReasoningSummary(): any {
+    return this.reasoningSummary;
+  }
+
+  setReasoningSummary(summary: any): void {
+    this.reasoningSummary = summary;
+  }
+
+  /**
+   * Cleanup resources
+   */
+  async cleanup(): Promise<void> {
+    if (this.streamProcessor) {
+      this.streamProcessor.stop();
+      this.streamProcessor = null;
+    }
   }
 }

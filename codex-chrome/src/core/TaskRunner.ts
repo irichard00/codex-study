@@ -1,6 +1,7 @@
 /**
  * TaskRunner implementation - ports run_task functionality from codex-rs
  * Manages task execution lifecycle, handles task cancellation, and emits progress events
+ * Enhanced with AgentTask integration - contains the majority of task execution logic
  */
 
 import { Session } from './Session';
@@ -9,6 +10,20 @@ import { TurnContext } from './TurnContext';
 import { InputItem, Event } from '../protocol/types';
 import { EventMsg, TaskStartedEvent, TaskCompleteEvent, ErrorEvent, TurnAbortedEvent } from '../protocol/events';
 import { v4 as uuidv4 } from 'uuid';
+
+/**
+ * Task state for tracking execution
+ */
+export interface TaskState {
+  submissionId: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown';
+  currentTurnIndex: number;
+  tokenUsage: {
+    used: number;
+    max: number;
+  };
+  lastError?: Error;
+}
 
 /**
  * Task execution result
@@ -35,6 +50,7 @@ export interface TaskOptions {
 /**
  * TaskRunner handles the execution of a complete task which may involve multiple turns
  * Port of run_task function from codex-rs/core/src/codex.rs
+ * Enhanced with AgentTask coordination - maintains the majority of task execution logic
  */
 export class TaskRunner {
   private session: Session;
@@ -46,6 +62,11 @@ export class TaskRunner {
   private cancelled = false;
   private cancelPromise: Promise<void> | null = null;
   private cancelResolve: (() => void) | null = null;
+
+  // New: Task state tracking for AgentTask coordination
+  private tasks: Map<string, TaskState> = new Map();
+  private static readonly MAX_TURNS = 50;
+  private static readonly COMPACTION_THRESHOLD = 0.75;
 
   constructor(
     session: Session,
@@ -441,5 +462,152 @@ export class TaskRunner {
     );
 
     return taskRunner.run();
+  }
+
+  /**
+   * New method for AgentTask coordination
+   * Contains the main task execution logic
+   */
+  async executeWithCoordination(
+    submissionId: string,
+    signal: AbortSignal
+  ): Promise<void> {
+    const taskState: TaskState = {
+      submissionId,
+      status: 'running',
+      currentTurnIndex: 0,
+      tokenUsage: { used: 0, max: this.turnContext.getModelContextWindow() || 100000 }
+    };
+
+    this.tasks.set(submissionId, taskState);
+
+    try {
+      // Set up abort signal handling
+      signal.addEventListener('abort', () => {
+        this.cancel();
+        taskState.status = 'cancelled';
+      });
+
+      // Main task execution logic (existing run logic adapted)
+      await this.runTurnLoop(taskState, signal);
+
+      // Check if auto-compaction is needed
+      if (this.shouldAutoCompact(taskState)) {
+        await this.compactContext(taskState);
+      }
+
+      taskState.status = 'completed';
+    } catch (error) {
+      if (signal.aborted) {
+        taskState.status = 'cancelled';
+      } else {
+        taskState.status = 'failed';
+        taskState.lastError = error as Error;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Run the turn loop with state tracking
+   */
+  private async runTurnLoop(state: TaskState, signal: AbortSignal): Promise<void> {
+    // Use existing run() logic but with state tracking
+    while (state.currentTurnIndex < TaskRunner.MAX_TURNS && !signal.aborted) {
+      // Check for pending user input during execution
+      const pendingInput = await this.session.getPendingInput();
+
+      // Prepare turn input based on mode
+      const turnInput = this.options.reviewMode
+        ? this.buildReviewTurnInput([], pendingInput)
+        : await this.buildNormalTurnInput(pendingInput);
+
+      // Execute turn with existing logic
+      const turnResult = await this.runTurnWithTimeout(turnInput);
+
+      // Process turn results
+      const processResult = await this.processTurnResult(turnResult, []);
+
+      // Update state
+      state.currentTurnIndex++;
+
+      // Update token usage if available
+      if (turnResult.totalTokenUsage) {
+        state.tokenUsage.used = turnResult.totalTokenUsage.total_tokens || 0;
+      }
+
+      // Check if task is complete
+      if (processResult.taskComplete) {
+        break;
+      }
+
+      // Check for token limit
+      if (processResult.tokenLimitReached && !signal.aborted) {
+        await this.attemptAutoCompact();
+      }
+    }
+  }
+
+  /**
+   * Check if auto-compaction should be triggered
+   */
+  private shouldAutoCompact(state: TaskState): boolean {
+    return state.tokenUsage.used / state.tokenUsage.max > TaskRunner.COMPACTION_THRESHOLD;
+  }
+
+  /**
+   * Compact the context to reduce token usage
+   */
+  private async compactContext(state: TaskState): Promise<void> {
+    try {
+      await this.session.compact();
+
+      // Emit compaction event
+      await this.emitEvent({
+        type: 'BackgroundEvent',
+        data: {
+          message: `Context compacted at turn ${state.currentTurnIndex}`,
+          level: 'info'
+        }
+      });
+    } catch (error) {
+      console.warn('Context compaction failed:', error);
+    }
+  }
+
+  /**
+   * Get task status for a submission
+   */
+  getTaskStatus(submissionId: string): TaskState['status'] {
+    return this.tasks.get(submissionId)?.status || 'unknown';
+  }
+
+  /**
+   * Get current turn index for a submission
+   */
+  getCurrentTurnIndex(submissionId: string): number {
+    return this.tasks.get(submissionId)?.currentTurnIndex || 0;
+  }
+
+  /**
+   * Get token usage for a submission
+   */
+  getTokenUsage(submissionId: string): { used: number; max: number; compactionThreshold: number } {
+    const state = this.tasks.get(submissionId);
+    return {
+      used: state?.tokenUsage.used || 0,
+      max: state?.tokenUsage.max || 100000,
+      compactionThreshold: TaskRunner.COMPACTION_THRESHOLD
+    };
+  }
+
+  /**
+   * Check if task is complete
+   */
+  private async isTaskComplete(state: TaskState): Promise<boolean> {
+    // Task is complete if we've reached max turns or no more tool calls pending
+    return state.currentTurnIndex >= TaskRunner.MAX_TURNS ||
+           state.status === 'completed' ||
+           state.status === 'cancelled';
   }
 }
