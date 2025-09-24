@@ -1,246 +1,94 @@
 /**
- * Browser Tools System - Index
- *
- * Exports all browser tools and utilities for the codex-chrome extension.
- * Provides a centralized entry point for tool registration and management.
+ * Tool registration and management for codex-chrome
  */
 
-// Core tool system exports
-export { ToolRegistry, toolRegistry } from './ToolRegistry';
-export type {
-  ToolDefinition,
-  ToolParameterSchema,
-  ParameterProperty,
-  ToolExecutionRequest,
-  ToolExecutionResponse,
-  ToolError,
-  ToolDiscoveryQuery,
-  ToolDiscoveryResult,
-  ToolValidationResult,
-  ValidationError,
-  ToolContext,
-  ToolHandler,
-} from './ToolRegistry';
+import { ToolRegistry } from './ToolRegistry';
+import { WebScrapingTool } from './WebScrapingTool';
+import { FormAutomationTool } from './FormAutomationTool';
+import { NetworkInterceptTool } from './NetworkInterceptTool';
+import { DataExtractionTool } from './DataExtractionTool';
 
-// Base tool exports
-export { BaseTool, createToolDefinition } from './BaseTool';
-export type {
-  BaseToolRequest,
-  BaseToolOptions,
-  ToolResult,
-} from './BaseTool';
-
-// Individual tool exports
-export { TabTool } from './TabTool';
-export type {
-  TabToolRequest,
-  TabProperties,
-  TabQuery,
-  ScreenshotOptions,
-  TabInfo,
-  TabToolResponse,
-} from './TabTool';
-
-export { DOMTool } from './DOMTool';
-export type {
-  DOMToolRequest,
-  DOMActionOptions,
-  DOMElement,
-  BoundingBox,
-  DOMToolResponse,
-} from './DOMTool';
-
-export { StorageTool } from './StorageTool';
-export type {
-  StorageToolRequest,
-  StorageOptions,
-  StorageToolResponse,
-  StorageQuota,
-} from './StorageTool';
-
-export { NavigationTool } from './NavigationTool';
-export type {
-  NavigationToolRequest,
-  NavigationOptions,
-  NavigationToolResponse,
-  HistoryEntry,
-  NavigationError,
-  NavigationEvent,
-} from './NavigationTool';
+// Re-export all tools
+export { ToolRegistry } from './ToolRegistry';
+export { BaseTool } from './BaseTool';
+export { WebScrapingTool } from './WebScrapingTool';
+export { FormAutomationTool } from './FormAutomationTool';
+export { NetworkInterceptTool } from './NetworkInterceptTool';
+export { DataExtractionTool } from './DataExtractionTool';
 
 /**
- * Create and configure a complete tool registry with all browser tools
+ * Register all basic/existing tools
  */
-export async function createBrowserToolRegistry(): Promise<ToolRegistry> {
+export function registerBasicTools(registry: ToolRegistry): void {
+  // Register existing basic tools here
+  // These would be the original tools from the codebase
+  // For now, just a placeholder
+  console.log('Registering basic tools...');
+}
+
+/**
+ * Register advanced browser automation tools
+ */
+export function registerAdvancedTools(registry: ToolRegistry): void {
+  // Register new browser-specific tools
+  registry.register(new WebScrapingTool());
+  registry.register(new FormAutomationTool());
+  registry.register(new NetworkInterceptTool());
+  registry.register(new DataExtractionTool());
+
+  console.log('Advanced browser tools registered:', [
+    'WebScrapingTool',
+    'FormAutomationTool',
+    'NetworkInterceptTool',
+    'DataExtractionTool'
+  ]);
+}
+
+/**
+ * Initialize all tools
+ */
+export async function initializeTools(): Promise<ToolRegistry> {
   const registry = new ToolRegistry();
 
-  // Create tool instances
-  const tabTool = new TabTool();
-  const domTool = new DOMTool();
-  const storageTool = new StorageTool();
-  const navigationTool = new NavigationTool();
+  // Register all tool categories
+  registerBasicTools(registry);
+  registerAdvancedTools(registry);
 
-  // Register all tools
-  await registry.register(tabTool.getDefinition(), async (params, context) => {
-    return tabTool.execute(params);
-  });
+  // Initialize the registry
+  await registry.initialize();
 
-  await registry.register(domTool.getDefinition(), async (params, context) => {
-    return domTool.execute(params);
-  });
-
-  await registry.register(storageTool.getDefinition(), async (params, context) => {
-    return storageTool.execute(params);
-  });
-
-  await registry.register(navigationTool.getDefinition(), async (params, context) => {
-    return navigationTool.execute(params);
-  });
-
+  console.log(`Total tools registered: ${registry.getToolCount()}`);
   return registry;
 }
 
 /**
- * Tool categories for organization
+ * Get tool definitions for OpenAI/model format
  */
-export const TOOL_CATEGORIES = {
-  BROWSER: 'browser',
-  DOM: 'dom',
-  STORAGE: 'storage',
-  NAVIGATION: 'navigation',
-} as const;
-
-/**
- * Default tool configurations
- */
-export const DEFAULT_TOOL_OPTIONS = {
-  timeout: 30000,
-  retries: 3,
-  waitForLoad: true,
-} as const;
-
-/**
- * Common tool error codes
- */
-export const TOOL_ERROR_CODES = {
-  // General errors
-  EXECUTION_ERROR: 'EXECUTION_ERROR',
-  TIMEOUT: 'TIMEOUT',
-  VALIDATION_ERROR: 'VALIDATION_ERROR',
-
-  // Permission errors
-  PERMISSION_DENIED: 'PERMISSION_DENIED',
-  CHROME_API_UNAVAILABLE: 'CHROME_API_UNAVAILABLE',
-
-  // Tab errors
-  TAB_NOT_FOUND: 'TAB_NOT_FOUND',
-  TAB_CLOSED: 'TAB_CLOSED',
-
-  // DOM errors
-  ELEMENT_NOT_FOUND: 'ELEMENT_NOT_FOUND',
-  CONTENT_SCRIPT_ERROR: 'CONTENT_SCRIPT_ERROR',
-
-  // Storage errors
-  STORAGE_QUOTA_EXCEEDED: 'STORAGE_QUOTA_EXCEEDED',
-  STORAGE_KEY_NOT_FOUND: 'STORAGE_KEY_NOT_FOUND',
-
-  // Navigation errors
-  NAVIGATION_FAILED: 'NAVIGATION_FAILED',
-  INVALID_URL: 'INVALID_URL',
-  LOAD_TIMEOUT: 'LOAD_TIMEOUT',
-} as const;
-
-/**
- * Utility function to check if Chrome extension APIs are available
- */
-export function isChromeExtensionContext(): boolean {
-  return typeof chrome !== 'undefined' && !!chrome.runtime && !!chrome.runtime.id;
-}
-
-/**
- * Utility function to check for specific permissions
- */
-export async function checkPermissions(permissions: string[]): Promise<boolean> {
-  if (!isChromeExtensionContext() || !chrome.permissions) {
-    return false;
-  }
-
-  try {
-    return await chrome.permissions.contains({ permissions });
-  } catch (error) {
-    console.warn('Permission check failed:', error);
-    return false;
-  }
-}
-
-/**
- * Utility function to request permissions
- */
-export async function requestPermissions(permissions: string[]): Promise<boolean> {
-  if (!isChromeExtensionContext() || !chrome.permissions) {
-    return false;
-  }
-
-  try {
-    return await chrome.permissions.request({ permissions });
-  } catch (error) {
-    console.warn('Permission request failed:', error);
-    return false;
-  }
-}
-
-/**
- * Get tool statistics from registry
- */
-export function getToolStats(registry: ToolRegistry) {
-  const stats = registry.getStats();
-  const tools = registry.listTools();
-
-  const toolsByCategory = tools.reduce((acc, tool) => {
-    const category = tool.category || 'uncategorized';
-    acc[category] = (acc[category] || 0) + 1;
-    return acc;
-  }, {} as Record<string, number>);
-
-  return {
-    ...stats,
-    toolsByCategory,
-    averageToolsPerCategory: stats.totalTools / stats.categories.length,
-  };
-}
-
-/**
- * Validate tool compatibility with current browser context
- */
-export async function validateToolCompatibility(): Promise<{
-  compatible: boolean;
-  missingAPIs: string[];
-  missingPermissions: string[];
-  warnings: string[];
-}> {
-  const missingAPIs: string[] = [];
-  const missingPermissions: string[] = [];
-  const warnings: string[] = [];
-
-  // Check Chrome APIs
-  if (!chrome?.tabs) missingAPIs.push('tabs');
-  if (!chrome?.storage) missingAPIs.push('storage');
-  if (!chrome?.scripting) missingAPIs.push('scripting');
-  if (!chrome?.webNavigation) warnings.push('webNavigation API not available - some navigation features may be limited');
-
-  // Check permissions
-  const requiredPermissions = ['tabs', 'storage', 'activeTab', 'scripting'];
-  for (const permission of requiredPermissions) {
-    const hasPermission = await checkPermissions([permission]);
-    if (!hasPermission) {
-      missingPermissions.push(permission);
+export function getToolDefinitions(registry: ToolRegistry): any[] {
+  return registry.getAllTools().map(tool => ({
+    type: 'function',
+    function: {
+      name: tool.name,
+      description: tool.description,
+      parameters: tool.getParameterSchema()
     }
-  }
+  }));
+}
 
-  return {
-    compatible: missingAPIs.length === 0 && missingPermissions.length === 0,
-    missingAPIs,
-    missingPermissions,
-    warnings,
-  };
+/**
+ * Execute a tool by name
+ */
+export async function executeTool(
+  registry: ToolRegistry,
+  name: string,
+  parameters: any
+): Promise<any> {
+  return registry.execute(name, parameters);
+}
+
+/**
+ * Cleanup all tools
+ */
+export async function cleanupTools(registry: ToolRegistry): Promise<void> {
+  await registry.cleanup();
 }

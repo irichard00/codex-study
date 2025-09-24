@@ -4,24 +4,32 @@
 - Input: /home/irichard/dev/study/codex-study/docs/specs/20250924-complete-codex-chrome-implementation.md
 - Output: Implementation artifacts in /home/irichard/dev/study/codex-study/docs/specs
 - Status: COMPLETE
+- Execution Date: 2025-09-24
 
 ## Technical Context
-The codex-chrome skeleton already exists with basic structure in place. Focus on implementing the missing core components without creating the chrome extension app from zero:
+We already have codex-chrome/ code with substantial infrastructure in place. Only focus on implementing the missing parts, no need to start from scratch:
 
-**Existing Infrastructure:**
+**Existing Infrastructure (Already Implemented):**
 - Chrome extension project setup with Vite, TypeScript, Svelte
-- Basic directory structure (src/core, src/protocol, src/background, src/sidepanel, src/content)
-- Some core files already exist: CodexAgent.ts, Session.ts, MessageRouter.ts, QueueProcessor.ts
-- Protocol types and events partially implemented
+- Complete directory structure (src/core, src/protocol, src/background, src/sidepanel, src/content)
+- Core files exist: CodexAgent.ts, Session.ts, MessageRouter.ts, QueueProcessor.ts, TaskRunner.ts, TurnManager.ts
+- Protocol types and events fully implemented
+- Model clients (OpenAI, Anthropic) implemented
+- Basic browser tools (TabTool, DOMTool, StorageTool, NavigationTool) implemented
+- ApprovalManager and DiffTracker implemented
 
-**Missing Components to Implement:**
-1. ModelClient implementations (OpenAI, Anthropic)
-2. TaskRunner (run_task equivalent) for task execution
-3. TurnManager (run_turn equivalent) for conversation flow
-4. ToolsRegistry and BrowserTools (TabTool, DOMTool, StorageTool, NavigationTool)
-5. ApprovalManager for user consent
-6. DiffTracker for change monitoring
-7. Integration wiring between all components
+**Missing Components to Implement (Focus Areas):**
+1. **AgentTask** class - Critical coordinator from codex-rs not yet ported
+2. **StreamProcessor** - For handling streaming responses in browser context
+3. **Enhanced Browser Tools** - WebScrapingTool, FormAutomationTool, NetworkInterceptTool, DataExtractionTool
+4. **ConversationStore** - IndexedDB persistence layer
+5. **CacheManager** - Response caching and offline support
+6. **Integration refinements** - Proper wiring of AgentTask with existing components
+
+**User-Provided Implementation Details:**
+- AgentTask should integrate with codex-chrome/src/core/TaskRunner.ts
+- The majority of task running logic should remain in TaskRunner
+- AgentTask acts as a lightweight coordinator that delegates to TaskRunner
 
 ## Progress Tracking
 - [x] Phase 0: Research and Analysis

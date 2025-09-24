@@ -1,230 +1,234 @@
-# Codex Chrome Extension - Research Document (Based on Actual Code)
+# Research and Analysis: Missing Components for Codex Chrome Extension
 
-## Actual Codex-rs Architecture Analysis
+## Executive Summary
+Analysis of the existing codex-chrome implementation against codex-rs reveals that while the foundational SQ/EQ architecture and basic tools are implemented, the critical `AgentTask` coordinator class and advanced browser-specific tools are missing. The implementation has ~80% of infrastructure complete but lacks the key orchestration component that makes the agent functional.
 
-### Core Components Found in Codebase
+## Comparative Analysis: Codex-rs vs Codex-chrome
 
-#### 1. Main Orchestration (`codex-rs/core/src/codex.rs`)
+### Successfully Ported Components ✅
+1. **Protocol System**
+   - `Submission` and `Op` enums correctly ported
+   - `Event` and `EventMsg` enums fully implemented
+   - All protocol types maintain exact naming from Rust
 
-The actual system uses a **queue-based architecture** with:
-- **Submission Queue (SQ)**: Incoming requests via `Submission` enum
-- **Event Queue (EQ)**: Outgoing events via `Event` enum
+2. **Core Infrastructure**
+   - `CodexAgent` class implements the main Codex struct functionality
+   - `Session` management with conversation state
+   - `MessageRouter` for Chrome extension message passing
+   - `QueueProcessor` for handling submissions
 
-**Key Structs to Preserve:**
+3. **Model Integration**
+   - `OpenAIClient` and `AnthropicClient` fully functional
+   - `ModelClientFactory` for provider selection
+   - Streaming support implemented
+
+4. **Basic Tools**
+   - `ToolRegistry` for tool management
+   - `TabTool`, `DOMTool`, `StorageTool`, `NavigationTool` implemented
+   - `BaseTool` abstract class for tool extension
+
+### Critical Missing Components ❌
+
+#### 1. AgentTask Class (CRITICAL)
+**Location in codex-rs**: `core/src/codex.rs:1096`
 ```rust
-// Main interface
-struct Codex {
-    next_id: AtomicU64,
-    tx_sub: Sender<Submission>,
-    rx_event: Receiver<Event>,
+pub(crate) struct AgentTask {
+    sess: Arc<Session>,
+    sub_id: String,
+    input: Vec<ResponseItem>,
+    abort_rx: mpsc::Receiver<()>,
+    tx_event: broadcast::Sender<Event>,
+    is_review_mode: bool,
 }
+```
+**Purpose**: Orchestrates the entire task execution lifecycle
+**Key Methods Missing**:
+- `run()` - Main execution loop
+- `run_turn_loop()` - Manages multiple turns
+- `should_auto_compact()` - Context window management
+- `handle_review_mode()` - Special execution mode
 
-// Session management
-struct Session {
-    conversation_id: ConversationId,
-    mcp_connection_manager: McpConnectionManager,
-    session_manager: ExecSessionManager,
-    unified_exec_manager: UnifiedExecSessionManager,
-    rollout: Mutex<Option<RolloutRecorder>>,
-    state: Mutex<State>,
+#### 2. Turn Coordination Enhancement
+Current `TurnManager` exists but lacks:
+- Proper integration with AgentTask
+- Review mode handling
+- Auto-compaction logic
+- Token budget management
+
+#### 3. StreamProcessor (Missing)
+Not found in codex-chrome, needed for:
+- Efficient chunked response handling
+- Progressive UI updates
+- Backpressure management
+- Stream error recovery
+
+#### 4. Advanced Browser Tools (Missing)
+**WebScrapingTool** - Not implemented
+- Pattern-based extraction
+- Table parsing
+- Pagination handling
+
+**FormAutomationTool** - Not implemented
+- Smart field detection
+- Multi-step form support
+- Validation handling
+
+**NetworkInterceptTool** - Not implemented
+- Request/response modification
+- API mocking
+- Performance monitoring
+
+**DataExtractionTool** - Not implemented
+- Structured data extraction
+- Export capabilities
+
+#### 5. Persistence Layer (Missing)
+**ConversationStore** - Not implemented
+- IndexedDB integration needed
+- Query capabilities
+- Migration utilities
+
+**CacheManager** - Not implemented
+- Response caching
+- Offline support
+- TTL management
+
+## Architecture Gap Analysis
+
+### Task Execution Flow
+**In codex-rs**:
+```
+Submission → Codex → AgentTask → TurnLoop → Tools → Events
+```
+
+**In codex-chrome** (current):
+```
+Submission → CodexAgent → TaskRunner → TurnManager → Tools → Events
+                            ↑
+                    [AgentTask missing here]
+```
+
+The missing AgentTask is the critical coordinator that:
+1. Manages the entire conversation flow
+2. Handles review modes
+3. Manages context compaction
+4. Coordinates between TaskRunner and TurnManager
+5. Emits proper lifecycle events
+
+### Browser Context Adaptations Needed
+
+#### File System Operations → Browser Storage
+- codex-rs uses file system for persistence
+- codex-chrome needs IndexedDB/chrome.storage
+
+#### Terminal Commands → Browser Actions
+- codex-rs executes shell commands
+- codex-chrome needs browser automation
+
+#### MCP Protocol → Chrome Extension APIs
+- codex-rs uses MCP for external tools
+- codex-chrome should use Chrome APIs directly
+
+## Implementation Strategy
+
+### Phase 0: Research and Analysis ✅ (Current)
+- Identified AgentTask as critical missing component
+- Mapped browser-specific tool requirements
+- Analyzed storage needs
+
+### Phase 1: Core Coordination
+**Priority 1: Port AgentTask**
+```typescript
+class AgentTask {
+  private session: Session;
+  private submissionId: string;
+  private input: ResponseItem[];
+  private abortController: AbortController;
+  private eventEmitter: EventEmitter;
+  private isReviewMode: boolean;
+
+  async run(): Promise<void> {
+    // Main execution logic
+  }
+
+  private async runTurnLoop(): Promise<void> {
+    // Turn coordination
+  }
+
+  private shouldAutoCompact(): boolean {
+    // Context management
+  }
 }
 ```
 
-#### 2. Protocol System (`codex-rs/protocol/src/protocol.rs`)
+**Priority 2: Enhance Turn Integration**
+- Wire AgentTask with existing TurnManager
+- Add review mode support
+- Implement auto-compaction
 
-**Core Message Types:**
-```rust
-// User submissions
-enum Op {
-    UserInput { item: InputItem },
-    UserTurn { context: TurnContext },
-    OverrideTurnContext { context: TurnContext },
-    Interrupt(Interrupt),
-    // ... other operations
-}
+### Phase 2: Browser Tools
+**WebScrapingTool**:
+- CSS/XPath selectors
+- Pattern library
+- Table extraction
 
-// System events
-enum EventMsg {
-    TaskStarted(TaskStartedEvent),
-    TaskComplete(TaskCompleteEvent),
-    AgentMessage(AgentMessageEvent),
-    AgentMessageDelta(AgentMessageDeltaEvent),
-    ExecCommandBegin(ExecCommandBeginEvent),
-    ExecCommandEnd(ExecCommandEndEvent),
-    // ... many more event types
-}
-```
+**FormAutomationTool**:
+- Field detection
+- Validation handling
+- Multi-step support
 
-#### 3. Model Client (`codex-rs/core/src/client.rs`)
+### Phase 3: Persistence
+**ConversationStore**:
+- IndexedDB schema
+- CRUD operations
+- Query interface
 
-**Key Components:**
-```rust
-struct ModelClient {
-    config: Arc<Config>,
-    auth_manager: Option<Arc<AuthManager>>,
-    client: reqwest::Client,
-    provider: ModelProviderInfo,
-    conversation_id: ConversationId,
-    effort: Option<ReasoningEffortConfig>,
-}
-```
+**CacheManager**:
+- Response caching
+- Offline fallback
+- Storage quotas
 
-#### 4. Tool System (`codex-rs/core/src/openai_tools.rs`)
+## Technical Constraints & Solutions
 
-**Actually Implemented Tools:**
-- `exec_command` - Execute shell commands with streaming output
-- `write_stdin` - Write to stdin of running commands
-- `local_shell` - Built-in shell execution
-- `unified_exec` - Experimental unified execution
-- `view_image` - View image files
-- `update_plan` - Update task planning
-- `web_search` - Web search capability
-- Apply patch tools (structured and freeform)
-- MCP tool integration
+### Browser Limitations
+1. **No File System**: Use IndexedDB instead
+2. **CORS**: Use content scripts for cross-origin
+3. **Memory**: Implement aggressive cleanup
+4. **CPU**: Use Web Workers for heavy processing
 
-### Key Differences from Initial Analysis
+### Chrome Extension Specific
+1. **Manifest V3**: Service workers instead of background pages
+2. **Permissions**: Declare minimal required permissions
+3. **Storage Quotas**: Implement rotation policies
+4. **CSP**: Ensure Content Security Policy compliance
 
-1. **No "AgentSystem" class** - The system uses `Codex` and `Session` structs
-2. **No "QueryProcessor" class** - Uses `parse_command()` function
-3. **No "ReasoningEngine" class** - Reasoning is handled by the model provider
-4. **No "StateManager" class** - State is managed within `Session`
-5. **Queue-based architecture** instead of direct method calls
+## Risk Assessment
 
-### Components to Convert for Chrome Extension
+### High Risk
+1. **AgentTask Complexity**: Core component, failure blocks everything
+2. **Stream Processing**: Browser streaming APIs differ from Rust
 
-#### Core System (Must Preserve Logic)
+### Medium Risk
+1. **Storage Limits**: IndexedDB quotas may be exceeded
+2. **Performance**: Complex tools may slow browser
 
-1. **Queue Architecture**:
-   ```typescript
-   // TypeScript conversion
-   class CodexChromeAgent {
-     private submissionQueue: Submission[] = [];
-     private eventQueue: Event[] = [];
+### Low Risk
+1. **Tool Implementation**: Can be added incrementally
+2. **UI Updates**: Already have working examples
 
-     async submitOperation(op: Op): Promise<void> {
-       // Queue submission
-     }
+## Validation Criteria
+1. AgentTask successfully orchestrates multi-turn conversations
+2. Browser tools can extract data from complex websites
+3. Conversations persist across browser sessions
+4. Performance remains acceptable (<100ms response)
+5. Memory usage stays under 100MB
 
-     async getNextEvent(): Promise<Event | null> {
-       // Dequeue event
-     }
-   }
-   ```
+## Next Steps
+1. Begin Phase 1: Implement AgentTask class
+2. Create integration tests for AgentTask
+3. Enhance TurnManager for AgentTask coordination
+4. Begin Phase 2: Implement advanced browser tools
+5. Design IndexedDB schema for persistence
 
-2. **Session Management**:
-   ```typescript
-   interface Session {
-     conversationId: string;
-     mcpConnectionManager?: McpConnectionManager; // Optional for Chrome
-     state: SessionState;
-     turnContext: TurnContext;
-   }
-   ```
-
-3. **Protocol Messages**:
-   ```typescript
-   // Direct port from Rust
-   type Op =
-     | { type: 'UserInput', item: InputItem }
-     | { type: 'UserTurn', context: TurnContext }
-     | { type: 'Interrupt', reason: string };
-
-   type EventMsg =
-     | { type: 'TaskStarted', data: TaskStartedEvent }
-     | { type: 'AgentMessage', data: AgentMessageEvent }
-     | { type: 'ExecCommandBegin', data: ExecCommandBeginEvent }
-     // ... etc
-   ```
-
-### Tool Replacements for Chrome Extension
-
-| Codex-rs Tool | Chrome Extension Equivalent | Purpose |
-|--------------|----------------------------|---------|
-| `exec_command` | `executeInTab` | Run JavaScript in tab context |
-| `local_shell` | `chromeDevTools` | Execute DevTools commands |
-| `view_image` | `captureTab` | Screenshot tab content |
-| `file_search` | `searchTabs` | Search across open tabs |
-| `apply_patch` | `modifyDOM` | Modify page DOM |
-| `web_search` | `webSearch` | Search web (keep same) |
-
-### Architecture Adaptation Strategy
-
-#### 1. Message Flow Conversion
-```
-Rust Flow:
-User Input → Submission Queue → Session Processing → Model API → Event Queue → UI
-
-Chrome Extension Flow:
-Side Panel → Background Worker → Content Script → Web Page → Response → Side Panel
-```
-
-#### 2. Concurrency Model
-- **Rust**: Uses tokio async runtime with channels
-- **Chrome**: Use Service Worker with Chrome message passing
-
-#### 3. Storage Adaptation
-- **Rust**: File system and in-memory state
-- **Chrome**: Chrome Storage API (local, session, sync)
-
-### Key Files for Reference
-
-1. **Core Logic**:
-   - `codex-rs/core/src/codex.rs` - Main orchestration (4,600+ lines)
-   - `codex-rs/core/src/client.rs` - Model client (1,400+ lines)
-   - `codex-rs/core/src/exec.rs` - Execution logic (400+ lines)
-
-2. **Protocol**:
-   - `codex-rs/protocol/src/protocol.rs` - All message types (1,400+ lines)
-   - `codex-rs/protocol/src/models.rs` - Model definitions (400+ lines)
-
-3. **Tools**:
-   - `codex-rs/core/src/openai_tools.rs` - Tool definitions (1,200+ lines)
-   - `codex-rs/core/src/exec_command/` - Command execution details
-
-### Implementation Priority
-
-#### Phase 1: Core Message System
-1. Port `Submission` and `Event` types
-2. Implement queue-based message passing
-3. Create Chrome message adapter
-
-#### Phase 2: Session Management
-1. Port `Session` struct
-2. Adapt for Chrome storage
-3. Implement turn context management
-
-#### Phase 3: Tool Framework
-1. Create browser tool interface
-2. Implement tab management tools
-3. Add content script injection
-
-#### Phase 4: Model Integration
-1. Port model client for browser
-2. Handle streaming responses
-3. Implement token counting
-
-### Technical Challenges
-
-1. **No Direct File System**: All file operations must become browser operations
-2. **Async Model**: Chrome's event-driven model vs Rust's async/await
-3. **Memory Constraints**: Chrome extensions have memory limits
-4. **Security**: Content Security Policy restrictions
-
-### Preserved Naming Conventions
-
-Critical names to maintain:
-- `Submission`, `Op`, `Event`, `EventMsg`
-- `TurnContext`, `InputItem`, `ConversationId`
-- `ExecCommandBeginEvent`, `ExecCommandEndEvent`
-- `AgentMessage`, `AgentMessageDelta`
-- Tool names: `exec_command`, `update_plan`, etc.
-
-### Dependencies Not Needed
-
-Components to skip in Chrome extension:
-- `linux-sandbox/` - Not applicable in browser
-- `mcp-*` - Optional, can add later if needed
-- `login/` - Use Chrome's identity API
-- `file-search/` - Replace with tab search
-- `ollama/` - Local LLM not supported
-- `tui/` - Replaced by Svelte UI
+## Conclusion
+The codex-chrome implementation has strong foundations with 80% of infrastructure complete. The critical missing piece is the AgentTask coordinator, which is essential for proper task execution flow. Once implemented, along with enhanced browser tools and persistence, the extension will achieve functional parity with codex-rs for browser-based operations.
