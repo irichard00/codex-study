@@ -9,6 +9,7 @@ import type { MessageRecord, ConversationData } from '../types/storage';
 import { ConversationStore } from '../storage/ConversationStore';
 import { State } from './State';
 import { v4 as uuidv4 } from 'uuid';
+import { TurnContext } from './TurnContext';
 
 /**
  * Tool definition interface (to avoid circular dependency with TurnManager)
@@ -20,18 +21,6 @@ export interface ToolDefinition {
     description: string;
     parameters?: any;
   };
-}
-
-/**
- * Turn context containing current session configuration
- */
-export interface TurnContext {
-  cwd: string;
-  approval_policy: AskForApproval;
-  sandbox_policy: SandboxPolicy;
-  model: string;
-  effort?: ReasoningEffortConfig;
-  summary: ReasoningSummaryConfig;
 }
 
 /**
@@ -55,13 +44,13 @@ export class Session {
     this.state = new State(this.conversationId);
 
     // Initialize with default turn context
-    this.turnContext = {
+    this.turnContext = new TurnContext({
       cwd: '/',
       approval_policy: 'on-request',
       sandbox_policy: { mode: 'workspace-write' },
       model: 'claude-3-sonnet',
       summary: { enabled: false },
-    };
+    });
   }
 
   /**
