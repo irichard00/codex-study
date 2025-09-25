@@ -190,115 +190,103 @@ export class CodexAgent {
   }
 
   /**
-   * Handle user input
+   * Process user input with AgentTask
+   * Common method for handling both handleUserInput and handleUserTurn
    */
-  private async handleUserInput(op: Extract<Op, { type: 'UserInput' }>): Promise<void> {
-    // Process user input items
-    for (const item of op.items) {
-      if (item.type === 'text') {
-        // For now, just echo back the text
-        this.emitEvent({
-          type: 'AgentMessage',
-          data: {
-            message: `Processing: ${item.text}`,
-          },
-        });
-      }
+  private async processUserInputWithTask(
+    items: Array<any>,
+    contextOverrides?: {
+      cwd?: string;
+      approval_policy?: string;
+      sandbox_policy?: string;
+      model?: string;
+      effort?: number;
+      summary?: boolean;
+      final_output_json_schema?: any;
     }
-  }
-
-  /**
-   * Handle user turn with full context using AgentTask
-   */
-  private async handleUserTurn(op: Extract<Op, { type: 'UserTurn' }>): Promise<void> {
+  ): Promise<void> {
     try {
-      // Initialize components if not already done
-      if (!this.turnContext) {
-        this.turnContext = new TurnContext({
-          cwd: op.cwd,
-          approval_policy: op.approval_policy,
-          sandbox_policy: op.sandbox_policy,
-          model: op.model,
-          effort: op.effort,
-          summary: op.summary,
-        });
-      } else {
-        // Update existing context
-        this.turnContext.updateContext({
-          cwd: op.cwd,
-          approval_policy: op.approval_policy,
-          sandbox_policy: op.sandbox_policy,
-          model: op.model,
-          effort: op.effort,
-          summary: op.summary,
-        });
-      }
+      // Get current running task if exists
+      const currentTask = this.activeTasks.size > 0
+        ? Array.from(this.activeTasks.values())[0]
+        : null;
 
-      // Update session turn context
-      this.session.updateTurnContext({
-        cwd: op.cwd,
-        approval_policy: op.approval_policy,
-        sandbox_policy: op.sandbox_policy,
-        model: op.model,
-        effort: op.effort,
-        summary: op.summary,
-      });
-
-      // Initialize TaskRunner and TurnManager if needed
-      if (!this.taskRunner || !this.turnManager) {
-        this.turnManager = new TurnManager(
-          this.modelClientFactory.getClient(op.model),
-          this.toolRegistry,
-          this.approvalManager,
-          this.diffTracker
-        );
-
-        this.taskRunner = new TaskRunner(
-          this.session,
-          this.turnContext,
-          this.turnManager,
-          uuidv4(), // submission ID will be replaced
-          op.items,
-          { autoCompact: true }
-        );
-      }
-
-      // Convert input items to ResponseItem format for AgentTask
-      const responseItems: ResponseItem[] = op.items.map(item => ({
+      // Convert input items to ResponseItem format
+      const responseItems: ResponseItem[] = items.map(item => ({
         role: 'user' as const,
         content: item.type === 'text' ? item.text || '' : `[${item.type}]`,
       }));
 
-      // Create lightweight AgentTask coordinator
-      const submissionId = uuidv4();
-      const agentTask = new AgentTask(
-        this.taskRunner,
-        this.session.getId(),
-        submissionId,
-        responseItems,
-        false // not review mode
-      );
+      if (currentTask) {
+        // Inject into existing task
+        await currentTask.injectUserInput(responseItems);
+      } else {
+        // No running task, spawn a new one
+        let taskContext: TurnContext;
 
-      this.activeTasks.set(submissionId, agentTask);
+        if (contextOverrides) {
+          // Create fresh context with overrides for this turn
+          taskContext = new TurnContext(contextOverrides);
 
-      try {
-        // Run task through AgentTask coordinator
-        await agentTask.run();
+          // Update session turn context with overrides
+          this.session.updateTurnContext(contextOverrides);
+        } else {
+          // Use persistent context
+          if (!this.turnContext) {
+            this.turnContext = new TurnContext({});
+          }
+          taskContext = this.turnContext;
+        }
 
-        // Emit completion
-        this.emitEvent({
-          type: 'AgentMessage',
-          data: {
-            message: 'Task completed successfully.',
-          },
-        });
-      } finally {
-        // Clean up
-        this.activeTasks.delete(submissionId);
+        // Initialize TaskRunner and TurnManager if needed or if model changed
+        const modelToUse = contextOverrides?.model || taskContext.getModel();
+
+        if (!this.taskRunner || !this.turnManager ||
+            (contextOverrides?.model && contextOverrides.model !== this.turnContext?.getModel())) {
+          this.turnManager = new TurnManager(
+            this.modelClientFactory.getClient(modelToUse),
+            this.toolRegistry,
+            this.approvalManager,
+            this.diffTracker
+          );
+
+          this.taskRunner = new TaskRunner(
+            this.session,
+            taskContext,
+            this.turnManager,
+            uuidv4(), // submission ID will be replaced
+            items,
+            { autoCompact: true }
+          );
+        }
+
+        // Create and run AgentTask
+        const submissionId = uuidv4();
+        const agentTask = new AgentTask(
+          this.taskRunner,
+          this.session.getId(),
+          submissionId,
+          responseItems,
+          false // not review mode
+        );
+
+        this.activeTasks.set(submissionId, agentTask);
+
+        try {
+          await agentTask.run();
+
+          this.emitEvent({
+            type: 'AgentMessage',
+            data: {
+              message: 'Task completed successfully.',
+            },
+          });
+        } finally {
+          this.activeTasks.delete(submissionId);
+        }
       }
-
     } catch (error) {
-      console.error('Error in handleUserTurn:', error);
+      console.error('Error processing user input:', error);
 
       this.emitEvent({
         type: 'Error',
@@ -309,6 +297,30 @@ export class CodexAgent {
 
       throw error;
     }
+  }
+
+  /**
+   * Handle user input
+   * Uses the current persistent TurnContext
+   */
+  private async handleUserInput(op: Extract<Op, { type: 'UserInput' }>): Promise<void> {
+    await this.processUserInputWithTask(op.items);
+  }
+
+  /**
+   * Handle user turn with full context using AgentTask
+   * Allows per-turn overrides of the context
+   */
+  private async handleUserTurn(op: Extract<Op, { type: 'UserTurn' }>): Promise<void> {
+    await this.processUserInputWithTask(op.items, {
+      cwd: op.cwd,
+      approval_policy: op.approval_policy,
+      sandbox_policy: op.sandbox_policy,
+      model: op.model,
+      effort: op.effort,
+      summary: op.summary,
+      final_output_json_schema: op.final_output_json_schema,
+    });
   }
 
   /**
