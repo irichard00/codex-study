@@ -144,9 +144,9 @@ export class State {
    * Add to conversation history
    * Accepts old format for backward compatibility
    */
-  addToHistory(entry: { timestamp: number; text: string; type: 'user' | 'agent' }): void {
+  addToHistory(entry: { timestamp: number; text: string; type: 'user' | 'agent' | 'system' }): void {
     const responseItem: ResponseItem = {
-      role: entry.type === 'user' ? 'user' : 'assistant',
+      role: entry.type === 'user' ? 'user' : entry.type === 'system' ? 'system' : 'assistant',
       content: entry.text,
       timestamp: entry.timestamp
     };
@@ -160,11 +160,11 @@ export class State {
    * Get conversation history
    * Returns in old format for backward compatibility
    */
-  getHistory(): Array<{ timestamp: number; text: string; type: 'user' | 'agent' }> {
+  getHistory(): Array<{ timestamp: number; text: string; type: 'user' | 'agent' | 'system' }> {
     return this.conversationHistory.items.map(item => ({
       timestamp: item.timestamp || Date.now(),
       text: typeof item.content === 'string' ? item.content : JSON.stringify(item.content),
-      type: item.role === 'user' ? 'user' as const : 'agent' as const
+      type: item.role === 'user' ? 'user' as const : item.role === 'system' ? 'system' as const : 'agent' as const
     }));
   }
 
@@ -390,7 +390,7 @@ export class State {
     } else if (data.history) {
       // Convert old format to new
       state.conversationHistory.items = data.history.map((h: any) => ({
-        role: h.type === 'user' ? 'user' as const : 'assistant' as const,
+        role: h.type === 'user' ? 'user' as const : h.type === 'system' ? 'system' as const : 'assistant' as const,
         content: h.text,
         timestamp: h.timestamp
       }));

@@ -112,7 +112,7 @@ export class Session {
       // Load messages from storage
       const messages = await this.conversationStore.getMessages(conv.id);
       this.conversationHistory.items = messages.map(msg => ({
-        role: msg.role === 'user' ? 'user' as const : 'assistant' as const,
+        role: msg.role as 'user' | 'assistant' | 'system',
         content: msg.content,
         timestamp: msg.timestamp
       }));
@@ -171,9 +171,9 @@ export class Session {
   /**
    * Add a message to history
    */
-  async addToHistory(entry: { timestamp: number; text: string; type: 'user' | 'agent' }): Promise<void> {
+  async addToHistory(entry: { timestamp: number; text: string; type: 'user' | 'agent' | 'system' }): Promise<void> {
     const responseItem: ResponseItem = {
-      role: entry.type === 'user' ? 'user' : 'assistant',
+      role: entry.type === 'user' ? 'user' : entry.type === 'system' ? 'system' : 'assistant',
       content: entry.text,
       timestamp: entry.timestamp
     };
@@ -189,7 +189,7 @@ export class Session {
     if (this.conversationStore && this.conversation) {
       const messageRecord: Omit<MessageRecord, 'id'> = {
         conversationId: this.conversation.id,
-        role: entry.type === 'user' ? 'user' : 'assistant',
+        role: entry.type === 'user' ? 'user' : entry.type === 'system' ? 'system' : 'assistant',
         content: entry.text,
         timestamp: entry.timestamp,
       };
@@ -202,11 +202,11 @@ export class Session {
    * Get conversation history
    * Returns items in the old format for backward compatibility
    */
-  getHistory(): Array<{ timestamp: number; text: string; type: 'user' | 'agent' }> {
+  getHistory(): Array<{ timestamp: number; text: string; type: 'user' | 'agent' | 'system' }> {
     return this.conversationHistory.items.map(item => ({
       timestamp: item.timestamp || Date.now(),
       text: typeof item.content === 'string' ? item.content : JSON.stringify(item.content),
-      type: item.role === 'user' ? 'user' as const : 'agent' as const
+      type: item.role === 'user' ? 'user' as const : item.role === 'system' ? 'system' as const : 'agent' as const
     }));
   }
 
@@ -312,7 +312,7 @@ export class Session {
   static import(data: {
     conversationId: string;
     conversationHistory?: ConversationHistory;
-    history?: Array<{ timestamp: number; text: string; type: 'user' | 'agent' }>; // For backward compatibility
+    history?: Array<{ timestamp: number; text: string; type: 'user' | 'agent' | 'system' }>; // For backward compatibility
     turnContext: TurnContext;
     messageCount: number;
   }): Session {
@@ -327,7 +327,7 @@ export class Session {
     } else if (data.history) {
       // Convert old format to new
       session.conversationHistory.items = data.history.map(h => ({
-        role: h.type === 'user' ? 'user' as const : 'assistant' as const,
+        role: h.type === 'user' ? 'user' as const : h.type === 'system' ? 'system' as const : 'assistant' as const,
         content: h.text,
         timestamp: h.timestamp
       }));
@@ -359,8 +359,8 @@ export class Session {
   /**
    * Get messages by type
    */
-  getMessagesByType(type: 'user' | 'agent'): ResponseItem[] {
-    const role = type === 'user' ? 'user' : 'assistant';
+  getMessagesByType(type: 'user' | 'agent' | 'system'): ResponseItem[] {
+    const role = type === 'user' ? 'user' : type === 'system' ? 'system' : 'assistant';
     return this.conversationHistory.items.filter(item => item.role === role);
   }
 
@@ -430,13 +430,13 @@ export class Session {
     const timestamp = Date.now();
 
     for (const item of items) {
-      if (item.role === 'assistant' || item.role === 'user') {
+      if (item.role === 'assistant' || item.role === 'user' || item.role === 'system') {
         const text = this.extractTextFromItem(item);
         if (text) {
           await this.addToHistory({
             timestamp,
             text,
-            type: item.role === 'assistant' ? 'agent' : 'user',
+            type: item.role === 'assistant' ? 'agent' : item.role === 'system' ? 'system' : 'user',
           });
         }
       }
