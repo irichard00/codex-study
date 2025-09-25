@@ -179,6 +179,73 @@ export class State {
   }
 
   /**
+   * Set conversation history
+   */
+  setConversationHistory(history: ConversationHistory): void {
+    this.conversationHistory = {
+      items: [...history.items],
+      metadata: { ...history.metadata }
+    };
+  }
+
+  /**
+   * Set conversation history items only
+   */
+  setConversationHistoryItems(items: ResponseItem[]): void {
+    this.conversationHistory.items = [...items];
+    this.conversationHistory.metadata!.lastUpdateTime = Date.now();
+  }
+
+  /**
+   * Get history entry by offset
+   * @param offset Negative offset from end of history
+   */
+  getHistoryEntry(offset: number): ResponseItem | undefined {
+    const items = this.conversationHistory.items;
+    if (offset >= 0 || Math.abs(offset) > items.length) {
+      return undefined;
+    }
+    return items[items.length + offset];
+  }
+
+  /**
+   * Get last message from history
+   */
+  getLastMessage(): ResponseItem | undefined {
+    const items = this.conversationHistory.items;
+    return items[items.length - 1];
+  }
+
+  /**
+   * Get messages by type
+   */
+  getMessagesByType(type: 'user' | 'agent' | 'system'): ResponseItem[] {
+    const role = type === 'user' ? 'user' : type === 'system' ? 'system' : 'assistant';
+    return this.conversationHistory.items.filter(item => item.role === role);
+  }
+
+  /**
+   * Compact conversation history to save tokens
+   */
+  compact(keepCount: number = 20): void {
+    if (this.conversationHistory.items.length > keepCount) {
+      const toRemove = this.conversationHistory.items.length - keepCount;
+      this.conversationHistory.items.splice(0, toRemove);
+      this.conversationHistory.metadata!.lastUpdateTime = Date.now();
+    }
+  }
+
+  /**
+   * Search messages in conversation history
+   */
+  searchMessages(query: string): ResponseItem[] {
+    return this.conversationHistory.items.filter(item => {
+      const content = typeof item.content === 'string' ? item.content : JSON.stringify(item.content);
+      return content.toLowerCase().includes(query.toLowerCase());
+    });
+  }
+
+  /**
    * Clear conversation history
    */
   clearHistory(): void {
@@ -198,6 +265,11 @@ export class State {
 
     if (this.currentTurn) {
       this.currentTurn.tokenCount += tokens;
+    }
+
+    // Update conversation history metadata
+    if (this.conversationHistory.metadata) {
+      this.conversationHistory.metadata.totalTokens = this.totalTokensUsed;
     }
   }
 
@@ -394,6 +466,11 @@ export class State {
         content: h.text,
         timestamp: h.timestamp
       }));
+    }
+
+    // Ensure totalTokens in metadata matches state
+    if (state.conversationHistory.metadata) {
+      state.conversationHistory.metadata.totalTokens = data.totalTokensUsed || 0;
     }
 
     state.turnHistory = data.turnHistory || [];

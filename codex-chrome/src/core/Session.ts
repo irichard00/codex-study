@@ -40,7 +40,6 @@ export interface TurnContext {
 export class Session {
   readonly conversationId: string;
   private state: State;
-  private conversationHistory: ConversationHistory;
   private turnContext: TurnContext;
   private messageCount: number = 0;
   private currentTurnItems: InputItem[] = [];
@@ -54,17 +53,6 @@ export class Session {
     this.conversationId = `conv_${uuidv4()}`;
     this.isPersistent = isPersistent;
     this.state = new State(this.conversationId);
-
-    // Initialize conversation history
-    this.conversationHistory = {
-      items: [],
-      metadata: {
-        sessionId: this.conversationId,
-        startTime: Date.now(),
-        lastUpdateTime: Date.now(),
-        totalTokens: 0
-      }
-    };
 
     // Initialize with default turn context
     this.turnContext = {
@@ -111,13 +99,13 @@ export class Session {
 
       // Load messages from storage
       const messages = await this.conversationStore.getMessages(conv.id);
-      this.conversationHistory.items = messages.map(msg => ({
+      const items = messages.map(msg => ({
         role: msg.role as 'user' | 'assistant' | 'system',
         content: msg.content,
         timestamp: msg.timestamp
       }));
+      this.state.setConversationHistoryItems(items);
       this.messageCount = messages.length;
-      this.conversationHistory.metadata!.lastUpdateTime = Date.now();
 
       return conv.id;
     }
@@ -172,18 +160,9 @@ export class Session {
    * Add a message to history
    */
   async addToHistory(entry: { timestamp: number; text: string; type: 'user' | 'agent' | 'system' }): Promise<void> {
-    const responseItem: ResponseItem = {
-      role: entry.type === 'user' ? 'user' : entry.type === 'system' ? 'system' : 'assistant',
-      content: entry.text,
-      timestamp: entry.timestamp
-    };
-
-    this.conversationHistory.items.push(responseItem);
-    this.conversationHistory.metadata!.lastUpdateTime = Date.now();
-    this.messageCount++;
-
-    // Also add to State (convert back to old format for compatibility)
+    // Delegate to State
     this.state.addToHistory(entry);
+    this.messageCount++;
 
     // Persist to storage if enabled
     if (this.conversationStore && this.conversation) {
@@ -203,21 +182,14 @@ export class Session {
    * Returns items in the old format for backward compatibility
    */
   getHistory(): Array<{ timestamp: number; text: string; type: 'user' | 'agent' | 'system' }> {
-    return this.conversationHistory.items.map(item => ({
-      timestamp: item.timestamp || Date.now(),
-      text: typeof item.content === 'string' ? item.content : JSON.stringify(item.content),
-      type: item.role === 'user' ? 'user' as const : item.role === 'system' ? 'system' as const : 'agent' as const
-    }));
+    return this.state.getHistory();
   }
 
   /**
    * Get conversation history as ConversationHistory
    */
   getConversationHistory(): ConversationHistory {
-    return {
-      ...this.conversationHistory,
-      items: [...this.conversationHistory.items]
-    };
+    return this.state.getConversationHistory();
   }
 
   /**
@@ -225,19 +197,14 @@ export class Session {
    * @param offset Negative offset from end of history
    */
   getHistoryEntry(offset: number): ResponseItem | undefined {
-    const items = this.conversationHistory.items;
-    if (offset >= 0 || Math.abs(offset) > items.length) {
-      return undefined;
-    }
-    return items[items.length + offset];
+    return this.state.getHistoryEntry(offset);
   }
 
   /**
    * Clear conversation history
    */
   clearHistory(): void {
-    this.conversationHistory.items = [];
-    this.conversationHistory.metadata!.lastUpdateTime = Date.now();
+    this.state.clearHistory();
     this.messageCount = 0;
   }
 
@@ -281,7 +248,7 @@ export class Session {
     return {
       conversationId: this.conversationId,
       messageCount: this.messageCount,
-      startTime: this.conversationHistory.metadata?.startTime || Date.now(),
+      startTime: this.state.getConversationHistory().metadata?.startTime || Date.now(),
       currentModel: this.turnContext.model,
     };
   }
@@ -297,10 +264,7 @@ export class Session {
   } {
     return {
       conversationId: this.conversationId,
-      conversationHistory: {
-        items: [...this.conversationHistory.items],
-        metadata: { ...this.conversationHistory.metadata }
-      },
+      conversationHistory: this.state.getConversationHistory(),
       turnContext: { ...this.turnContext },
       messageCount: this.messageCount,
     };
@@ -320,17 +284,15 @@ export class Session {
 
     // Handle both new and old format
     if (data.conversationHistory) {
-      session.conversationHistory = {
-        items: [...data.conversationHistory.items],
-        metadata: { ...data.conversationHistory.metadata }
-      };
+      session.state.setConversationHistory(data.conversationHistory);
     } else if (data.history) {
       // Convert old format to new
-      session.conversationHistory.items = data.history.map(h => ({
+      const items = data.history.map(h => ({
         role: h.type === 'user' ? 'user' as const : h.type === 'system' ? 'system' as const : 'assistant' as const,
         content: h.text,
         timestamp: h.timestamp
       }));
+      session.state.setConversationHistoryItems(items);
     }
 
     Object.assign(session, {
@@ -345,23 +307,21 @@ export class Session {
    * Check if session is empty
    */
   isEmpty(): boolean {
-    return this.conversationHistory.items.length === 0;
+    return this.state.getConversationHistory().items.length === 0;
   }
 
   /**
    * Get last message from history
    */
   getLastMessage(): ResponseItem | undefined {
-    const items = this.conversationHistory.items;
-    return items[items.length - 1];
+    return this.state.getLastMessage();
   }
 
   /**
    * Get messages by type
    */
   getMessagesByType(type: 'user' | 'agent' | 'system'): ResponseItem[] {
-    const role = type === 'user' ? 'user' : type === 'system' ? 'system' : 'assistant';
-    return this.conversationHistory.items.filter(item => item.role === role);
+    return this.state.getMessagesByType(type);
   }
 
   /**
@@ -514,7 +474,8 @@ export class Session {
    * Build turn input with full conversation history
    */
   async buildTurnInputWithHistory(newItems: any[]): Promise<any[]> {
-    const historyItems = this.conversationHistory.items.map(item => ({
+    const conversationHistory = this.state.getConversationHistory();
+    const historyItems = conversationHistory.items.map(item => ({
       role: item.role,
       content: typeof item.content === 'string'
         ? [{ type: 'text', text: item.content }]
@@ -554,14 +515,9 @@ export class Session {
    * Compact conversation history to save tokens
    */
   async compact(): Promise<void> {
-    // Simple compaction strategy: keep last 20 messages
-    if (this.conversationHistory.items.length > 20) {
-      const keepCount = 20;
-      const toRemove = this.conversationHistory.items.length - keepCount;
-      this.conversationHistory.items.splice(0, toRemove);
-      this.conversationHistory.metadata!.lastUpdateTime = Date.now();
-      this.messageCount = this.conversationHistory.items.length;
-    }
+    // Delegate to State
+    this.state.compact();
+    this.messageCount = this.state.getConversationHistory().items.length;
   }
 
   /**
@@ -587,10 +543,7 @@ export class Session {
   async searchMessages(query: string): Promise<any[]> {
     if (!this.conversationStore) {
       // Search in memory if no storage
-      return this.conversationHistory.items.filter(item => {
-        const content = typeof item.content === 'string' ? item.content : JSON.stringify(item.content);
-        return content.toLowerCase().includes(query.toLowerCase());
-      });
+      return this.state.searchMessages(query);
     }
 
     const results = await this.conversationStore.searchMessages(query);
