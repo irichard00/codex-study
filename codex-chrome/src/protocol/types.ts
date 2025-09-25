@@ -124,6 +124,14 @@ export type SandboxPolicy =
     };
 
 /**
+ * Response item for conversation history
+ */
+export interface ResponseItem {
+  role: 'user' | 'assistant' | 'system';
+  content: string | any[];
+}
+
+/**
  * User input types
  */
 export type InputItem =

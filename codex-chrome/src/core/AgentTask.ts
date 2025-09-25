@@ -6,10 +6,11 @@
  * provides lifecycle management and cancellation support.
  */
 
-import type { TaskRunner } from './TaskRunner';
+import { TaskRunner } from './TaskRunner';
 import type { InputItem, ResponseItem } from '../protocol/types';
 import type { Session } from './Session';
 import type { TurnContext } from './TurnContext';
+import type { TurnManager } from './TurnManager';
 
 /**
  * Task execution status
@@ -26,12 +27,12 @@ export interface TokenBudget {
 }
 
 /**
- * AgentTask coordinates task execution by delegating to TaskRunner
+ * AgentTask coordinates task execution by creating and managing its own TaskRunner
  * Implements the critical missing coordinator from codex-rs
  */
 export class AgentTask {
   private taskRunner: TaskRunner;
-  private submissionId: string;
+  public submissionId: string;
   private sessionId: string;
   private status: TaskStatus = 'initializing';
   private abortController: AbortController;
@@ -39,18 +40,32 @@ export class AgentTask {
   private isReviewMode: boolean;
 
   constructor(
-    taskRunner: TaskRunner,
+    session: Session,
+    turnContext: TurnContext,
+    turnManager: TurnManager,
     sessionId: string,
     submissionId: string,
     input: ResponseItem[],
     isReviewMode: boolean = false
   ) {
-    this.taskRunner = taskRunner;
     this.sessionId = sessionId;
     this.submissionId = submissionId;
     this.input = input;
     this.isReviewMode = isReviewMode;
     this.abortController = new AbortController();
+    
+    // Create TaskRunner instance - AgentTask owns its TaskRunner
+    this.taskRunner = new TaskRunner(
+      session,
+      turnContext,
+      turnManager,
+      submissionId,
+      input.map(item => ({
+        type: 'text' as const,
+        text: typeof item.content === 'string' ? item.content : JSON.stringify(item.content)
+      })),
+      { autoCompact: true }
+    );
   }
 
   /**
@@ -101,12 +116,6 @@ export class AgentTask {
     return runnerStatus as TaskStatus || this.status;
   }
 
-  /**
-   * Get submission ID
-   */
-  getSubmissionId(): string {
-    return this.submissionId;
-  }
 
   /**
    * Get session ID
@@ -134,5 +143,21 @@ export class AgentTask {
    */
   getTokenUsage(): TokenBudget {
     return this.taskRunner.getTokenUsage(this.submissionId);
+  }
+
+  /**
+   * Inject user input into the running task
+   * This allows for mid-task user interaction
+   */
+  async injectUserInput(input: ResponseItem[]): Promise<void> {
+    // Convert ResponseItem[] to InputItem[] format for TaskRunner
+    const inputItems = input.map(item => ({
+      type: 'text' as const,
+      text: typeof item.content === 'string' ? item.content : JSON.stringify(item.content)
+    }));
+    
+    // For now, we'll need to extend TaskRunner to support input injection
+    // This is a placeholder for the actual implementation
+    console.log('Injecting user input:', inputItems);
   }
 }

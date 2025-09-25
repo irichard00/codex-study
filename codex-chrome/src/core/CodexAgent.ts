@@ -3,7 +3,7 @@
  * Preserves the SQ/EQ (Submission Queue/Event Queue) architecture
  */
 
-import type { Submission, Op, Event, ResponseItem } from '../protocol/types';
+import type { Submission, Op, Event, ResponseItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig } from '../protocol/types';
 import type { EventMsg } from '../protocol/events';
 import { Session } from './Session';
 import { TaskRunner } from './TaskRunner';
@@ -26,10 +26,7 @@ export class CodexAgent {
   private eventQueue: Event[] = [];
   private session: Session;
   private isProcessing: boolean = false;
-  private taskRunner: TaskRunner | null = null;
-  private turnManager: TurnManager | null = null;
-  private turnContext: TurnContext | null = null;
-  private activeTasks: Map<string, AgentTask> = new Map();
+  private activeTask: AgentTask | null = null;
   private approvalManager: ApprovalManager;
   private diffTracker: DiffTracker;
   private toolRegistry: ToolRegistry;
@@ -197,19 +194,23 @@ export class CodexAgent {
     items: Array<any>,
     contextOverrides?: {
       cwd?: string;
-      approval_policy?: string;
-      sandbox_policy?: string;
+      approval_policy?: AskForApproval;
+      sandbox_policy?: SandboxPolicy;
       model?: string;
-      effort?: number;
-      summary?: boolean;
+      effort?: ReasoningEffortConfig;
+      summary?: ReasoningSummaryConfig;
       final_output_json_schema?: any;
-    }
+    },
+    newTask: boolean = false
   ): Promise<void> {
     try {
       // Get current running task if exists
-      const currentTask = this.activeTasks.size > 0
-        ? Array.from(this.activeTasks.values())[0]
-        : null;
+      let currentTask = this.activeTask;
+      if (newTask) {
+        currentTask?.cancel();
+        this.activeTask = null;
+        currentTask = null;
+      }
 
       // Convert input items to ResponseItem format
       const responseItems: ResponseItem[] = items.map(item => ({
@@ -219,58 +220,48 @@ export class CodexAgent {
 
       if (currentTask) {
         // Inject into existing task
-        await currentTask.injectUserInput(responseItems);
+        if (currentTask) {
+          await currentTask.injectUserInput(responseItems);
+        }
       } else {
         // No running task, spawn a new one
         let taskContext: TurnContext;
 
         if (contextOverrides) {
           // Create fresh context with overrides for this turn
-          taskContext = new TurnContext(contextOverrides);
+          const modelClient = await this.modelClientFactory.createClientForModel(contextOverrides.model || 'default');
+          taskContext = new TurnContext(modelClient, contextOverrides);
 
           // Update session turn context with overrides
           this.session.updateTurnContext(contextOverrides);
         } else {
-          // Use persistent context
-          if (!this.turnContext) {
-            this.turnContext = new TurnContext({});
-          }
-          taskContext = this.turnContext;
+          // Create a new context for this turn
+          const modelClient = await this.modelClientFactory.createClientForModel('default');
+          taskContext = new TurnContext(modelClient, {});
         }
 
-        // Initialize TaskRunner and TurnManager if needed or if model changed
+        // Create TurnManager for this task
         const modelToUse = contextOverrides?.model || taskContext.getModel();
+        const modelClient = await this.modelClientFactory.createClientForModel(modelToUse);
+        const turnManager = new TurnManager(
+          this.session,
+          taskContext,
+          modelClient
+        );
 
-        if (!this.taskRunner || !this.turnManager ||
-            (contextOverrides?.model && contextOverrides.model !== this.turnContext?.getModel())) {
-          this.turnManager = new TurnManager(
-            this.modelClientFactory.getClient(modelToUse),
-            this.toolRegistry,
-            this.approvalManager,
-            this.diffTracker
-          );
-
-          this.taskRunner = new TaskRunner(
-            this.session,
-            taskContext,
-            this.turnManager,
-            uuidv4(), // submission ID will be replaced
-            items,
-            { autoCompact: true }
-          );
-        }
-
-        // Create and run AgentTask
+        // Create and run AgentTask - AgentTask will create its own TaskRunner
         const submissionId = uuidv4();
         const agentTask = new AgentTask(
-          this.taskRunner,
+          this.session,
+          taskContext,
+          turnManager,
           this.session.getId(),
           submissionId,
           responseItems,
           false // not review mode
         );
 
-        this.activeTasks.set(submissionId, agentTask);
+        this.activeTask = agentTask;
 
         try {
           await agentTask.run();
@@ -282,7 +273,7 @@ export class CodexAgent {
             },
           });
         } finally {
-          this.activeTasks.delete(submissionId);
+          this.activeTask = null;
         }
       }
     } catch (error) {
@@ -319,7 +310,6 @@ export class CodexAgent {
       model: op.model,
       effort: op.effort,
       summary: op.summary,
-      final_output_json_schema: op.final_output_json_schema,
     });
   }
 
@@ -327,10 +317,9 @@ export class CodexAgent {
    * Cancel a running task
    */
   cancelTask(submissionId: string): void {
-    const task = this.activeTasks.get(submissionId);
-    if (task) {
-      task.cancel();
-      this.activeTasks.delete(submissionId);
+    if (this.activeTask && this.activeTask.submissionId === submissionId) {
+      this.activeTask.cancel();
+      this.activeTask = null;
     }
   }
 
@@ -454,13 +443,6 @@ export class CodexAgent {
     return this.session;
   }
 
-  /**
-   * Get the task runner (creates new instance per task)
-   */
-  getTaskRunner(): void {
-    // TaskRunner is created per task, not stored as instance property
-    throw new Error('TaskRunner instances are created per task execution');
-  }
 
   /**
    * Get the tool registry
