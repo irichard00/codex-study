@@ -44,7 +44,10 @@ export type EventMsg =
   | { type: 'ShutdownComplete' }
   | { type: 'ConversationPath'; data: ConversationPathResponseEvent }
   | { type: 'EnteredReviewMode'; data: ReviewRequest }
-  | { type: 'ExitedReviewMode'; data: ExitedReviewModeEvent };
+  | { type: 'ExitedReviewMode'; data: ExitedReviewModeEvent }
+  | { type: 'Notification'; data: NotificationEvent }
+  | { type: 'Interrupted' }
+  | { type: 'TaskFailed'; data: TaskFailedEvent };
 
 // Individual event payload types
 
@@ -267,4 +270,17 @@ export interface ReviewOutputEvent {
   approved: boolean;
   changes?: string;
   comments?: string;
+}
+
+export interface NotificationEvent {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  timestamp: number;
+}
+
+export interface TaskFailedEvent {
+  reason: string;
+  error?: string;
 }

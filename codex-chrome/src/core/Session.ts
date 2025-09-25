@@ -7,6 +7,7 @@ import type { InputItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, R
 import type { HistoryEntry, EventMsg } from '../protocol/events';
 import type { MessageRecord, ConversationData } from '../types/storage';
 import { ConversationStore } from '../storage/ConversationStore';
+import { State } from './State';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
@@ -38,6 +39,7 @@ export interface TurnContext {
  */
 export class Session {
   readonly conversationId: string;
+  private state: State;
   private history: HistoryEntry[] = [];
   private turnContext: TurnContext;
   private messageCount: number = 0;
@@ -47,10 +49,11 @@ export class Session {
   private conversationStore: ConversationStore | null = null;
   private conversation: ConversationData | null = null;
   private isPersistent: boolean = true;
-  
+
   constructor(isPersistent: boolean = true) {
     this.conversationId = `conv_${uuidv4()}`;
     this.isPersistent = isPersistent;
+    this.state = new State(this.conversationId);
 
     // Initialize with default turn context
     this.turnContext = {
@@ -159,6 +162,9 @@ export class Session {
   async addToHistory(entry: HistoryEntry): Promise<void> {
     this.history.push(entry);
     this.messageCount++;
+
+    // Also add to State
+    this.state.addToHistory(entry);
 
     // Persist to storage if enabled
     if (this.conversationStore && this.conversation) {
@@ -576,5 +582,90 @@ export class Session {
    */
   getId(): string {
     return this.conversationId;
+  }
+
+  /**
+   * Get the State instance
+   */
+  getState(): State {
+    return this.state;
+  }
+
+  /**
+   * Start a new turn in state
+   */
+  startTurn(): void {
+    this.state.startTurn();
+  }
+
+  /**
+   * End current turn in state
+   */
+  endTurn(): void {
+    this.state.endTurn();
+  }
+
+  /**
+   * Track token usage
+   */
+  addTokenUsage(tokens: number): void {
+    this.state.addTokenUsage(tokens);
+  }
+
+  /**
+   * Track tool usage
+   */
+  trackToolUsage(toolName: string): void {
+    this.state.trackToolUsage(toolName);
+  }
+
+  /**
+   * Add error to state
+   */
+  addError(error: string, context?: any): void {
+    this.state.addError(error, context);
+  }
+
+  /**
+   * Request interrupt
+   */
+  requestInterrupt(): void {
+    this.state.requestInterrupt();
+  }
+
+  /**
+   * Check if interrupt requested
+   */
+  isInterruptRequested(): boolean {
+    return this.state.isInterruptRequested();
+  }
+
+  /**
+   * Clear interrupt flag
+   */
+  clearInterrupt(): void {
+    this.state.clearInterrupt();
+  }
+
+  /**
+   * Export session with state
+   */
+  exportWithState(): any {
+    const baseExport = this.export();
+    return {
+      ...baseExport,
+      state: this.state.export()
+    };
+  }
+
+  /**
+   * Import session with state
+   */
+  static importWithState(data: any): Session {
+    const session = Session.import(data);
+    if (data.state) {
+      session.state = State.import(data.state);
+    }
+    return session;
   }
 }

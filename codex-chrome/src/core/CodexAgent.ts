@@ -3,7 +3,7 @@
  * Preserves the SQ/EQ (Submission Queue/Event Queue) architecture
  */
 
-import type { Submission, Op, Event, ResponseItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig } from '../protocol/types';
+import type { Submission, Op, Event, ResponseItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig, ReviewDecision } from '../protocol/types';
 import type { EventMsg } from '../protocol/events';
 import { Session } from './Session';
 import { TaskRunner } from './TaskRunner';
@@ -14,6 +14,7 @@ import { ApprovalManager } from './ApprovalManager';
 import { DiffTracker } from './DiffTracker';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import { ModelClientFactory } from '../models/ModelClientFactory';
+import { UserNotifier } from './UserNotifier';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
@@ -31,6 +32,7 @@ export class CodexAgent {
   private diffTracker: DiffTracker;
   private toolRegistry: ToolRegistry;
   private modelClientFactory: ModelClientFactory;
+  private userNotifier: UserNotifier;
 
   constructor() {
     this.session = new Session();
@@ -38,8 +40,10 @@ export class CodexAgent {
     this.toolRegistry = new ToolRegistry();
     this.approvalManager = new ApprovalManager();
     this.diffTracker = new DiffTracker();
-    // Components are initialized but not fully integrated yet
-    // Full integration pending interface alignment
+    this.userNotifier = new UserNotifier();
+
+    // Setup event processing for notifications
+    this.setupNotificationHandlers();
   }
 
   /**
@@ -175,8 +179,17 @@ export class CodexAgent {
    * Handle interrupt operation
    */
   private async handleInterrupt(): Promise<void> {
+    // Set interrupt flag in session
+    this.session.requestInterrupt();
+
     // Clear the submission queue
     this.submissionQueue = [];
+
+    // Notify user about interruption
+    await this.userNotifier.notifyWarning(
+      'Task Interrupted',
+      'The current task has been interrupted by user request'
+    );
 
     this.emitEvent({
       type: 'TurnAborted',
@@ -184,6 +197,15 @@ export class CodexAgent {
         reason: 'user_interrupt',
       },
     });
+
+    // Cancel active task if any
+    if (this.activeTask) {
+      await this.activeTask.cancel();
+      this.activeTask = null;
+    }
+
+    // Clear interrupt flag after handling
+    this.session.clearInterrupt();
   }
 
   /**
@@ -425,6 +447,9 @@ export class CodexAgent {
 
     this.eventQueue.push(event);
 
+    // Process event for user notifications
+    this.userNotifier.processEvent(event);
+
     // Notify listeners via Chrome runtime if available
     if (typeof chrome !== 'undefined' && chrome.runtime) {
       chrome.runtime.sendMessage({
@@ -472,5 +497,106 @@ export class CodexAgent {
     this.toolRegistry.clear();
     this.submissionQueue = [];
     this.eventQueue = [];
+    await this.userNotifier.clearAll();
+  }
+
+  /**
+   * Setup notification handlers
+   */
+  private setupNotificationHandlers(): void {
+    // Register notification callback for UI updates
+    this.userNotifier.onNotification((notification) => {
+      // Emit notification event for UI
+      this.emitEvent({
+        type: 'Notification',
+        data: {
+          id: notification.id,
+          type: notification.type,
+          title: notification.title,
+          message: notification.message,
+          timestamp: notification.timestamp,
+        },
+      });
+    });
+  }
+
+  /**
+   * Handle approval decision
+   */
+  private async handleApprovalDecision(
+    approvalId: string,
+    decision: 'approve' | 'reject'
+  ): Promise<void> {
+    // Process the approval decision
+    const pendingApproval = this.approvalManager.getApproval(approvalId);
+    if (!pendingApproval) return;
+
+    const approval = pendingApproval.request;
+
+    // Submit the decision as an operation based on approval type
+    const reviewDecision: ReviewDecision = decision === 'approve'
+      ? 'approve'
+      : 'reject';
+
+    const op: Op = approval.type === 'command'
+      ? {
+          type: 'ExecApproval',
+          id: approvalId,
+          decision: reviewDecision,
+        }
+      : {
+          type: 'PatchApproval',
+          id: approvalId,
+          decision: reviewDecision,
+        };
+
+    await this.submitOperation(op);
+  }
+
+  /**
+   * Get user notifier
+   */
+  getUserNotifier(): UserNotifier {
+    return this.userNotifier;
+  }
+
+  /**
+   * Handle interruption
+   */
+  async interrupt(): Promise<void> {
+    // Request interrupt on session
+    this.session.requestInterrupt();
+
+    // Notify user
+    await this.userNotifier.notifyInfo(
+      'Interruption Requested',
+      'The current task will be interrupted'
+    );
+
+    // Submit interrupt operation
+    await this.submitOperation({ type: 'Interrupt' });
+  }
+
+  /**
+   * Show progress notification
+   */
+  async showProgress(
+    title: string,
+    message: string,
+    current: number,
+    total: number
+  ): Promise<string> {
+    return this.userNotifier.notifyProgress(title, message, current, total);
+  }
+
+  /**
+   * Update progress notification
+   */
+  async updateProgress(
+    notificationId: string,
+    current: number,
+    total: number
+  ): Promise<void> {
+    await this.userNotifier.updateProgress(notificationId, current, total);
   }
 }

@@ -73,6 +73,7 @@ export class ApprovalManager {
   private pendingRequests = new Map<string, PendingApproval>();
   private approvalHistory = new Map<string, ApprovalResponse>();
   private eventEmitter?: (event: Event) => void;
+  private approvalRequestCallback?: (approval: ApprovalRequest) => void;
 
   constructor(eventEmitter?: (event: Event) => void) {
     this.eventEmitter = eventEmitter;
@@ -101,6 +102,11 @@ export class ApprovalManager {
         },
       },
     });
+
+    // Call approval request callback if registered
+    if (this.approvalRequestCallback) {
+      this.approvalRequestCallback(request);
+    }
 
     // Set up timeout handling
     const timeout = request.timeout || this.policy.timeout || 30000;
@@ -301,6 +307,20 @@ export class ApprovalManager {
    */
   getPendingApprovals(): ApprovalRequest[] {
     return Array.from(this.pendingRequests.values()).map(p => p.request);
+  }
+
+  /**
+   * Get a specific approval request by ID
+   */
+  getApproval(approvalId: string): PendingApproval | undefined {
+    return this.pendingRequests.get(approvalId);
+  }
+
+  /**
+   * Register a callback for approval requests
+   */
+  onApprovalRequest(callback: (approval: ApprovalRequest) => void): void {
+    this.approvalRequestCallback = callback;
   }
 
   /**
