@@ -3,8 +3,8 @@
  * Manages conversation state, turn context, and history
  */
 
-import type { InputItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig, Event } from '../protocol/types';
-import type { HistoryEntry, EventMsg } from '../protocol/events';
+import type { InputItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig, Event, ResponseItem, ConversationHistory } from '../protocol/types';
+import type { EventMsg } from '../protocol/events';
 import type { MessageRecord, ConversationData } from '../types/storage';
 import { ConversationStore } from '../storage/ConversationStore';
 import { State } from './State';
@@ -40,7 +40,7 @@ export interface TurnContext {
 export class Session {
   readonly conversationId: string;
   private state: State;
-  private history: HistoryEntry[] = [];
+  private conversationHistory: ConversationHistory;
   private turnContext: TurnContext;
   private messageCount: number = 0;
   private currentTurnItems: InputItem[] = [];
@@ -54,6 +54,17 @@ export class Session {
     this.conversationId = `conv_${uuidv4()}`;
     this.isPersistent = isPersistent;
     this.state = new State(this.conversationId);
+
+    // Initialize conversation history
+    this.conversationHistory = {
+      items: [],
+      metadata: {
+        sessionId: this.conversationId,
+        startTime: Date.now(),
+        lastUpdateTime: Date.now(),
+        totalTokens: 0
+      }
+    };
 
     // Initialize with default turn context
     this.turnContext = {
@@ -100,12 +111,13 @@ export class Session {
 
       // Load messages from storage
       const messages = await this.conversationStore.getMessages(conv.id);
-      this.history = messages.map(msg => ({
-        timestamp: msg.timestamp,
-        text: msg.content,
-        type: msg.role === 'user' ? 'user' as const : 'agent' as const
+      this.conversationHistory.items = messages.map(msg => ({
+        role: msg.role === 'user' ? 'user' as const : 'assistant' as const,
+        content: msg.content,
+        timestamp: msg.timestamp
       }));
       this.messageCount = messages.length;
+      this.conversationHistory.metadata!.lastUpdateTime = Date.now();
 
       return conv.id;
     }
@@ -159,11 +171,18 @@ export class Session {
   /**
    * Add a message to history
    */
-  async addToHistory(entry: HistoryEntry): Promise<void> {
-    this.history.push(entry);
+  async addToHistory(entry: { timestamp: number; text: string; type: 'user' | 'agent' }): Promise<void> {
+    const responseItem: ResponseItem = {
+      role: entry.type === 'user' ? 'user' : 'assistant',
+      content: entry.text,
+      timestamp: entry.timestamp
+    };
+
+    this.conversationHistory.items.push(responseItem);
+    this.conversationHistory.metadata!.lastUpdateTime = Date.now();
     this.messageCount++;
 
-    // Also add to State
+    // Also add to State (convert back to old format for compatibility)
     this.state.addToHistory(entry);
 
     // Persist to storage if enabled
@@ -181,27 +200,44 @@ export class Session {
 
   /**
    * Get conversation history
+   * Returns items in the old format for backward compatibility
    */
-  getHistory(): HistoryEntry[] {
-    return [...this.history];
+  getHistory(): Array<{ timestamp: number; text: string; type: 'user' | 'agent' }> {
+    return this.conversationHistory.items.map(item => ({
+      timestamp: item.timestamp || Date.now(),
+      text: typeof item.content === 'string' ? item.content : JSON.stringify(item.content),
+      type: item.role === 'user' ? 'user' as const : 'agent' as const
+    }));
+  }
+
+  /**
+   * Get conversation history as ConversationHistory
+   */
+  getConversationHistory(): ConversationHistory {
+    return {
+      ...this.conversationHistory,
+      items: [...this.conversationHistory.items]
+    };
   }
 
   /**
    * Get history entry by offset
    * @param offset Negative offset from end of history
    */
-  getHistoryEntry(offset: number): HistoryEntry | undefined {
-    if (offset >= 0 || Math.abs(offset) > this.history.length) {
+  getHistoryEntry(offset: number): ResponseItem | undefined {
+    const items = this.conversationHistory.items;
+    if (offset >= 0 || Math.abs(offset) > items.length) {
       return undefined;
     }
-    return this.history[this.history.length + offset];
+    return items[items.length + offset];
   }
 
   /**
    * Clear conversation history
    */
   clearHistory(): void {
-    this.history = [];
+    this.conversationHistory.items = [];
+    this.conversationHistory.metadata!.lastUpdateTime = Date.now();
     this.messageCount = 0;
   }
 
@@ -245,7 +281,7 @@ export class Session {
     return {
       conversationId: this.conversationId,
       messageCount: this.messageCount,
-      startTime: this.history[0]?.timestamp || Date.now(),
+      startTime: this.conversationHistory.metadata?.startTime || Date.now(),
       currentModel: this.turnContext.model,
     };
   }
@@ -255,13 +291,16 @@ export class Session {
    */
   export(): {
     conversationId: string;
-    history: HistoryEntry[];
+    conversationHistory: ConversationHistory;
     turnContext: TurnContext;
     messageCount: number;
   } {
     return {
       conversationId: this.conversationId,
-      history: [...this.history],
+      conversationHistory: {
+        items: [...this.conversationHistory.items],
+        metadata: { ...this.conversationHistory.metadata }
+      },
       turnContext: { ...this.turnContext },
       messageCount: this.messageCount,
     };
@@ -272,14 +311,30 @@ export class Session {
    */
   static import(data: {
     conversationId: string;
-    history: HistoryEntry[];
+    conversationHistory?: ConversationHistory;
+    history?: Array<{ timestamp: number; text: string; type: 'user' | 'agent' }>; // For backward compatibility
     turnContext: TurnContext;
     messageCount: number;
   }): Session {
     const session = new Session();
+
+    // Handle both new and old format
+    if (data.conversationHistory) {
+      session.conversationHistory = {
+        items: [...data.conversationHistory.items],
+        metadata: { ...data.conversationHistory.metadata }
+      };
+    } else if (data.history) {
+      // Convert old format to new
+      session.conversationHistory.items = data.history.map(h => ({
+        role: h.type === 'user' ? 'user' as const : 'assistant' as const,
+        content: h.text,
+        timestamp: h.timestamp
+      }));
+    }
+
     Object.assign(session, {
       conversationId: data.conversationId,
-      history: [...data.history],
       turnContext: { ...data.turnContext },
       messageCount: data.messageCount,
     });
@@ -290,21 +345,23 @@ export class Session {
    * Check if session is empty
    */
   isEmpty(): boolean {
-    return this.history.length === 0;
+    return this.conversationHistory.items.length === 0;
   }
 
   /**
    * Get last message from history
    */
-  getLastMessage(): HistoryEntry | undefined {
-    return this.history[this.history.length - 1];
+  getLastMessage(): ResponseItem | undefined {
+    const items = this.conversationHistory.items;
+    return items[items.length - 1];
   }
 
   /**
    * Get messages by type
    */
-  getMessagesByType(type: 'user' | 'agent'): HistoryEntry[] {
-    return this.history.filter(entry => entry.type === type);
+  getMessagesByType(type: 'user' | 'agent'): ResponseItem[] {
+    const role = type === 'user' ? 'user' : 'assistant';
+    return this.conversationHistory.items.filter(item => item.role === role);
   }
 
   /**
@@ -457,9 +514,11 @@ export class Session {
    * Build turn input with full conversation history
    */
   async buildTurnInputWithHistory(newItems: any[]): Promise<any[]> {
-    const historyItems = this.history.map(entry => ({
-      role: entry.type === 'user' ? 'user' : 'assistant',
-      content: [{ type: 'text', text: entry.text }],
+    const historyItems = this.conversationHistory.items.map(item => ({
+      role: item.role,
+      content: typeof item.content === 'string'
+        ? [{ type: 'text', text: item.content }]
+        : item.content,
     }));
 
     return [...historyItems, ...newItems];
@@ -496,11 +555,12 @@ export class Session {
    */
   async compact(): Promise<void> {
     // Simple compaction strategy: keep last 20 messages
-    if (this.history.length > 20) {
+    if (this.conversationHistory.items.length > 20) {
       const keepCount = 20;
-      const toRemove = this.history.length - keepCount;
-      this.history.splice(0, toRemove);
-      this.messageCount = this.history.length;
+      const toRemove = this.conversationHistory.items.length - keepCount;
+      this.conversationHistory.items.splice(0, toRemove);
+      this.conversationHistory.metadata!.lastUpdateTime = Date.now();
+      this.messageCount = this.conversationHistory.items.length;
     }
   }
 
@@ -527,9 +587,10 @@ export class Session {
   async searchMessages(query: string): Promise<any[]> {
     if (!this.conversationStore) {
       // Search in memory if no storage
-      return this.history.filter(entry =>
-        entry.text.toLowerCase().includes(query.toLowerCase())
-      );
+      return this.conversationHistory.items.filter(item => {
+        const content = typeof item.content === 'string' ? item.content : JSON.stringify(item.content);
+        return content.toLowerCase().includes(query.toLowerCase());
+      });
     }
 
     const results = await this.conversationStore.searchMessages(query);

@@ -3,7 +3,7 @@
  * Preserving exact event names and structures
  */
 
-import { ReviewRequest } from './types';
+import { ReviewRequest, ResponseItem } from './types';
 
 /**
  * Complete EventMsg enumeration
@@ -61,6 +61,9 @@ export interface TaskStartedEvent {
 
 export interface TaskCompleteEvent {
   last_agent_message?: string;
+  // Added for compatibility with Rust's AgentTurnComplete notification
+  turn_id?: string;
+  input_messages?: string[];
 }
 
 export interface TokenUsage {
@@ -211,14 +214,8 @@ export interface TurnDiffEvent {
 }
 
 export interface GetHistoryEntryResponseEvent {
-  entry?: HistoryEntry;
+  entry?: ResponseItem;
   error?: string;
-}
-
-export interface HistoryEntry {
-  timestamp: number;
-  text: string;
-  type: 'user' | 'agent';
 }
 
 export interface McpListToolsResponseEvent {

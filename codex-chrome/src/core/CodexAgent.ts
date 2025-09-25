@@ -155,11 +155,18 @@ export class CodexAgent {
           });
       }
 
-      // Emit TaskComplete event
+      // Emit TaskComplete event with turn metadata if available
+      const history = this.session.getHistory();
+      const lastAgentMessage = history
+        .filter(h => h.type === 'agent')
+        .pop()?.text;
+
       this.emitEvent({
         type: 'TaskComplete',
         data: {
-          last_agent_message: undefined,
+          last_agent_message: lastAgentMessage,
+          turn_id: submission.id,
+          input_messages: [], // Will be populated by specific handlers
         },
       });
     } catch (error) {
@@ -286,7 +293,28 @@ export class CodexAgent {
         this.activeTask = agentTask;
 
         try {
-          await agentTask.run();
+          const result = await agentTask.run();
+
+          // Extract last assistant message from session history
+          const history = this.session.getHistory();
+          const lastAgentMessage = history
+            .filter(h => h.type === 'agent')
+            .pop()?.text;
+
+          // Extract input messages from this turn
+          const inputMessages = responseItems
+            .filter(item => item.role === 'user')
+            .map(item => typeof item.content === 'string' ? item.content : JSON.stringify(item.content));
+
+          // Emit TaskComplete with turn metadata for notification compatibility
+          this.emitEvent({
+            type: 'TaskComplete',
+            data: {
+              last_agent_message: lastAgentMessage,
+              turn_id: submissionId,
+              input_messages: inputMessages,
+            },
+          });
 
           this.emitEvent({
             type: 'AgentMessage',

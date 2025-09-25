@@ -72,8 +72,15 @@ export class UserNotifier {
   private chromeNotificationSupport: boolean = false;
   private maxNotifications: number = 100;
   private notificationHistory: UserNotification[] = [];
+  private externalCommand?: string; // For compatibility with Rust's notify_command
+  private fallbackToConsole: boolean = true; // Fallback when Chrome notifications unavailable
 
-  constructor() {
+  constructor(config?: {
+    externalCommand?: string;
+    fallbackToConsole?: boolean;
+  }) {
+    this.externalCommand = config?.externalCommand;
+    this.fallbackToConsole = config?.fallbackToConsole ?? true;
     this.checkChromeNotificationSupport();
   }
 
@@ -143,9 +150,18 @@ export class UserNotifier {
     this.notifications.set(notificationId, notification);
     this.addToHistory(notification);
 
-    // Show Chrome notification if available
-    if (this.chromeNotificationSupport) {
-      await this.showChromeNotification(notification);
+    // Try to show Chrome notification if available
+    try {
+      if (this.chromeNotificationSupport) {
+        await this.showChromeNotification(notification);
+      } else if (this.fallbackToConsole) {
+        this.showFallbackNotification(notification);
+      }
+    } catch (error) {
+      console.warn('Primary notification method failed, using fallback:', error);
+      if (this.fallbackToConsole) {
+        this.showFallbackNotification(notification);
+      }
     }
 
     // Notify callbacks
@@ -159,6 +175,53 @@ export class UserNotifier {
     }
 
     return notificationId;
+  }
+
+  /**
+   * Show fallback notification when Chrome notifications are unavailable
+   */
+  private showFallbackNotification(notification: UserNotification): void {
+    const typeIcon = {
+      info: 'ℹ️',
+      success: '✅',
+      warning: '⚠️',
+      error: '❌',
+      progress: '📊',
+      approval: '❓',
+    }[notification.type] || '📢';
+
+    const priorityIndicator = notification.priority === 'urgent' ? '🚨' :
+                              notification.priority === 'high' ? '❗' : '';
+
+    const progressInfo = notification.progress
+      ? ` [${notification.progress.current}/${notification.progress.total}]`
+      : '';
+
+    // Log to console with structured format
+    console.log(
+      `${typeIcon} [${notification.type.toUpperCase()}]${priorityIndicator} ${notification.title}: ${notification.message}${progressInfo}`
+    );
+
+    // Also emit to content script or popup if available
+    if (typeof chrome !== 'undefined' && chrome.runtime) {
+      chrome.runtime.sendMessage({
+        type: 'FALLBACK_NOTIFICATION',
+        payload: notification,
+      }).catch(() => {
+        // Ignore errors if no listeners
+      });
+    }
+
+    // Store in sessionStorage for popup/content script access
+    if (typeof sessionStorage !== 'undefined') {
+      try {
+        const notifications = JSON.parse(sessionStorage.getItem('pendingNotifications') || '[]');
+        notifications.push(notification);
+        sessionStorage.setItem('pendingNotifications', JSON.stringify(notifications));
+      } catch (error) {
+        // Ignore storage errors
+      }
+    }
   }
 
   /**
@@ -488,6 +551,73 @@ export class UserNotifier {
   }
 
   /**
+   * Notify agent turn completion
+   * Matches the Rust implementation's AgentTurnComplete notification
+   */
+  async notifyAgentTurnComplete(
+    turnId: string,
+    inputMessages: string[],
+    lastAssistantMessage?: string
+  ): Promise<void> {
+    const title = 'Agent Turn Complete';
+    const message = lastAssistantMessage
+      ? `Completed: ${lastAssistantMessage.substring(0, 100)}${lastAssistantMessage.length > 100 ? '...' : ''}`
+      : 'Agent turn completed successfully';
+
+    // Create notification with metadata matching Rust serialization format
+    await this.notify('success', title, message, {
+      priority: 'normal',
+      metadata: {
+        type: 'agent-turn-complete', // Match Rust naming convention
+        'turn-id': turnId,
+        'input-messages': inputMessages,
+        'last-assistant-message': lastAssistantMessage,
+      }
+    });
+
+    // If external command is configured, send notification to external process
+    // This matches Rust's invoke_notify behavior
+    if (this.externalCommand) {
+      await this.notifyExternal({
+        type: 'agent-turn-complete',
+        'turn-id': turnId,
+        'input-messages': inputMessages,
+        'last-assistant-message': lastAssistantMessage,
+      });
+    }
+  }
+
+  /**
+   * Send notification to external command (matches Rust implementation)
+   */
+  private async notifyExternal(notification: any): Promise<void> {
+    if (!this.externalCommand) return;
+
+    try {
+      const json = JSON.stringify(notification);
+
+      // In Chrome extension context, we can't directly spawn processes
+      // Instead, send via native messaging or other extension APIs
+      if (chrome.runtime && chrome.runtime.sendNativeMessage) {
+        chrome.runtime.sendNativeMessage(
+          this.externalCommand,
+          { notification: json },
+          (response) => {
+            if (chrome.runtime.lastError) {
+              console.warn(`Failed to send notification to external command: ${chrome.runtime.lastError.message}`);
+            }
+          }
+        );
+      } else {
+        // Fallback: Log to console with special prefix for external monitoring
+        console.log(`[EXTERNAL_NOTIFICATION] ${json}`);
+      }
+    } catch (error) {
+      console.error('Failed to serialize notification payload:', error);
+    }
+  }
+
+  /**
    * Process event and show notification if needed
    */
   async processEvent(event: Event): Promise<void> {
@@ -521,7 +651,19 @@ export class UserNotifier {
         break;
 
       case 'TaskComplete':
-        await this.notifySuccess('Task Completed', 'Task completed successfully');
+        // Enhanced to match Rust implementation
+        const data = eventMsg.data as any;
+        if (data?.turn_id && data?.input_messages) {
+          // Use agent turn complete notification for compatibility
+          await this.notifyAgentTurnComplete(
+            data.turn_id,
+            data.input_messages,
+            data.last_agent_message
+          );
+        } else {
+          // Fallback to simple success notification
+          await this.notifySuccess('Task Completed', 'Task completed successfully');
+        }
         break;
 
       case 'TaskFailed':

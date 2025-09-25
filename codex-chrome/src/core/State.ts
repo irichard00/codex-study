@@ -3,8 +3,7 @@
  * Manages session state including conversation history, turn context, and execution state
  */
 
-import type { InputItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig } from '../protocol/types';
-import type { HistoryEntry } from '../protocol/events';
+import type { InputItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig, ResponseItem, ConversationHistory } from '../protocol/types';
 
 /**
  * Execution state of the session
@@ -38,7 +37,7 @@ export class State {
   private executionState: ExecutionState = 'idle';
 
   // Conversation history
-  private history: HistoryEntry[] = [];
+  private conversationHistory: ConversationHistory;
 
   // Current turn state
   private currentTurn: TurnState | null = null;
@@ -81,6 +80,17 @@ export class State {
 
   constructor(sessionId: string) {
     this.sessionId = sessionId;
+
+    // Initialize conversation history
+    this.conversationHistory = {
+      items: [],
+      metadata: {
+        sessionId: this.sessionId,
+        startTime: Date.now(),
+        lastUpdateTime: Date.now(),
+        totalTokens: 0
+      }
+    };
   }
 
   /**
@@ -132,24 +142,48 @@ export class State {
 
   /**
    * Add to conversation history
+   * Accepts old format for backward compatibility
    */
-  addToHistory(entry: HistoryEntry): void {
-    this.history.push(entry);
+  addToHistory(entry: { timestamp: number; text: string; type: 'user' | 'agent' }): void {
+    const responseItem: ResponseItem = {
+      role: entry.type === 'user' ? 'user' : 'assistant',
+      content: entry.text,
+      timestamp: entry.timestamp
+    };
+
+    this.conversationHistory.items.push(responseItem);
+    this.conversationHistory.metadata!.lastUpdateTime = Date.now();
     this.lastActivityTime = Date.now();
   }
 
   /**
    * Get conversation history
+   * Returns in old format for backward compatibility
    */
-  getHistory(): HistoryEntry[] {
-    return [...this.history];
+  getHistory(): Array<{ timestamp: number; text: string; type: 'user' | 'agent' }> {
+    return this.conversationHistory.items.map(item => ({
+      timestamp: item.timestamp || Date.now(),
+      text: typeof item.content === 'string' ? item.content : JSON.stringify(item.content),
+      type: item.role === 'user' ? 'user' as const : 'agent' as const
+    }));
+  }
+
+  /**
+   * Get conversation history as ConversationHistory
+   */
+  getConversationHistory(): ConversationHistory {
+    return {
+      ...this.conversationHistory,
+      items: [...this.conversationHistory.items]
+    };
   }
 
   /**
    * Clear conversation history
    */
   clearHistory(): void {
-    this.history = [];
+    this.conversationHistory.items = [];
+    this.conversationHistory.metadata!.lastUpdateTime = Date.now();
     this.turnHistory = [];
     this.totalTokensUsed = 0;
     this.toolUsageStats.clear();
@@ -323,7 +357,10 @@ export class State {
     return {
       sessionId: this.sessionId,
       executionState: this.executionState,
-      history: [...this.history],
+      conversationHistory: {
+        items: [...this.conversationHistory.items],
+        metadata: { ...this.conversationHistory.metadata }
+      },
       turnHistory: [...this.turnHistory],
       totalTokensUsed: this.totalTokensUsed,
       tokenLimit: this.tokenLimit,
@@ -343,7 +380,22 @@ export class State {
     const state = new State(data.sessionId);
 
     state.executionState = data.executionState || 'idle';
-    state.history = data.history || [];
+
+    // Handle both new and old format
+    if (data.conversationHistory) {
+      state.conversationHistory = {
+        items: [...data.conversationHistory.items],
+        metadata: { ...data.conversationHistory.metadata }
+      };
+    } else if (data.history) {
+      // Convert old format to new
+      state.conversationHistory.items = data.history.map((h: any) => ({
+        role: h.type === 'user' ? 'user' as const : 'assistant' as const,
+        content: h.text,
+        timestamp: h.timestamp
+      }));
+    }
+
     state.turnHistory = data.turnHistory || [];
     state.totalTokensUsed = data.totalTokensUsed || 0;
     state.tokenLimit = data.tokenLimit || 100000;
