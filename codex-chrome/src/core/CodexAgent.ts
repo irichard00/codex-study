@@ -66,7 +66,7 @@ export class CodexAgent {
     await this.modelClientFactory.initialize(this.config);
 
     // Initialize tool registry with config
-    await this.toolRegistry.initialize();
+    await this.toolRegistry.initialize(this.config);
 
     // Initialize session
     await this.session.initialize();
