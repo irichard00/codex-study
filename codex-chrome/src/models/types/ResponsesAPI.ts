@@ -1,6 +1,7 @@
 // Import types from their respective modules
 import type { TokenUsage } from './TokenUsage';
 import type { RateLimitSnapshot } from './RateLimits';
+import type { ResponseItem } from '../../protocol/types';
 
 /**
  * Response events emitted during model streaming
@@ -17,26 +18,6 @@ export type ResponseEvent =
   | { type: 'WebSearchCallBegin'; callId: string }
   | { type: 'RateLimits'; snapshot: RateLimitSnapshot };
 
-/**
- * Individual response items in conversation
- * Extended from existing protocol types
- */
-export interface ResponseItem {
-  id?: string;
-  type: 'message' | 'reasoning' | 'function_call' | 'web_search_call' | 'local_shell_call' | 'custom_tool_call';
-  role?: 'assistant' | 'user' | 'system' | 'tool';
-  content?: string | ContentBlock[];
-  metadata?: {
-    timestamp?: number;
-    model?: string;
-    [key: string]: any;
-  };
-}
-
-export interface ContentBlock {
-  type: 'text' | 'output_text' | 'input_text' | 'error_text';
-  text: string;
-}
 
 /**
  * API request payload for Responses API

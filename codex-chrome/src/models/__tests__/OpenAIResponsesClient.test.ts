@@ -11,8 +11,8 @@ import type {
   ResponseEvent,
   ModelFamily,
   ModelProviderInfo,
-  ResponseItem,
 } from '../types/ResponsesAPI';
+import type { ResponseItem } from '../../protocol/types';
 
 // Mock fetch globally
 const mockFetch = vi.fn();

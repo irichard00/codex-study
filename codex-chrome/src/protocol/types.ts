@@ -124,12 +124,24 @@ export type SandboxPolicy =
     };
 
 /**
- * Response item for conversation history
+ * Response item for conversation history and API responses
  */
 export interface ResponseItem {
-  role: 'user' | 'assistant' | 'system';
-  content: string | any[];
+  id?: string;
+  type?: 'message' | 'reasoning' | 'function_call' | 'web_search_call' | 'local_shell_call' | 'custom_tool_call';
+  role?: 'assistant' | 'user' | 'system' | 'tool';
+  content?: string | ContentBlock[] | any[];
   timestamp?: number; // Optional timestamp for compatibility with former HistoryEntry
+  metadata?: {
+    timestamp?: number;
+    model?: string;
+    [key: string]: any;
+  };
+}
+
+export interface ContentBlock {
+  type: 'text' | 'output_text' | 'input_text' | 'error_text';
+  text: string;
 }
 
 /**
@@ -207,4 +219,4 @@ export interface Event {
 }
 
 // Re-export EventMsg from events.ts
-export { EventMsg } from './events';
+export type { EventMsg } from './events';

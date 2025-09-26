@@ -3,7 +3,7 @@
  * Preserving exact event names and structures
  */
 
-import { ReviewRequest, ResponseItem } from './types';
+import type { ReviewRequest, ResponseItem } from './types';
 
 /**
  * Complete EventMsg enumeration

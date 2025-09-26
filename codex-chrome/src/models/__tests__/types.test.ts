@@ -3,8 +3,6 @@ import { describe, it, expect } from 'vitest';
 // ResponseEvent types and guards
 import {
   ResponseEvent,
-  ResponseItem,
-  ContentBlock,
   isResponseEvent,
   isCreated,
   isOutputItemDone,
@@ -16,6 +14,8 @@ import {
   isWebSearchCallBegin,
   isRateLimits,
 } from '../types/ResponseEvent';
+
+import type { ResponseItem, ContentBlock } from '../../protocol/types';
 
 // TokenUsage types and functions
 import {
