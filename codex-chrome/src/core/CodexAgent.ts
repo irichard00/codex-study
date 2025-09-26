@@ -5,6 +5,8 @@
 
 import type { Submission, Op, Event, ResponseItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig, ReviewDecision } from '../protocol/types';
 import type { EventMsg } from '../protocol/events';
+import type { IConfigChangeEvent } from '../config/types';
+import { AgentConfig } from '../config/AgentConfig';
 import { Session } from './Session';
 import { TaskRunner } from './TaskRunner';
 import { TurnManager } from './TurnManager';
@@ -28,22 +30,98 @@ export class CodexAgent {
   private session: Session;
   private isProcessing: boolean = false;
   private activeTask: AgentTask | null = null;
+  private config: AgentConfig;
   private approvalManager: ApprovalManager;
   private diffTracker: DiffTracker;
   private toolRegistry: ToolRegistry;
   private modelClientFactory: ModelClientFactory;
   private userNotifier: UserNotifier;
 
-  constructor() {
-    this.session = new Session();
+  constructor(config?: AgentConfig) {
+    // Use provided config or get singleton instance
+    this.config = config || AgentConfig.getInstance();
+
+    // Initialize components with config
+    this.session = new Session(this.config);
     this.modelClientFactory = ModelClientFactory.getInstance();
-    this.toolRegistry = new ToolRegistry();
-    this.approvalManager = new ApprovalManager();
+    this.toolRegistry = new ToolRegistry(this.config);
+    this.approvalManager = new ApprovalManager(this.config);
     this.diffTracker = new DiffTracker();
     this.userNotifier = new UserNotifier();
 
     // Setup event processing for notifications
     this.setupNotificationHandlers();
+
+    // Subscribe to config changes
+    this.setupConfigSubscriptions();
+  }
+
+  /**
+   * Initialize the agent (ensures config is loaded)
+   */
+  async initialize(): Promise<void> {
+    await this.config.initialize();
+
+    // Initialize model client factory with config
+    await this.modelClientFactory.initialize(this.config);
+
+    // Initialize tool registry with config
+    await this.toolRegistry.initialize();
+
+    // Initialize session
+    await this.session.initialize();
+  }
+
+  /**
+   * Setup config change subscriptions
+   */
+  private setupConfigSubscriptions(): void {
+    // Subscribe to model config changes
+    this.config.on('config-changed', (event: IConfigChangeEvent) => {
+      if (event.section === 'model') {
+        this.handleModelConfigChange(event);
+      } else if (event.section === 'security') {
+        this.handleSecurityConfigChange(event);
+      }
+    });
+  }
+
+  /**
+   * Handle model configuration changes
+   */
+  private async handleModelConfigChange(event: IConfigChangeEvent): Promise<void> {
+    // Update model client factory with new config
+    const modelConfig = await this.config.getModelConfig();
+    console.log('Model configuration changed:', modelConfig.selected);
+
+    // Emit event for UI update
+    this.emitEvent({
+      type: 'ConfigUpdate',
+      data: {
+        section: 'model',
+        config: modelConfig
+      }
+    });
+  }
+
+  /**
+   * Handle security configuration changes
+   */
+  private async handleSecurityConfigChange(event: IConfigChangeEvent): Promise<void> {
+    const config = await this.config.getConfig();
+    console.log('Security configuration changed:', config.security?.approvalPolicy);
+
+    // Update approval manager policies
+    // ApprovalManager will handle its own config updates via its subscription
+
+    // Emit event for UI update
+    this.emitEvent({
+      type: 'ConfigUpdate',
+      data: {
+        section: 'security',
+        config: config.security
+      }
+    });
   }
 
   /**
