@@ -1,3 +1,64 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-term-bg: #000000;
+  --color-term-green: #00ff00;
+  --color-term-yellow: #ffff00;
+  --color-term-red: #ff0000;
+  --color-term-bright-green: #33ff00;
+  --color-term-dim-green: #00cc00;
+  --font-terminal: 'Menlo', 'Monaco', 'Consolas', 'Liberation Mono', 'Courier New', monospace;
+}
+
+.terminal-container {
+  background-color: var(--color-term-bg);
+  color: var(--color-term-green);
+  font-family: var(--font-terminal);
+  padding: 1rem;
+  min-height: 100vh;
+  overflow: auto;
+}
+
+.terminal-message {
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin-bottom: 0.5rem;
+}
+
+.terminal-input {
+  background: transparent;
+  color: var(--color-term-bright-green);
+  outline: none;
+  border: none;
+  width: 100%;
+  caret-color: var(--color-term-bright-green);
+}
+
+.terminal-input::placeholder {
+  color: var(--color-term-dim-green);
+}
+
+.terminal-prompt::before {
+  content: '> ';
+  color: var(--color-term-dim-green);
+}
+
+.text-term-green {
+  color: var(--color-term-green);
+}
+
+.text-term-yellow {
+  color: var(--color-term-yellow);
+}
+
+.text-term-red {
+  color: var(--color-term-red);
+}
+
+.text-term-bright-green {
+  color: var(--color-term-bright-green);
+}
+
+.text-term-dim-green {
+  color: var(--color-term-dim-green);
+}
