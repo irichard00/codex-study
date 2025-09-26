@@ -1,0 +1,590 @@
+openapi: 3.0.0
+info:
+  title: Chrome Extension Config API
+  description: Internal API for managing Chrome extension configuration
+  version: 1.0.0
+
+paths:
+  /config:
+    get:
+      summary: Get current configuration
+      operationId: getConfig
+      responses:
+        '200':
+          description: Current configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChromeConfig'
+
+    put:
+      summary: Update configuration
+      operationId: updateConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChromeConfig'
+      responses:
+        '200':
+          description: Configuration updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChromeConfig'
+        '400':
+          description: Invalid configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+  /config/model:
+    get:
+      summary: Get model configuration
+      operationId: getModelConfig
+      responses:
+        '200':
+          description: Model configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelConfig'
+
+    patch:
+      summary: Update model configuration
+      operationId: updateModelConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ModelConfig'
+      responses:
+        '200':
+          description: Model configuration updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelConfig'
+
+  /config/providers:
+    get:
+      summary: List all providers
+      operationId: getProviders
+      responses:
+        '200':
+          description: List of providers
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: '#/components/schemas/ProviderConfig'
+
+    post:
+      summary: Add a provider
+      operationId: addProvider
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProviderConfig'
+      responses:
+        '201':
+          description: Provider added
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderConfig'
+
+  /config/providers/{providerId}:
+    parameters:
+      - name: providerId
+        in: path
+        required: true
+        schema:
+          type: string
+
+    get:
+      summary: Get provider by ID
+      operationId: getProvider
+      responses:
+        '200':
+          description: Provider configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderConfig'
+        '404':
+          description: Provider not found
+
+    put:
+      summary: Update provider
+      operationId: updateProvider
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProviderConfig'
+      responses:
+        '200':
+          description: Provider updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderConfig'
+
+    delete:
+      summary: Delete provider
+      operationId: deleteProvider
+      responses:
+        '204':
+          description: Provider deleted
+        '400':
+          description: Cannot delete active provider
+
+  /config/profiles:
+    get:
+      summary: List all profiles
+      operationId: getProfiles
+      responses:
+        '200':
+          description: List of profiles
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: '#/components/schemas/ProfileConfig'
+
+    post:
+      summary: Create profile
+      operationId: createProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileConfig'
+      responses:
+        '201':
+          description: Profile created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileConfig'
+
+  /config/profiles/{profileName}:
+    parameters:
+      - name: profileName
+        in: path
+        required: true
+        schema:
+          type: string
+
+    get:
+      summary: Get profile
+      operationId: getProfile
+      responses:
+        '200':
+          description: Profile configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileConfig'
+        '404':
+          description: Profile not found
+
+    put:
+      summary: Update profile
+      operationId: updateProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileConfig'
+      responses:
+        '200':
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileConfig'
+
+    delete:
+      summary: Delete profile
+      operationId: deleteProfile
+      responses:
+        '204':
+          description: Profile deleted
+        '400':
+          description: Cannot delete active profile
+
+  /config/profiles/{profileName}/activate:
+    parameters:
+      - name: profileName
+        in: path
+        required: true
+        schema:
+          type: string
+
+    post:
+      summary: Activate profile
+      operationId: activateProfile
+      responses:
+        '200':
+          description: Profile activated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileConfig'
+
+  /config/migrate:
+    post:
+      summary: Migrate configuration from old format
+      operationId: migrateConfig
+      responses:
+        '200':
+          description: Migration successful
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  migratedFrom:
+                    type: string
+                  migratedTo:
+                    type: string
+                  itemsMigrated:
+                    type: integer
+        '409':
+          description: Already migrated
+
+  /config/reset:
+    post:
+      summary: Reset to default configuration
+      operationId: resetConfig
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                preserveApiKeys:
+                  type: boolean
+                  default: false
+      responses:
+        '200':
+          description: Configuration reset
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChromeConfig'
+
+  /config/export:
+    get:
+      summary: Export configuration
+      operationId: exportConfig
+      parameters:
+        - name: includeApiKeys
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Exported configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportData'
+
+  /config/import:
+    post:
+      summary: Import configuration
+      operationId: importConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExportData'
+      responses:
+        '200':
+          description: Configuration imported
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChromeConfig'
+
+components:
+  schemas:
+    ChromeConfig:
+      type: object
+      required:
+        - version
+        - model
+        - providers
+        - preferences
+        - cache
+        - extension
+      properties:
+        version:
+          type: string
+          pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
+        model:
+          $ref: '#/components/schemas/ModelConfig'
+        providers:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ProviderConfig'
+        profiles:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ProfileConfig'
+        activeProfile:
+          type: string
+          nullable: true
+        preferences:
+          $ref: '#/components/schemas/UserPreferences'
+        cache:
+          $ref: '#/components/schemas/CacheSettings'
+        extension:
+          $ref: '#/components/schemas/ExtensionSettings'
+
+    ModelConfig:
+      type: object
+      required:
+        - selected
+        - provider
+      properties:
+        selected:
+          type: string
+          minLength: 1
+        provider:
+          type: string
+        contextWindow:
+          type: integer
+          nullable: true
+          minimum: 1
+        maxOutputTokens:
+          type: integer
+          nullable: true
+          minimum: 1
+        autoCompactTokenLimit:
+          type: integer
+          nullable: true
+        reasoningEffort:
+          type: string
+          enum: [low, medium, high]
+          nullable: true
+        reasoningSummary:
+          type: string
+          enum: [none, brief, detailed]
+          default: none
+        verbosity:
+          type: string
+          enum: [low, medium, high]
+          nullable: true
+
+    ProviderConfig:
+      type: object
+      required:
+        - id
+        - name
+        - apiKey
+        - timeout
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        apiKey:
+          type: string
+          minLength: 1
+        baseUrl:
+          type: string
+          nullable: true
+          format: uri
+        organization:
+          type: string
+          nullable: true
+        version:
+          type: string
+          nullable: true
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        timeout:
+          type: integer
+          minimum: 1000
+          maximum: 60000
+        retryConfig:
+          $ref: '#/components/schemas/RetryConfig'
+
+    ProfileConfig:
+      type: object
+      required:
+        - name
+        - model
+        - provider
+        - created
+      properties:
+        name:
+          type: string
+          minLength: 1
+        description:
+          type: string
+          nullable: true
+        model:
+          type: string
+        provider:
+          type: string
+        modelSettings:
+          type: object
+        created:
+          type: integer
+          format: int64
+        lastUsed:
+          type: integer
+          format: int64
+          nullable: true
+
+    UserPreferences:
+      type: object
+      properties:
+        autoSync:
+          type: boolean
+          default: true
+        telemetryEnabled:
+          type: boolean
+          default: false
+        theme:
+          type: string
+          enum: [light, dark, system]
+          default: system
+        shortcuts:
+          type: object
+          additionalProperties:
+            type: string
+        experimental:
+          type: object
+          additionalProperties:
+            type: boolean
+
+    CacheSettings:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          default: true
+        ttl:
+          type: integer
+          minimum: 0
+          maximum: 86400
+          default: 3600
+        maxSize:
+          type: integer
+          minimum: 0
+          default: 5242880
+        compressionEnabled:
+          type: boolean
+          default: false
+        persistToStorage:
+          type: boolean
+          default: false
+
+    ExtensionSettings:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+          default: true
+        contentScriptEnabled:
+          type: boolean
+          default: true
+        allowedOrigins:
+          type: array
+          items:
+            type: string
+        storageQuotaWarning:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.8
+        updateChannel:
+          type: string
+          enum: [stable, beta]
+          default: stable
+        permissions:
+          $ref: '#/components/schemas/PermissionSettings'
+
+    PermissionSettings:
+      type: object
+      properties:
+        tabs:
+          type: boolean
+          default: true
+        storage:
+          type: boolean
+          default: true
+        notifications:
+          type: boolean
+          default: false
+        clipboardRead:
+          type: boolean
+          default: false
+        clipboardWrite:
+          type: boolean
+          default: false
+
+    RetryConfig:
+      type: object
+      properties:
+        maxRetries:
+          type: integer
+          minimum: 0
+          maximum: 10
+          default: 3
+        initialDelay:
+          type: integer
+          default: 1000
+        maxDelay:
+          type: integer
+          default: 10000
+        backoffMultiplier:
+          type: number
+          minimum: 1
+          maximum: 3
+          default: 2
+
+    ExportData:
+      type: object
+      required:
+        - version
+        - exportDate
+        - config
+      properties:
+        version:
+          type: string
+        exportDate:
+          type: integer
+          format: int64
+        config:
+          $ref: '#/components/schemas/ChromeConfig'
+
+    ValidationError:
+      type: object
+      properties:
+        message:
+          type: string
+        field:
+          type: string
+        code:
+          type: string
