@@ -3,7 +3,7 @@
  * Preserves the SQ/EQ (Submission Queue/Event Queue) architecture
  */
 
-import type { Submission, Op, Event, ResponseItem } from '../protocol/types';
+import type { Submission, Op, Event, ResponseItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig, ReviewDecision } from '../protocol/types';
 import type { EventMsg } from '../protocol/events';
 import { Session } from './Session';
 import { TaskRunner } from './TaskRunner';
@@ -14,6 +14,7 @@ import { ApprovalManager } from './ApprovalManager';
 import { DiffTracker } from './DiffTracker';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import { ModelClientFactory } from '../models/ModelClientFactory';
+import { UserNotifier } from './UserNotifier';
 import { v4 as uuidv4 } from 'uuid';
 
 /**
@@ -26,14 +27,12 @@ export class CodexAgent {
   private eventQueue: Event[] = [];
   private session: Session;
   private isProcessing: boolean = false;
-  private taskRunner: TaskRunner | null = null;
-  private turnManager: TurnManager | null = null;
-  private turnContext: TurnContext | null = null;
-  private activeTasks: Map<string, AgentTask> = new Map();
+  private activeTask: AgentTask | null = null;
   private approvalManager: ApprovalManager;
   private diffTracker: DiffTracker;
   private toolRegistry: ToolRegistry;
   private modelClientFactory: ModelClientFactory;
+  private userNotifier: UserNotifier;
 
   constructor() {
     this.session = new Session();
@@ -41,8 +40,10 @@ export class CodexAgent {
     this.toolRegistry = new ToolRegistry();
     this.approvalManager = new ApprovalManager();
     this.diffTracker = new DiffTracker();
-    // Components are initialized but not fully integrated yet
-    // Full integration pending interface alignment
+    this.userNotifier = new UserNotifier();
+
+    // Setup event processing for notifications
+    this.setupNotificationHandlers();
   }
 
   /**
@@ -154,11 +155,18 @@ export class CodexAgent {
           });
       }
 
-      // Emit TaskComplete event
+      // Emit TaskComplete event with turn metadata if available
+      const history = this.session.getHistory();
+      const lastAgentMessage = history
+        .filter(h => h.type === 'agent')
+        .pop()?.text;
+
       this.emitEvent({
         type: 'TaskComplete',
         data: {
-          last_agent_message: undefined,
+          last_agent_message: lastAgentMessage,
+          turn_id: submission.id,
+          input_messages: [], // Will be populated by specific handlers
         },
       });
     } catch (error) {
@@ -178,8 +186,17 @@ export class CodexAgent {
    * Handle interrupt operation
    */
   private async handleInterrupt(): Promise<void> {
+    // Set interrupt flag in session
+    this.session.requestInterrupt();
+
     // Clear the submission queue
     this.submissionQueue = [];
+
+    // Notify user about interruption
+    await this.userNotifier.notifyWarning(
+      'Task Interrupted',
+      'The current task has been interrupted by user request'
+    );
 
     this.emitEvent({
       type: 'TurnAborted',
@@ -187,6 +204,15 @@ export class CodexAgent {
         reason: 'user_interrupt',
       },
     });
+
+    // Cancel active task if any
+    if (this.activeTask) {
+      await this.activeTask.cancel();
+      this.activeTask = null;
+    }
+
+    // Clear interrupt flag after handling
+    this.session.clearInterrupt();
   }
 
   /**
@@ -197,19 +223,23 @@ export class CodexAgent {
     items: Array<any>,
     contextOverrides?: {
       cwd?: string;
-      approval_policy?: string;
-      sandbox_policy?: string;
+      approval_policy?: AskForApproval;
+      sandbox_policy?: SandboxPolicy;
       model?: string;
-      effort?: number;
-      summary?: boolean;
+      effort?: ReasoningEffortConfig;
+      summary?: ReasoningSummaryConfig;
       final_output_json_schema?: any;
-    }
+    },
+    newTask: boolean = false
   ): Promise<void> {
     try {
       // Get current running task if exists
-      const currentTask = this.activeTasks.size > 0
-        ? Array.from(this.activeTasks.values())[0]
-        : null;
+      let currentTask = this.activeTask;
+      if (newTask) {
+        currentTask?.cancel();
+        this.activeTask = null;
+        currentTask = null;
+      }
 
       // Convert input items to ResponseItem format
       const responseItems: ResponseItem[] = items.map(item => ({
@@ -219,61 +249,72 @@ export class CodexAgent {
 
       if (currentTask) {
         // Inject into existing task
-        await currentTask.injectUserInput(responseItems);
+        if (currentTask) {
+          await currentTask.injectUserInput(responseItems);
+        }
       } else {
         // No running task, spawn a new one
         let taskContext: TurnContext;
 
         if (contextOverrides) {
           // Create fresh context with overrides for this turn
-          taskContext = new TurnContext(contextOverrides);
+          const modelClient = await this.modelClientFactory.createClientForModel(contextOverrides.model || 'default');
+          taskContext = new TurnContext(modelClient, contextOverrides);
 
           // Update session turn context with overrides
           this.session.updateTurnContext(contextOverrides);
         } else {
-          // Use persistent context
-          if (!this.turnContext) {
-            this.turnContext = new TurnContext({});
-          }
-          taskContext = this.turnContext;
+          // Create a new context for this turn
+          const modelClient = await this.modelClientFactory.createClientForModel('default');
+          taskContext = new TurnContext(modelClient, {});
         }
 
-        // Initialize TaskRunner and TurnManager if needed or if model changed
+        // Create TurnManager for this task
         const modelToUse = contextOverrides?.model || taskContext.getModel();
+        const modelClient = await this.modelClientFactory.createClientForModel(modelToUse);
+        const turnManager = new TurnManager(
+          this.session,
+          taskContext,
+          modelClient
+        );
 
-        if (!this.taskRunner || !this.turnManager ||
-            (contextOverrides?.model && contextOverrides.model !== this.turnContext?.getModel())) {
-          this.turnManager = new TurnManager(
-            this.modelClientFactory.getClient(modelToUse),
-            this.toolRegistry,
-            this.approvalManager,
-            this.diffTracker
-          );
-
-          this.taskRunner = new TaskRunner(
-            this.session,
-            taskContext,
-            this.turnManager,
-            uuidv4(), // submission ID will be replaced
-            items,
-            { autoCompact: true }
-          );
-        }
-
-        // Create and run AgentTask
+        // Create and run AgentTask - AgentTask will create its own TaskRunner
         const submissionId = uuidv4();
         const agentTask = new AgentTask(
-          this.taskRunner,
+          this.session,
+          taskContext,
+          turnManager,
           this.session.getId(),
           submissionId,
           responseItems,
           false // not review mode
         );
 
-        this.activeTasks.set(submissionId, agentTask);
+        this.activeTask = agentTask;
 
         try {
-          await agentTask.run();
+          const result = await agentTask.run();
+
+          // Extract last assistant message from session history
+          const history = this.session.getHistory();
+          const lastAgentMessage = history
+            .filter(h => h.type === 'agent')
+            .pop()?.text;
+
+          // Extract input messages from this turn
+          const inputMessages = responseItems
+            .filter(item => item.role === 'user')
+            .map(item => typeof item.content === 'string' ? item.content : JSON.stringify(item.content));
+
+          // Emit TaskComplete with turn metadata for notification compatibility
+          this.emitEvent({
+            type: 'TaskComplete',
+            data: {
+              last_agent_message: lastAgentMessage,
+              turn_id: submissionId,
+              input_messages: inputMessages,
+            },
+          });
 
           this.emitEvent({
             type: 'AgentMessage',
@@ -282,7 +323,7 @@ export class CodexAgent {
             },
           });
         } finally {
-          this.activeTasks.delete(submissionId);
+          this.activeTask = null;
         }
       }
     } catch (error) {
@@ -319,7 +360,6 @@ export class CodexAgent {
       model: op.model,
       effort: op.effort,
       summary: op.summary,
-      final_output_json_schema: op.final_output_json_schema,
     });
   }
 
@@ -327,10 +367,9 @@ export class CodexAgent {
    * Cancel a running task
    */
   cancelTask(submissionId: string): void {
-    const task = this.activeTasks.get(submissionId);
-    if (task) {
-      task.cancel();
-      this.activeTasks.delete(submissionId);
+    if (this.activeTask && this.activeTask.submissionId === submissionId) {
+      this.activeTask.cancel();
+      this.activeTask = null;
     }
   }
 
@@ -436,6 +475,9 @@ export class CodexAgent {
 
     this.eventQueue.push(event);
 
+    // Process event for user notifications
+    this.userNotifier.processEvent(event);
+
     // Notify listeners via Chrome runtime if available
     if (typeof chrome !== 'undefined' && chrome.runtime) {
       chrome.runtime.sendMessage({
@@ -454,13 +496,6 @@ export class CodexAgent {
     return this.session;
   }
 
-  /**
-   * Get the task runner (creates new instance per task)
-   */
-  getTaskRunner(): void {
-    // TaskRunner is created per task, not stored as instance property
-    throw new Error('TaskRunner instances are created per task execution');
-  }
 
   /**
    * Get the tool registry
@@ -490,5 +525,106 @@ export class CodexAgent {
     this.toolRegistry.clear();
     this.submissionQueue = [];
     this.eventQueue = [];
+    await this.userNotifier.clearAll();
+  }
+
+  /**
+   * Setup notification handlers
+   */
+  private setupNotificationHandlers(): void {
+    // Register notification callback for UI updates
+    this.userNotifier.onNotification((notification) => {
+      // Emit notification event for UI
+      this.emitEvent({
+        type: 'Notification',
+        data: {
+          id: notification.id,
+          type: notification.type,
+          title: notification.title,
+          message: notification.message,
+          timestamp: notification.timestamp,
+        },
+      });
+    });
+  }
+
+  /**
+   * Handle approval decision
+   */
+  private async handleApprovalDecision(
+    approvalId: string,
+    decision: 'approve' | 'reject'
+  ): Promise<void> {
+    // Process the approval decision
+    const pendingApproval = this.approvalManager.getApproval(approvalId);
+    if (!pendingApproval) return;
+
+    const approval = pendingApproval.request;
+
+    // Submit the decision as an operation based on approval type
+    const reviewDecision: ReviewDecision = decision === 'approve'
+      ? 'approve'
+      : 'reject';
+
+    const op: Op = approval.type === 'command'
+      ? {
+          type: 'ExecApproval',
+          id: approvalId,
+          decision: reviewDecision,
+        }
+      : {
+          type: 'PatchApproval',
+          id: approvalId,
+          decision: reviewDecision,
+        };
+
+    await this.submitOperation(op);
+  }
+
+  /**
+   * Get user notifier
+   */
+  getUserNotifier(): UserNotifier {
+    return this.userNotifier;
+  }
+
+  /**
+   * Handle interruption
+   */
+  async interrupt(): Promise<void> {
+    // Request interrupt on session
+    this.session.requestInterrupt();
+
+    // Notify user
+    await this.userNotifier.notifyInfo(
+      'Interruption Requested',
+      'The current task will be interrupted'
+    );
+
+    // Submit interrupt operation
+    await this.submitOperation({ type: 'Interrupt' });
+  }
+
+  /**
+   * Show progress notification
+   */
+  async showProgress(
+    title: string,
+    message: string,
+    current: number,
+    total: number
+  ): Promise<string> {
+    return this.userNotifier.notifyProgress(title, message, current, total);
+  }
+
+  /**
+   * Update progress notification
+   */
+  async updateProgress(
+    notificationId: string,
+    current: number,
+    total: number
+  ): Promise<void> {
+    await this.userNotifier.updateProgress(notificationId, current, total);
   }
 }

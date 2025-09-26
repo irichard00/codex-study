@@ -9,7 +9,7 @@ import { AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryC
 /**
  * Shell environment policy for command execution
  */
-export type ShellEnvironmentPolicy = 'preserve' | 'clean' | 'restricted';
+export type BrowserEnvironmentPolicy = 'preserve' | 'clean' | 'restricted';
 
 /**
  * Tools configuration for the turn
@@ -42,7 +42,7 @@ export interface TurnContextConfig {
   /** Sandbox policy for tool execution */
   sandboxPolicy?: SandboxPolicy;
   /** Shell environment handling */
-  shellEnvironmentPolicy?: ShellEnvironmentPolicy;
+  browserEnvironmentPolicy?: BrowserEnvironmentPolicy;
   /** Tools configuration */
   toolsConfig?: ToolsConfig;
   /** Model identifier */
@@ -66,7 +66,7 @@ export class TurnContext {
   private userInstructions?: string;
   private approvalPolicy: AskForApproval;
   private sandboxPolicy: SandboxPolicy;
-  private shellEnvironmentPolicy: ShellEnvironmentPolicy;
+  private browserEnvironmentPolicy: BrowserEnvironmentPolicy;
   private toolsConfig: ToolsConfig;
   private reviewMode: boolean;
 
@@ -82,7 +82,7 @@ export class TurnContext {
     this.userInstructions = config.userInstructions;
     this.approvalPolicy = config.approvalPolicy || 'on-request';
     this.sandboxPolicy = config.sandboxPolicy || { mode: 'workspace-write' };
-    this.shellEnvironmentPolicy = config.shellEnvironmentPolicy || 'preserve';
+    this.browserEnvironmentPolicy = config.browserEnvironmentPolicy || 'preserve';
     this.reviewMode = config.reviewMode || false;
 
     // Default tools configuration
@@ -115,8 +115,8 @@ export class TurnContext {
     if (config.sandboxPolicy !== undefined) {
       this.sandboxPolicy = config.sandboxPolicy;
     }
-    if (config.shellEnvironmentPolicy !== undefined) {
-      this.shellEnvironmentPolicy = config.shellEnvironmentPolicy;
+    if (config.browserEnvironmentPolicy !== undefined) {
+      this.browserEnvironmentPolicy = config.browserEnvironmentPolicy;
     }
     if (config.toolsConfig !== undefined) {
       this.toolsConfig = { ...this.toolsConfig, ...config.toolsConfig };
@@ -310,15 +310,15 @@ export class TurnContext {
   /**
    * Get shell environment policy
    */
-  getShellEnvironmentPolicy(): ShellEnvironmentPolicy {
-    return this.shellEnvironmentPolicy;
+  getBrowserEnvironmentPolicy(): BrowserEnvironmentPolicy {
+    return this.browserEnvironmentPolicy;
   }
 
   /**
-   * Set shell environment policy
+   * Set browser environment policy
    */
-  setShellEnvironmentPolicy(policy: ShellEnvironmentPolicy): void {
-    this.shellEnvironmentPolicy = policy;
+  setBrowserEnvironmentPolicy(policy: BrowserEnvironmentPolicy): void {
+    this.browserEnvironmentPolicy = policy;
   }
 
   /**
@@ -412,7 +412,7 @@ export class TurnContext {
       userInstructions: this.userInstructions,
       approvalPolicy: this.approvalPolicy,
       sandboxPolicy: structuredClone(this.sandboxPolicy),
-      shellEnvironmentPolicy: this.shellEnvironmentPolicy,
+      browserEnvironmentPolicy: this.browserEnvironmentPolicy,
       toolsConfig: structuredClone(this.toolsConfig),
       reviewMode: this.reviewMode,
     });
@@ -429,7 +429,7 @@ export class TurnContext {
     userInstructions?: string;
     approvalPolicy: AskForApproval;
     sandboxPolicy: SandboxPolicy;
-    shellEnvironmentPolicy: ShellEnvironmentPolicy;
+    browserEnvironmentPolicy: BrowserEnvironmentPolicy;
     toolsConfig: ToolsConfig;
     model: string;
     effort?: ReasoningEffortConfig;
@@ -442,7 +442,7 @@ export class TurnContext {
       userInstructions: this.userInstructions,
       approvalPolicy: this.approvalPolicy,
       sandboxPolicy: structuredClone(this.sandboxPolicy),
-      shellEnvironmentPolicy: this.shellEnvironmentPolicy,
+      browserEnvironmentPolicy: this.browserEnvironmentPolicy,
       toolsConfig: structuredClone(this.toolsConfig),
       model: this.getModel(),
       effort: this.getEffort(),
@@ -462,7 +462,7 @@ export class TurnContext {
       userInstructions?: string;
       approvalPolicy: AskForApproval;
       sandboxPolicy: SandboxPolicy;
-      shellEnvironmentPolicy: ShellEnvironmentPolicy;
+      browserEnvironmentPolicy: BrowserEnvironmentPolicy;
       toolsConfig: ToolsConfig;
       model: string;
       effort?: ReasoningEffortConfig;
@@ -483,7 +483,7 @@ export class TurnContext {
       userInstructions: data.userInstructions,
       approvalPolicy: data.approvalPolicy,
       sandboxPolicy: data.sandboxPolicy,
-      shellEnvironmentPolicy: data.shellEnvironmentPolicy,
+      browserEnvironmentPolicy: data.browserEnvironmentPolicy,
       toolsConfig: data.toolsConfig,
       reviewMode: data.reviewMode,
     });
@@ -532,9 +532,9 @@ export class TurnContext {
     }
 
     // Validate shell environment policy
-    const validShellPolicies: ShellEnvironmentPolicy[] = ['preserve', 'clean', 'restricted'];
-    if (!validShellPolicies.includes(this.shellEnvironmentPolicy)) {
-      errors.push(`Invalid shell environment policy: ${this.shellEnvironmentPolicy}`);
+    const validShellPolicies: BrowserEnvironmentPolicy[] = ['preserve', 'clean', 'restricted'];
+    if (!validShellPolicies.includes(this.browserEnvironmentPolicy)) {
+      errors.push(`Invalid shell environment policy: ${this.browserEnvironmentPolicy}`);
     }
 
     return {
@@ -552,7 +552,7 @@ export class TurnContext {
       model: this.getModel(),
       approvalPolicy: this.approvalPolicy,
       sandboxPolicy: this.sandboxPolicy,
-      shellEnvironmentPolicy: this.shellEnvironmentPolicy,
+      browserEnvironmentPolicy: this.browserEnvironmentPolicy,
       toolsConfig: this.toolsConfig,
       reviewMode: this.reviewMode,
       modelContextWindow: this.getModelContextWindow(),

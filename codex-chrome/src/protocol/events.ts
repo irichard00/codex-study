@@ -3,7 +3,7 @@
  * Preserving exact event names and structures
  */
 
-import { ReviewRequest } from './types';
+import { ReviewRequest, ResponseItem } from './types';
 
 /**
  * Complete EventMsg enumeration
@@ -44,7 +44,10 @@ export type EventMsg =
   | { type: 'ShutdownComplete' }
   | { type: 'ConversationPath'; data: ConversationPathResponseEvent }
   | { type: 'EnteredReviewMode'; data: ReviewRequest }
-  | { type: 'ExitedReviewMode'; data: ExitedReviewModeEvent };
+  | { type: 'ExitedReviewMode'; data: ExitedReviewModeEvent }
+  | { type: 'Notification'; data: NotificationEvent }
+  | { type: 'Interrupted' }
+  | { type: 'TaskFailed'; data: TaskFailedEvent };
 
 // Individual event payload types
 
@@ -58,6 +61,9 @@ export interface TaskStartedEvent {
 
 export interface TaskCompleteEvent {
   last_agent_message?: string;
+  // Added for compatibility with Rust's AgentTurnComplete notification
+  turn_id?: string;
+  input_messages?: string[];
 }
 
 export interface TokenUsage {
@@ -208,14 +214,8 @@ export interface TurnDiffEvent {
 }
 
 export interface GetHistoryEntryResponseEvent {
-  entry?: HistoryEntry;
+  entry?: ResponseItem;
   error?: string;
-}
-
-export interface HistoryEntry {
-  timestamp: number;
-  text: string;
-  type: 'user' | 'agent';
 }
 
 export interface McpListToolsResponseEvent {
@@ -267,4 +267,17 @@ export interface ReviewOutputEvent {
   approved: boolean;
   changes?: string;
   comments?: string;
+}
+
+export interface NotificationEvent {
+  id: string;
+  type: string;
+  title: string;
+  message: string;
+  timestamp: number;
+}
+
+export interface TaskFailedEvent {
+  reason: string;
+  error?: string;
 }

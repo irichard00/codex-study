@@ -124,6 +124,30 @@ export type SandboxPolicy =
     };
 
 /**
+ * Response item for conversation history
+ */
+export interface ResponseItem {
+  role: 'user' | 'assistant' | 'system';
+  content: string | any[];
+  timestamp?: number; // Optional timestamp for compatibility with former HistoryEntry
+}
+
+/**
+ * Conversation history wrapper
+ * Encapsulates a list of ResponseItems representing the conversation history
+ */
+export interface ConversationHistory {
+  items: ResponseItem[];
+  /** Optional metadata about the conversation */
+  metadata?: {
+    sessionId?: string;
+    startTime?: number;
+    lastUpdateTime?: number;
+    totalTokens?: number;
+  };
+}
+
+/**
  * User input types
  */
 export type InputItem =
