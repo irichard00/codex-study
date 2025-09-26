@@ -4,20 +4,20 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ChromeConfig } from '@config/ChromeConfig';
+import { AgentConfig } from '@config/AgentConfig';
 import { IChromeConfig } from '@config/types';
 import { resetChromeStorageMock } from '../../helpers/chrome-storage-mock';
 
 describe('GET /config - Contract Test', () => {
-  let configService: ChromeConfig;
+  let configService: AgentConfig;
 
   beforeEach(() => {
     resetChromeStorageMock();
-    configService = new ChromeConfig();
+    configService = new AgentConfig();
   });
 
   it('should return the complete configuration object', async () => {
-    // This test MUST fail initially as ChromeConfig doesn't exist yet
+    // This test MUST fail initially as AgentConfig doesn't exist yet
     const config = await configService.getConfig();
 
     // Validate contract structure

@@ -4,16 +4,16 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ChromeConfig } from '@config/ChromeConfig';
+import { AgentConfig } from '@config/AgentConfig';
 import { IModelConfig } from '@config/types';
 import { resetChromeStorageMock, setChromeStorageData } from '../../helpers/chrome-storage-mock';
 
 describe('GET /config/model - Contract Test', () => {
-  let configService: ChromeConfig;
+  let configService: AgentConfig;
 
   beforeEach(() => {
     resetChromeStorageMock();
-    configService = new ChromeConfig();
+    configService = new AgentConfig();
   });
 
   it('should return the current model configuration', async () => {

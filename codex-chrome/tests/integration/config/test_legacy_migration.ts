@@ -4,15 +4,15 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { ChromeConfig } from '@config/ChromeConfig';
+import { AgentConfig } from '@config/AgentConfig';
 import { resetChromeStorageMock, setChromeStorageData, getChromeStorageData } from '../../helpers/chrome-storage-mock';
 
 describe('Legacy Migration Integration Test', () => {
-  let configService: ChromeConfig;
+  let configService: AgentConfig;
 
   beforeEach(() => {
     resetChromeStorageMock();
-    configService = new ChromeConfig();
+    configService = new AgentConfig();
   });
 
   it('should migrate from ModelClientFactory storage format', async () => {

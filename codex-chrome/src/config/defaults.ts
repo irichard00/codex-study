@@ -2,7 +2,7 @@
  * T037: Default configuration values
  */
 
-import { IChromeConfig, IModelConfig, IUserPreferences, ICacheSettings, IExtensionSettings, IPermissionSettings } from './types';
+import type { IChromeConfig, IModelConfig, IUserPreferences, ICacheSettings, IExtensionSettings, IPermissionSettings } from './types';
 
 export const DEFAULT_MODEL_CONFIG: IModelConfig = {
   selected: 'gpt-3.5-turbo',

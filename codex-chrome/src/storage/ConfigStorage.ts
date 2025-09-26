@@ -2,7 +2,8 @@
  * T030-T032: Chrome storage wrapper for configuration
  */
 
-import { IChromeConfig, IConfigStorage, IStorageInfo, ConfigStorageError } from '../config/types';
+import type { IChromeConfig, IConfigStorage, IStorageInfo } from '../config/types';
+import { ConfigStorageError } from '../config/types';
 import { STORAGE_KEYS, CONFIG_LIMITS } from '../config/defaults';
 
 export class ConfigStorage implements IConfigStorage {

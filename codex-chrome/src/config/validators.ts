@@ -2,7 +2,7 @@
  * T038: Configuration validation functions
  */
 
-import {
+import type {
   IChromeConfig,
   IModelConfig,
   IProviderConfig,

@@ -68,7 +68,7 @@ As a Chrome extension user, I want the Codex agent to have a properly configured
 - **FR-012**: System MUST provide migration path for users updating from current implementation
 
 ### Key Entities
-- **ChromeConfig**: Core configuration object containing only Chrome-appropriate settings
+- **AgentConfig**: Core configuration object containing only Chrome-appropriate settings
 - **ModelConfig**: Model provider settings including API keys, endpoints, and model selection
 - **UserPreferences**: User-configurable options like model choice, verbosity, reasoning effort
 - **StorageManager**: Handles persistence to Chrome storage APIs instead of filesystem

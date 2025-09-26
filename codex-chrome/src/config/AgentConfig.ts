@@ -2,16 +2,16 @@
  * T033-T036, T043: Main Chrome extension configuration class
  */
 
-import {
+import type {
   IChromeConfig,
   IModelConfig,
   IProviderConfig,
   IProfileConfig,
   IConfigService,
   IConfigChangeEvent,
-  IExportData,
-  ConfigValidationError
+  IExportData
 } from './types';
+import { ConfigValidationError } from './types';
 import { ConfigStorage } from '../storage/ConfigStorage';
 import {
   DEFAULT_CHROME_CONFIG,
@@ -20,7 +20,7 @@ import {
 } from './defaults';
 import { validateConfig, validateModelConfig, validateProviderConfig } from './validators';
 
-export class ChromeConfig implements IConfigService {
+export class AgentConfig implements IConfigService {
   private storage: ConfigStorage;
   private currentConfig: IChromeConfig;
   private eventHandlers: Map<string, Set<(e: IConfigChangeEvent) => void>>;
