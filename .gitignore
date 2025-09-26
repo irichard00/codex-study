@@ -30,7 +30,7 @@ result
 # cli tools
 CLAUDE.md
 .claude/
-.specify
+.specify/
 
 # caches
 .cache/

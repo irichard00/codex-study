@@ -1,0 +1,614 @@
+openapi: 3.0.0
+info:
+  title: AgentConfig API
+  description: Configuration management API for Codex Chrome Extension
+  version: 1.0.0
+
+paths:
+  /config:
+    get:
+      summary: Get current configuration
+      operationId: getConfig
+      responses:
+        '200':
+          description: Current configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChromeConfig'
+
+    patch:
+      summary: Update configuration
+      operationId: updateConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartialChromeConfig'
+      responses:
+        '200':
+          description: Updated configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChromeConfig'
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+    post:
+      summary: Reset configuration
+      operationId: resetConfig
+      parameters:
+        - name: preserveApiKeys
+          in: query
+          schema:
+            type: boolean
+          description: Preserve API keys when resetting
+      responses:
+        '200':
+          description: Reset configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChromeConfig'
+
+  /config/model:
+    get:
+      summary: Get model configuration
+      operationId: getModelConfig
+      responses:
+        '200':
+          description: Model configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelConfig'
+
+    patch:
+      summary: Update model configuration
+      operationId: updateModelConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartialModelConfig'
+      responses:
+        '200':
+          description: Updated model configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ModelConfig'
+        '400':
+          description: Validation error
+
+  /config/providers:
+    get:
+      summary: List all providers
+      operationId: getProviders
+      responses:
+        '200':
+          description: Provider configurations
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: '#/components/schemas/ProviderConfig'
+
+  /config/providers/{id}:
+    get:
+      summary: Get specific provider
+      operationId: getProvider
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Provider configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderConfig'
+        '404':
+          description: Provider not found
+
+    put:
+      summary: Add or update provider
+      operationId: upsertProvider
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProviderConfig'
+      responses:
+        '200':
+          description: Provider configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProviderConfig'
+
+    delete:
+      summary: Delete provider
+      operationId: deleteProvider
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Provider deleted
+        '400':
+          description: Cannot delete active provider
+
+  /config/profiles:
+    get:
+      summary: List all profiles
+      operationId: getProfiles
+      responses:
+        '200':
+          description: Profile configurations
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  $ref: '#/components/schemas/ProfileConfig'
+
+  /config/profiles/{name}:
+    get:
+      summary: Get specific profile
+      operationId: getProfile
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Profile configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileConfig'
+        '404':
+          description: Profile not found
+
+    put:
+      summary: Create or update profile
+      operationId: upsertProfile
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProfileConfig'
+      responses:
+        '200':
+          description: Profile configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProfileConfig'
+
+    delete:
+      summary: Delete profile
+      operationId: deleteProfile
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: Profile deleted
+        '400':
+          description: Cannot delete active profile
+
+  /config/profiles/{name}/activate:
+    post:
+      summary: Activate profile
+      operationId: activateProfile
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Profile activated
+        '404':
+          description: Profile not found
+
+  /config/export:
+    get:
+      summary: Export configuration
+      operationId: exportConfig
+      parameters:
+        - name: includeApiKeys
+          in: query
+          schema:
+            type: boolean
+      responses:
+        '200':
+          description: Exported configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ExportData'
+
+  /config/import:
+    post:
+      summary: Import configuration
+      operationId: importConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ExportData'
+      responses:
+        '200':
+          description: Configuration imported
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChromeConfig'
+        '400':
+          description: Invalid configuration data
+
+components:
+  schemas:
+    ChromeConfig:
+      type: object
+      required:
+        - version
+        - model
+        - providers
+        - tools
+        - security
+        - ui
+        - system
+      properties:
+        version:
+          type: string
+        model:
+          $ref: '#/components/schemas/ModelConfig'
+        providers:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ProviderConfig'
+        profiles:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ProfileConfig'
+        activeProfile:
+          type: string
+        tools:
+          $ref: '#/components/schemas/ToolsConfig'
+        security:
+          $ref: '#/components/schemas/SecurityConfig'
+        ui:
+          $ref: '#/components/schemas/UIConfig'
+        system:
+          $ref: '#/components/schemas/SystemConfig'
+
+    PartialChromeConfig:
+      type: object
+      properties:
+        model:
+          $ref: '#/components/schemas/PartialModelConfig'
+        providers:
+          type: object
+        profiles:
+          type: object
+        activeProfile:
+          type: string
+        tools:
+          $ref: '#/components/schemas/PartialToolsConfig'
+        security:
+          $ref: '#/components/schemas/PartialSecurityConfig'
+        ui:
+          $ref: '#/components/schemas/PartialUIConfig'
+        system:
+          $ref: '#/components/schemas/PartialSystemConfig'
+
+    ModelConfig:
+      type: object
+      required:
+        - selected
+        - provider
+        - contextWindow
+        - maxOutputTokens
+      properties:
+        selected:
+          type: string
+        provider:
+          type: string
+        contextWindow:
+          type: integer
+          minimum: 1000
+        maxOutputTokens:
+          type: integer
+          minimum: 100
+        temperature:
+          type: number
+          minimum: 0
+          maximum: 2
+        reasoningEffort:
+          type: string
+          enum: [low, medium, high]
+        reasoningSummary:
+          type: boolean
+
+    PartialModelConfig:
+      type: object
+      properties:
+        selected:
+          type: string
+        provider:
+          type: string
+        contextWindow:
+          type: integer
+        maxOutputTokens:
+          type: integer
+        temperature:
+          type: number
+        reasoningEffort:
+          type: string
+        reasoningSummary:
+          type: boolean
+
+    ProviderConfig:
+      type: object
+      required:
+        - id
+        - name
+        - type
+        - models
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [openai, anthropic, google, custom]
+        apiKey:
+          type: string
+        apiBase:
+          type: string
+          format: uri
+        organization:
+          type: string
+        models:
+          type: array
+          items:
+            type: string
+
+    ProfileConfig:
+      type: object
+      required:
+        - name
+        - displayName
+        - model
+        - provider
+      properties:
+        name:
+          type: string
+        displayName:
+          type: string
+        model:
+          type: string
+        provider:
+          type: string
+        modelSettings:
+          type: object
+        toolSettings:
+          type: object
+        lastUsed:
+          type: integer
+
+    ToolsConfig:
+      type: object
+      required:
+        - includePlanTool
+        - includeApplyPatchTool
+        - includeViewImageTool
+        - includeWebSearch
+      properties:
+        includePlanTool:
+          type: boolean
+        includeApplyPatchTool:
+          type: boolean
+        includeViewImageTool:
+          type: boolean
+        includeWebSearch:
+          type: boolean
+        customTools:
+          type: object
+          additionalProperties:
+            type: boolean
+
+    PartialToolsConfig:
+      type: object
+      properties:
+        includePlanTool:
+          type: boolean
+        includeApplyPatchTool:
+          type: boolean
+        includeViewImageTool:
+          type: boolean
+        includeWebSearch:
+          type: boolean
+        customTools:
+          type: object
+
+    SecurityConfig:
+      type: object
+      required:
+        - approvalPolicy
+        - sandboxPolicy
+        - trustedProjects
+      properties:
+        approvalPolicy:
+          type: string
+          enum: [never, onFailure, unlessTrusted, always]
+        sandboxPolicy:
+          type: string
+          enum: [readOnly, workspaceWrite, fullAccess]
+        trustedProjects:
+          type: array
+          items:
+            type: string
+        shellEnvironmentPolicy:
+          type: string
+          enum: [inherit, clean, custom]
+
+    PartialSecurityConfig:
+      type: object
+      properties:
+        approvalPolicy:
+          type: string
+        sandboxPolicy:
+          type: string
+        trustedProjects:
+          type: array
+        shellEnvironmentPolicy:
+          type: string
+
+    UIConfig:
+      type: object
+      required:
+        - hideAgentReasoning
+        - showRawAgentReasoning
+        - theme
+        - notificationsEnabled
+      properties:
+        hideAgentReasoning:
+          type: boolean
+        showRawAgentReasoning:
+          type: boolean
+        theme:
+          type: string
+          enum: [light, dark, auto]
+        notificationsEnabled:
+          type: boolean
+        notifyCommand:
+          type: string
+
+    PartialUIConfig:
+      type: object
+      properties:
+        hideAgentReasoning:
+          type: boolean
+        showRawAgentReasoning:
+          type: boolean
+        theme:
+          type: string
+        notificationsEnabled:
+          type: boolean
+        notifyCommand:
+          type: string
+
+    SystemConfig:
+      type: object
+      required:
+        - cwd
+        - debugMode
+      properties:
+        cwd:
+          type: string
+        userInstructions:
+          type: string
+        baseInstructions:
+          type: string
+        debugMode:
+          type: boolean
+
+    PartialSystemConfig:
+      type: object
+      properties:
+        cwd:
+          type: string
+        userInstructions:
+          type: string
+        baseInstructions:
+          type: string
+        debugMode:
+          type: boolean
+
+    ExportData:
+      type: object
+      required:
+        - version
+        - exportDate
+        - config
+      properties:
+        version:
+          type: string
+        exportDate:
+          type: integer
+        config:
+          $ref: '#/components/schemas/ChromeConfig'
+
+    ValidationError:
+      type: object
+      required:
+        - field
+        - error
+      properties:
+        field:
+          type: string
+        value:
+          type: any
+        error:
+          type: string
+
+    ConfigChangeEvent:
+      type: object
+      required:
+        - type
+        - section
+        - timestamp
+      properties:
+        type:
+          type: string
+          enum: [config-changed]
+        section:
+          type: string
+          enum: [model, provider, profile, tools, security, ui, system]
+        oldValue:
+          type: any
+        newValue:
+          type: any
+        timestamp:
+          type: integer

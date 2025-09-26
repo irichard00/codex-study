@@ -61,6 +61,8 @@ const MODEL_PROVIDER_MAP: Record<string, ModelProvider> = {
   'claude-3-5-haiku-20241022': 'anthropic',
 };
 
+const DEFAULT_MODEL = 'gpt-5';
+
 /**
  * Factory for creating and managing model clients
  */
@@ -86,6 +88,10 @@ export class ModelClientFactory {
    * @returns Promise resolving to a model client
    */
   async createClientForModel(model: string): Promise<ModelClient> {
+    if (model === 'default') {
+      model = DEFAULT_MODEL;
+    }
+
     const provider = this.getProviderForModel(model);
     return this.createClient(provider);
   }
@@ -139,6 +145,10 @@ export class ModelClientFactory {
    * @returns The provider for the model
    */
   getProviderForModel(model: string): ModelProvider {
+    if (model === 'default') {
+      return 'openai';
+    }
+
     const provider = MODEL_PROVIDER_MAP[model];
 
     if (!provider) {

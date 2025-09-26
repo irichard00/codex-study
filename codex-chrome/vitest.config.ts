@@ -7,11 +7,34 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
-    setupFiles: './src/tests/setup.ts'
+    setupFiles: ['./src/tests/setup.ts', './tests/helpers/chrome-storage-mock.ts'],
+    coverage: {
+      reporter: ['text', 'json', 'html'],
+      exclude: [
+        'node_modules/',
+        'dist/',
+        '**/*.config.ts',
+        '**/*.d.ts',
+        'tests/**'
+      ]
+    },
+    include: [
+      'tests/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}',
+      'src/tests/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'
+    ],
+    mockReset: true,
+    restoreMocks: true
   },
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src')
+      '@': resolve(__dirname, 'src'),
+      '@config': resolve(__dirname, 'src/config'),
+      '@storage': resolve(__dirname, 'src/storage'),
+      '@models': resolve(__dirname, 'src/models'),
+      '@core': resolve(__dirname, 'src/core'),
+      '@tools': resolve(__dirname, 'src/tools'),
+      '@protocol': resolve(__dirname, 'src/protocol'),
+      '@types': resolve(__dirname, 'src/types')
     }
   }
 });

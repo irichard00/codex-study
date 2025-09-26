@@ -3,11 +3,13 @@
  * Manages conversation state, turn context, and history
  */
 
-import type { InputItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig, Event } from '../protocol/types';
-import type { HistoryEntry, EventMsg } from '../protocol/events';
+import type { InputItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig, Event, ResponseItem, ConversationHistory } from '../protocol/types';
+import type { EventMsg } from '../protocol/events';
 import type { MessageRecord, ConversationData } from '../types/storage';
 import { ConversationStore } from '../storage/ConversationStore';
+import { State } from './State';
 import { v4 as uuidv4 } from 'uuid';
+import { TurnContext } from './TurnContext';
 
 /**
  * Tool definition interface (to avoid circular dependency with TurnManager)
@@ -22,23 +24,11 @@ export interface ToolDefinition {
 }
 
 /**
- * Turn context containing current session configuration
- */
-export interface TurnContext {
-  cwd: string;
-  approval_policy: AskForApproval;
-  sandbox_policy: SandboxPolicy;
-  model: string;
-  effort?: ReasoningEffortConfig;
-  summary: ReasoningSummaryConfig;
-}
-
-/**
  * Session class managing conversation state
  */
 export class Session {
   readonly conversationId: string;
-  private history: HistoryEntry[] = [];
+  private state: State;
   private turnContext: TurnContext;
   private messageCount: number = 0;
   private currentTurnItems: InputItem[] = [];
@@ -47,19 +37,20 @@ export class Session {
   private conversationStore: ConversationStore | null = null;
   private conversation: ConversationData | null = null;
   private isPersistent: boolean = true;
-  
+
   constructor(isPersistent: boolean = true) {
     this.conversationId = `conv_${uuidv4()}`;
     this.isPersistent = isPersistent;
+    this.state = new State(this.conversationId);
 
     // Initialize with default turn context
-    this.turnContext = {
+    this.turnContext = new TurnContext({
       cwd: '/',
       approval_policy: 'on-request',
       sandbox_policy: { mode: 'workspace-write' },
       model: 'claude-3-sonnet',
       summary: { enabled: false },
-    };
+    });
   }
 
   /**
@@ -97,11 +88,12 @@ export class Session {
 
       // Load messages from storage
       const messages = await this.conversationStore.getMessages(conv.id);
-      this.history = messages.map(msg => ({
-        timestamp: msg.timestamp,
-        text: msg.content,
-        type: msg.role === 'user' ? 'user' as const : 'agent' as const
+      const items = messages.map(msg => ({
+        role: msg.role as 'user' | 'assistant' | 'system',
+        content: msg.content,
+        timestamp: msg.timestamp
       }));
+      this.state.setConversationHistoryItems(items);
       this.messageCount = messages.length;
 
       return conv.id;
@@ -156,15 +148,16 @@ export class Session {
   /**
    * Add a message to history
    */
-  async addToHistory(entry: HistoryEntry): Promise<void> {
-    this.history.push(entry);
+  async addToHistory(entry: { timestamp: number; text: string; type: 'user' | 'agent' | 'system' }): Promise<void> {
+    // Delegate to State
+    this.state.addToHistory(entry);
     this.messageCount++;
 
     // Persist to storage if enabled
     if (this.conversationStore && this.conversation) {
       const messageRecord: Omit<MessageRecord, 'id'> = {
         conversationId: this.conversation.id,
-        role: entry.type === 'user' ? 'user' : 'assistant',
+        role: entry.type === 'user' ? 'user' : entry.type === 'system' ? 'system' : 'assistant',
         content: entry.text,
         timestamp: entry.timestamp,
       };
@@ -175,27 +168,32 @@ export class Session {
 
   /**
    * Get conversation history
+   * Returns items in the old format for backward compatibility
    */
-  getHistory(): HistoryEntry[] {
-    return [...this.history];
+  getHistory(): Array<{ timestamp: number; text: string; type: 'user' | 'agent' | 'system' }> {
+    return this.state.getHistory();
+  }
+
+  /**
+   * Get conversation history as ConversationHistory
+   */
+  getConversationHistory(): ConversationHistory {
+    return this.state.getConversationHistory();
   }
 
   /**
    * Get history entry by offset
    * @param offset Negative offset from end of history
    */
-  getHistoryEntry(offset: number): HistoryEntry | undefined {
-    if (offset >= 0 || Math.abs(offset) > this.history.length) {
-      return undefined;
-    }
-    return this.history[this.history.length + offset];
+  getHistoryEntry(offset: number): ResponseItem | undefined {
+    return this.state.getHistoryEntry(offset);
   }
 
   /**
    * Clear conversation history
    */
   clearHistory(): void {
-    this.history = [];
+    this.state.clearHistory();
     this.messageCount = 0;
   }
 
@@ -239,7 +237,7 @@ export class Session {
     return {
       conversationId: this.conversationId,
       messageCount: this.messageCount,
-      startTime: this.history[0]?.timestamp || Date.now(),
+      startTime: this.state.getConversationHistory().metadata?.startTime || Date.now(),
       currentModel: this.turnContext.model,
     };
   }
@@ -249,13 +247,13 @@ export class Session {
    */
   export(): {
     conversationId: string;
-    history: HistoryEntry[];
+    conversationHistory: ConversationHistory;
     turnContext: TurnContext;
     messageCount: number;
   } {
     return {
       conversationId: this.conversationId,
-      history: [...this.history],
+      conversationHistory: this.state.getConversationHistory(),
       turnContext: { ...this.turnContext },
       messageCount: this.messageCount,
     };
@@ -266,14 +264,28 @@ export class Session {
    */
   static import(data: {
     conversationId: string;
-    history: HistoryEntry[];
+    conversationHistory?: ConversationHistory;
+    history?: Array<{ timestamp: number; text: string; type: 'user' | 'agent' | 'system' }>; // For backward compatibility
     turnContext: TurnContext;
     messageCount: number;
   }): Session {
     const session = new Session();
+
+    // Handle both new and old format
+    if (data.conversationHistory) {
+      session.state.setConversationHistory(data.conversationHistory);
+    } else if (data.history) {
+      // Convert old format to new
+      const items = data.history.map(h => ({
+        role: h.type === 'user' ? 'user' as const : h.type === 'system' ? 'system' as const : 'assistant' as const,
+        content: h.text,
+        timestamp: h.timestamp
+      }));
+      session.state.setConversationHistoryItems(items);
+    }
+
     Object.assign(session, {
       conversationId: data.conversationId,
-      history: [...data.history],
       turnContext: { ...data.turnContext },
       messageCount: data.messageCount,
     });
@@ -284,21 +296,21 @@ export class Session {
    * Check if session is empty
    */
   isEmpty(): boolean {
-    return this.history.length === 0;
+    return this.state.getConversationHistory().items.length === 0;
   }
 
   /**
    * Get last message from history
    */
-  getLastMessage(): HistoryEntry | undefined {
-    return this.history[this.history.length - 1];
+  getLastMessage(): ResponseItem | undefined {
+    return this.state.getLastMessage();
   }
 
   /**
    * Get messages by type
    */
-  getMessagesByType(type: 'user' | 'agent'): HistoryEntry[] {
-    return this.history.filter(entry => entry.type === type);
+  getMessagesByType(type: 'user' | 'agent' | 'system'): ResponseItem[] {
+    return this.state.getMessagesByType(type);
   }
 
   /**
@@ -367,13 +379,13 @@ export class Session {
     const timestamp = Date.now();
 
     for (const item of items) {
-      if (item.role === 'assistant' || item.role === 'user') {
+      if (item.role === 'assistant' || item.role === 'user' || item.role === 'system') {
         const text = this.extractTextFromItem(item);
         if (text) {
           await this.addToHistory({
             timestamp,
             text,
-            type: item.role === 'assistant' ? 'agent' : 'user',
+            type: item.role === 'assistant' ? 'agent' : item.role === 'system' ? 'system' : 'user',
           });
         }
       }
@@ -451,9 +463,12 @@ export class Session {
    * Build turn input with full conversation history
    */
   async buildTurnInputWithHistory(newItems: any[]): Promise<any[]> {
-    const historyItems = this.history.map(entry => ({
-      role: entry.type === 'user' ? 'user' : 'assistant',
-      content: [{ type: 'text', text: entry.text }],
+    const conversationHistory = this.state.getConversationHistory();
+    const historyItems = conversationHistory.items.map(item => ({
+      role: item.role,
+      content: typeof item.content === 'string'
+        ? [{ type: 'text', text: item.content }]
+        : item.content,
     }));
 
     return [...historyItems, ...newItems];
@@ -489,13 +504,9 @@ export class Session {
    * Compact conversation history to save tokens
    */
   async compact(): Promise<void> {
-    // Simple compaction strategy: keep last 20 messages
-    if (this.history.length > 20) {
-      const keepCount = 20;
-      const toRemove = this.history.length - keepCount;
-      this.history.splice(0, toRemove);
-      this.messageCount = this.history.length;
-    }
+    // Delegate to State
+    this.state.compact();
+    this.messageCount = this.state.getConversationHistory().items.length;
   }
 
   /**
@@ -521,9 +532,7 @@ export class Session {
   async searchMessages(query: string): Promise<any[]> {
     if (!this.conversationStore) {
       // Search in memory if no storage
-      return this.history.filter(entry =>
-        entry.text.toLowerCase().includes(query.toLowerCase())
-      );
+      return this.state.searchMessages(query);
     }
 
     const results = await this.conversationStore.searchMessages(query);
@@ -576,5 +585,90 @@ export class Session {
    */
   getId(): string {
     return this.conversationId;
+  }
+
+  /**
+   * Get the State instance
+   */
+  getState(): State {
+    return this.state;
+  }
+
+  /**
+   * Start a new turn in state
+   */
+  startTurn(): void {
+    this.state.startTurn();
+  }
+
+  /**
+   * End current turn in state
+   */
+  endTurn(): void {
+    this.state.endTurn();
+  }
+
+  /**
+   * Track token usage
+   */
+  addTokenUsage(tokens: number): void {
+    this.state.addTokenUsage(tokens);
+  }
+
+  /**
+   * Track tool usage
+   */
+  trackToolUsage(toolName: string): void {
+    this.state.trackToolUsage(toolName);
+  }
+
+  /**
+   * Add error to state
+   */
+  addError(error: string, context?: any): void {
+    this.state.addError(error, context);
+  }
+
+  /**
+   * Request interrupt
+   */
+  requestInterrupt(): void {
+    this.state.requestInterrupt();
+  }
+
+  /**
+   * Check if interrupt requested
+   */
+  isInterruptRequested(): boolean {
+    return this.state.isInterruptRequested();
+  }
+
+  /**
+   * Clear interrupt flag
+   */
+  clearInterrupt(): void {
+    this.state.clearInterrupt();
+  }
+
+  /**
+   * Export session with state
+   */
+  exportWithState(): any {
+    const baseExport = this.export();
+    return {
+      ...baseExport,
+      state: this.state.export()
+    };
+  }
+
+  /**
+   * Import session with state
+   */
+  static importWithState(data: any): Session {
+    const session = Session.import(data);
+    if (data.state) {
+      session.state = State.import(data.state);
+    }
+    return session;
   }
 }

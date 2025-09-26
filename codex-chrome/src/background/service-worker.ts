@@ -13,6 +13,13 @@ import { ConversationStore } from '../storage/ConversationStore';
 import { CacheManager } from '../storage/CacheManager';
 import { StorageQuotaManager } from '../storage/StorageQuotaManager';
 import { registerBasicTools, registerAdvancedTools } from '../tools';
+import { AgentConfig } from '../config/AgentConfig';
+import type { ChromeConfigMessage, ConfigMessage } from '../protocol/config-messages';
+import {
+  createConfigResponse,
+  createConfigChangeNotification,
+  createConfigUpdate
+} from '../protocol/config-messages';
 
 // Global instances
 let agent: CodexAgent | null = null;
@@ -22,6 +29,7 @@ let toolRegistry: ToolRegistry | null = null;
 let conversationStore: ConversationStore | null = null;
 let cacheManager: CacheManager | null = null;
 let storageQuotaManager: StorageQuotaManager | null = null;
+let agentConfig: AgentConfig | null = null;
 
 /**
  * Initialize the service worker
@@ -29,14 +37,20 @@ let storageQuotaManager: StorageQuotaManager | null = null;
 async function initialize(): Promise<void> {
   console.log('Initializing Codex background service worker');
 
+  // Initialize configuration singleton first
+  agentConfig = AgentConfig.getInstance();
+  await agentConfig.initialize();
+  console.log('AgentConfig initialized');
+
   // Initialize ModelClientFactory
   modelClientFactory = ModelClientFactory.getInstance();
 
-  // Initialize ToolRegistry
-  toolRegistry = new ToolRegistry();
+  // Initialize ToolRegistry with config
+  toolRegistry = new ToolRegistry(agentConfig!);
 
-  // Create agent instance (this will create its own instances of components)
-  agent = new CodexAgent();
+  // Create agent instance with config
+  agent = new CodexAgent(agentConfig!);
+  await agent.initialize();
 
   // Create message router
   router = new MessageRouter('background');

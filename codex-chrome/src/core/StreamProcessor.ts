@@ -3,7 +3,11 @@
  *
  * Manages chunked data efficiently, applies backpressure when needed,
  * and batches UI updates for optimal performance.
+ *
+ * Extended in Phase 6 to also handle ResponseEvents from OpenAIResponsesClient.
  */
+
+import type { ResponseEvent } from '../models/types/ResponseEvent';
 
 /**
  * UI update types for progressive rendering
@@ -120,6 +124,7 @@ export class StreamProcessor {
   private status: StreamStatus = 'idle';
   private reader: ReadableStreamDefaultReader | null = null;
   private updateCallbacks: ((update: UIUpdate) => void)[] = [];
+  private responseEventCallbacks: ((event: ResponseEvent) => void)[] = [];
   private updateTimer: number | null = null;
   private pendingUpdates: UIUpdate[] = [];
   private config: Required<StreamConfig>;
@@ -179,6 +184,59 @@ export class StreamProcessor {
         this.reader.releaseLock();
         this.reader = null;
       }
+      this.metrics.endTime = Date.now();
+    }
+  }
+
+  /**
+   * Process ResponseEvent stream from OpenAIResponsesClient
+   * Integrates ResponseEvent emission alongside existing UIUpdate events
+   */
+  async processResponsesStream(
+    responseStream: AsyncGenerator<ResponseEvent>
+  ): Promise<void> {
+    if (this.status !== 'idle' && this.status !== 'completed') {
+      throw new Error('Stream already in progress');
+    }
+
+    this.status = 'streaming';
+    this.metrics.startTime = Date.now();
+
+    try {
+      for await (const responseEvent of responseStream) {
+        // Emit ResponseEvent to callbacks
+        this.responseEventCallbacks.forEach(callback => {
+          try {
+            callback(responseEvent);
+          } catch (error) {
+            console.error('ResponseEvent callback error:', error);
+          }
+        });
+
+        // Convert ResponseEvent to UIUpdate when appropriate
+        const uiUpdate = this.convertResponseEventToUIUpdate(responseEvent);
+        if (uiUpdate) {
+          this.batchUpdate(uiUpdate);
+        }
+
+        // Update metrics for ResponseEvents
+        this.updateMetricsForResponseEvent(responseEvent);
+
+        // Apply backpressure if needed
+        if (this.shouldApplyBackpressure()) {
+          this.pause();
+          await this.waitForBuffer();
+          this.resume();
+        }
+      }
+
+      this.status = 'completed';
+      this.flushPendingUpdates();
+    } catch (error) {
+      this.status = 'error';
+      this.metrics.errorCount++;
+      throw error;
+    } finally {
       this.metrics.endTime = Date.now();
     }
   }
@@ -359,10 +417,148 @@ export class StreamProcessor {
   }
 
   /**
+   * Convert ResponseEvent to UIUpdate when appropriate
+   */
+  private convertResponseEventToUIUpdate(event: ResponseEvent): UIUpdate | null {
+    const updateId = `resp_${this.sequenceNumber++}`;
+    const timestamp = Date.now();
+
+    switch (event.type) {
+      case 'OutputTextDelta':
+        return {
+          id: updateId,
+          type: 'append',
+          target: 'message',
+          content: event.delta,
+          metadata: {
+            tokens: this.countApproximateTokens(event.delta),
+            timestamp,
+            sequenceNumber: this.sequenceNumber - 1,
+          },
+        };
+
+      case 'ReasoningSummaryDelta':
+        return {
+          id: updateId,
+          type: 'append',
+          target: 'message',
+          content: `[Reasoning] ${event.delta}`,
+          metadata: {
+            tokens: this.countApproximateTokens(event.delta),
+            timestamp,
+            sequenceNumber: this.sequenceNumber - 1,
+          },
+        };
+
+      case 'ReasoningContentDelta':
+        return {
+          id: updateId,
+          type: 'append',
+          target: 'message',
+          content: `[Thinking] ${event.delta}`,
+          metadata: {
+            tokens: this.countApproximateTokens(event.delta),
+            timestamp,
+            sequenceNumber: this.sequenceNumber - 1,
+          },
+        };
+
+      case 'Created':
+        return {
+          id: updateId,
+          type: 'replace',
+          target: 'status',
+          content: 'Response started...',
+          metadata: {
+            timestamp,
+            sequenceNumber: this.sequenceNumber - 1,
+          },
+        };
+
+      case 'Completed':
+        return {
+          id: updateId,
+          type: 'replace',
+          target: 'status',
+          content: `Response completed. ID: ${event.responseId}${event.tokenUsage ? `, Tokens: ${event.tokenUsage.total_tokens}` : ''}`,
+          metadata: {
+            timestamp,
+            sequenceNumber: this.sequenceNumber - 1,
+          },
+        };
+
+      case 'WebSearchCallBegin':
+        return {
+          id: updateId,
+          type: 'append',
+          target: 'status',
+          content: `Web search initiated (${event.callId})...`,
+          metadata: {
+            timestamp,
+            sequenceNumber: this.sequenceNumber - 1,
+          },
+        };
+
+      case 'OutputItemDone':
+      case 'ReasoningSummaryPartAdded':
+      case 'RateLimits':
+        // These events don't directly translate to UI updates
+        // but can be handled by ResponseEvent callbacks
+        return null;
+
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Update metrics for ResponseEvent processing
+   */
+  private updateMetricsForResponseEvent(event: ResponseEvent): void {
+    // Count text content for metrics
+    let textContent = '';
+
+    switch (event.type) {
+      case 'OutputTextDelta':
+      case 'ReasoningSummaryDelta':
+      case 'ReasoningContentDelta':
+        textContent = event.delta;
+        break;
+      default:
+        // No text content to measure
+        break;
+    }
+
+    if (textContent) {
+      const textBytes = new TextEncoder().encode(textContent).length;
+      this.metrics.bytesProcessed += textBytes;
+      this.metrics.chunksProcessed++;
+      this.metrics.averageChunkSize = this.metrics.bytesProcessed / this.metrics.chunksProcessed;
+    }
+
+    // Update buffer utilization based on pending updates
+    this.metrics.bufferUtilization = (this.pendingUpdates.length / 100) * 100; // Assume max 100 pending updates
+  }
+
+  /**
+   * Count approximate tokens in text for metrics
+   */
+  private countApproximateTokens(text: string): number {
+    return text.split(/\s+/).length;
+  }
+
+  /**
    * Register callback for UI updates
    */
   onUpdate(callback: (update: UIUpdate) => void): void {
     this.updateCallbacks.push(callback);
+  }
+
+  /**
+   * Register callback for ResponseEvents
+   */
+  onResponseEvent(callback: (event: ResponseEvent) => void): void {
+    this.responseEventCallbacks.push(callback);
   }
 
   /**
