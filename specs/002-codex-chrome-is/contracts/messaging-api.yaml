@@ -1,0 +1,307 @@
+openapi: 3.0.0
+info:
+  title: Chrome Extension Config Messaging API
+  description: Cross-context messaging protocol for config synchronization
+  version: 1.0.0
+
+paths:
+  /message/config-request:
+    post:
+      summary: Request current configuration
+      operationId: requestConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigRequest'
+      responses:
+        '200':
+          description: Configuration response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ConfigResponse'
+
+  /message/config-update:
+    post:
+      summary: Broadcast configuration update
+      operationId: broadcastConfigUpdate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigUpdate'
+      responses:
+        '200':
+          description: Update acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateAck'
+
+  /message/config-change:
+    post:
+      summary: Notify configuration change
+      operationId: notifyConfigChange
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigChangeNotification'
+      responses:
+        '200':
+          description: Notification received
+
+  /message/config-sync:
+    post:
+      summary: Synchronize configuration across contexts
+      operationId: syncConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfigSync'
+      responses:
+        '200':
+          description: Sync completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncResult'
+
+components:
+  schemas:
+    MessageBase:
+      type: object
+      required:
+        - messageId
+        - timestamp
+        - source
+      properties:
+        messageId:
+          type: string
+          format: uuid
+        timestamp:
+          type: integer
+        source:
+          type: string
+          enum: [background, content, sidepanel, popup]
+
+    ConfigRequest:
+      allOf:
+        - $ref: '#/components/schemas/MessageBase'
+        - type: object
+          required:
+            - type
+          properties:
+            type:
+              type: string
+              enum: [CONFIG_REQUEST]
+            sections:
+              type: array
+              description: Specific sections to request (empty for all)
+              items:
+                type: string
+                enum: [model, providers, profiles, tools, security, ui, system]
+
+    ConfigResponse:
+      allOf:
+        - $ref: '#/components/schemas/MessageBase'
+        - type: object
+          required:
+            - type
+            - config
+          properties:
+            type:
+              type: string
+              enum: [CONFIG_RESPONSE]
+            config:
+              type: object
+              description: Full or partial configuration based on request
+            requestId:
+              type: string
+              format: uuid
+              description: ID of the original request
+
+    ConfigUpdate:
+      allOf:
+        - $ref: '#/components/schemas/MessageBase'
+        - type: object
+          required:
+            - type
+            - changes
+          properties:
+            type:
+              type: string
+              enum: [CONFIG_UPDATE]
+            changes:
+              type: object
+              description: Partial configuration changes
+            broadcast:
+              type: boolean
+              default: true
+              description: Whether to broadcast to all contexts
+
+    UpdateAck:
+      allOf:
+        - $ref: '#/components/schemas/MessageBase'
+        - type: object
+          required:
+            - type
+            - success
+          properties:
+            type:
+              type: string
+              enum: [UPDATE_ACK]
+            success:
+              type: boolean
+            error:
+              type: string
+              description: Error message if success is false
+            updateId:
+              type: string
+              format: uuid
+              description: ID of the update being acknowledged
+
+    ConfigChangeNotification:
+      allOf:
+        - $ref: '#/components/schemas/MessageBase'
+        - type: object
+          required:
+            - type
+            - section
+            - changeType
+          properties:
+            type:
+              type: string
+              enum: [CONFIG_CHANGE]
+            section:
+              type: string
+              enum: [model, provider, profile, tools, security, ui, system]
+            changeType:
+              type: string
+              enum: [created, updated, deleted]
+            oldValue:
+              type: object
+            newValue:
+              type: object
+
+    ConfigSync:
+      allOf:
+        - $ref: '#/components/schemas/MessageBase'
+        - type: object
+          required:
+            - type
+            - action
+          properties:
+            type:
+              type: string
+              enum: [CONFIG_SYNC]
+            action:
+              type: string
+              enum: [push, pull, merge]
+            config:
+              type: object
+              description: Configuration to sync (for push/merge)
+            force:
+              type: boolean
+              default: false
+              description: Force sync even if versions conflict
+
+    SyncResult:
+      allOf:
+        - $ref: '#/components/schemas/MessageBase'
+        - type: object
+          required:
+            - type
+            - success
+            - finalConfig
+          properties:
+            type:
+              type: string
+              enum: [SYNC_RESULT]
+            success:
+              type: boolean
+            finalConfig:
+              type: object
+              description: Final configuration after sync
+            conflicts:
+              type: array
+              description: List of conflicts if any
+              items:
+                type: object
+                properties:
+                  section:
+                    type: string
+                  localValue:
+                    type: any
+                  remoteValue:
+                    type: any
+                  resolution:
+                    type: string
+                    enum: [local, remote, merged]
+
+    ChromeMessage:
+      type: object
+      required:
+        - action
+        - data
+      properties:
+        action:
+          type: string
+          enum: [CONFIG_REQUEST, CONFIG_RESPONSE, CONFIG_UPDATE, CONFIG_CHANGE, CONFIG_SYNC]
+        data:
+          oneOf:
+            - $ref: '#/components/schemas/ConfigRequest'
+            - $ref: '#/components/schemas/ConfigResponse'
+            - $ref: '#/components/schemas/ConfigUpdate'
+            - $ref: '#/components/schemas/ConfigChangeNotification'
+            - $ref: '#/components/schemas/ConfigSync'
+            - $ref: '#/components/schemas/UpdateAck'
+            - $ref: '#/components/schemas/SyncResult'
+
+    MessageError:
+      type: object
+      required:
+        - error
+        - message
+        - timestamp
+      properties:
+        error:
+          type: string
+          enum: [INVALID_MESSAGE, PERMISSION_DENIED, CONFIG_LOCKED, SYNC_CONFLICT]
+        message:
+          type: string
+        details:
+          type: object
+        timestamp:
+          type: integer
+
+    ContextState:
+      type: object
+      required:
+        - contextId
+        - type
+        - configVersion
+        - lastSync
+      properties:
+        contextId:
+          type: string
+        type:
+          type: string
+          enum: [background, content, sidepanel, popup]
+        configVersion:
+          type: string
+        lastSync:
+          type: integer
+        cacheValid:
+          type: boolean
+        subscriptions:
+          type: array
+          items:
+            type: string
+            enum: [model, provider, profile, tools, security, ui, system]

@@ -21,18 +21,34 @@ import {
 import { validateConfig, validateModelConfig, validateProviderConfig } from './validators';
 
 export class AgentConfig implements IConfigService {
+  private static instance: AgentConfig | null = null;
   private storage: ConfigStorage;
   private currentConfig: IChromeConfig;
   private eventHandlers: Map<string, Set<(e: IConfigChangeEvent) => void>>;
   private initialized: boolean = false;
 
-  constructor() {
+  private constructor() {
     this.storage = new ConfigStorage();
     this.currentConfig = DEFAULT_CHROME_CONFIG;
     this.eventHandlers = new Map();
   }
 
-  private async initialize(): Promise<void> {
+  /**
+   * Get the singleton instance of AgentConfig
+   * @returns The singleton AgentConfig instance
+   */
+  public static getInstance(): AgentConfig {
+    if (!AgentConfig.instance) {
+      AgentConfig.instance = new AgentConfig();
+    }
+    return AgentConfig.instance;
+  }
+
+  /**
+   * Initialize the config from storage (lazy initialization)
+   * Called automatically on first config access
+   */
+  public async initialize(): Promise<void> {
     if (this.initialized) return;
 
     try {
