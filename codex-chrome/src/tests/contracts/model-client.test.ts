@@ -246,6 +246,48 @@ describe('ModelClient Contracts', () => {
   });
 
   describe('Anthropic Client Contract', () => {
+    // Define Anthropic-specific interfaces at describe level
+    interface AnthropicRequest {
+      model: string;
+      messages: AnthropicMessage[];
+      maxTokens: number;
+      temperature?: number;
+      system?: string;
+      tools?: AnthropicTool[];
+      stream?: boolean;
+    }
+
+    interface AnthropicMessage {
+      role: 'user' | 'assistant';
+      content: string | AnthropicContentBlock[];
+    }
+
+    interface AnthropicContentBlock {
+      type: 'text' | 'tool_use';
+      text?: string;
+      id?: string;
+      name?: string;
+      input?: any;
+    }
+
+    interface AnthropicTool {
+      name: string;
+      description: string;
+      input_schema: any;
+    }
+
+    interface AnthropicResponse {
+      id: string;
+      type: 'message';
+      role: 'assistant';
+      content: AnthropicContentBlock[];
+      model: string;
+      usage: {
+        inputTokens: number;
+        outputTokens: number;
+      };
+    }
+
     beforeEach(() => {
       const responses = new Map([
         ['https://api.anthropic.com/v1/messages', {
@@ -270,47 +312,6 @@ describe('ModelClient Contracts', () => {
     });
 
     it('should fulfill AnthropicRequest/Response contract', async () => {
-      interface AnthropicRequest {
-        model: string;
-        messages: AnthropicMessage[];
-        maxTokens: number;
-        temperature?: number;
-        system?: string;
-        tools?: AnthropicTool[];
-        stream?: boolean;
-      }
-
-      interface AnthropicMessage {
-        role: 'user' | 'assistant';
-        content: string | ContentBlock[];
-      }
-
-      interface ContentBlock {
-        type: 'text' | 'tool_use';
-        text?: string;
-        id?: string;
-        name?: string;
-        input?: any;
-      }
-
-      interface AnthropicTool {
-        name: string;
-        description: string;
-        input_schema: any;
-      }
-
-      interface AnthropicResponse {
-        id: string;
-        type: 'message';
-        role: 'assistant';
-        content: ContentBlock[];
-        model: string;
-        usage: {
-          inputTokens: number;
-          outputTokens: number;
-        };
-      }
-
       // Mock Anthropic client for testing contract
       const mockAnthropicClient = {
         async complete(req: AnthropicRequest): Promise<AnthropicResponse> {
@@ -377,7 +378,7 @@ describe('ModelClient Contracts', () => {
     });
 
     it('should handle content blocks and tool use', () => {
-      const contentBlock: ContentBlock = {
+      const contentBlock: AnthropicContentBlock = {
         type: 'tool_use',
         id: 'tool_123',
         name: 'calculator',

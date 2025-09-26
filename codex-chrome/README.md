@@ -121,13 +121,33 @@ npm run type-check
 
 ## Architecture
 
-The extension preserves the core SQ/EQ architecture from codex-rs:
+The extension preserves the core SQ/EQ architecture from codex-rs with performance enhancements:
 
 - **Submission Queue**: User requests (Op operations)
 - **Event Queue**: Agent responses (EventMsg)
 - **CodexAgent**: Main coordinator class
 - **Session**: Conversation state management
 - **MessageRouter**: Chrome extension message passing
+
+### Performance Features (Phase 9)
+
+#### SSE Event Parser Optimizations
+- **Memory Pooling**: Reuses event objects to reduce garbage collection pressure
+- **Hot Path Optimization**: Cached event type mappings for faster processing
+- **Lazy Parsing**: Early exit for ignored event types
+- **Performance Monitoring**: < 10ms target per event processing with built-in metrics
+
+#### Request Queue System
+- **Priority-based FIFO Queue**: Urgent > High > Normal > Low priority handling
+- **Rate Limiting**: Configurable per-minute and per-hour request limits
+- **Persistence**: Queue survives Chrome extension restarts via chrome.storage
+- **Retry Logic**: Exponential backoff with configurable max retries
+- **Analytics**: Success rate, wait times, and queue trends
+
+#### Model Client Improvements
+- **Streaming Response Processing**: Enhanced SSE parsing with error recovery
+- **Queue Integration**: Automatic request queuing with priority support
+- **Memory Management**: Buffer pooling and cleanup for long-running sessions
 
 ## Troubleshooting
 
