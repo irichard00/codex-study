@@ -21,6 +21,7 @@ export {
 // Provider implementations
 export { OpenAIClient } from './OpenAIClient';
 export { AnthropicClient } from './AnthropicClient';
+export { OpenAIResponsesClient, type OpenAIResponsesConfig } from './OpenAIResponsesClient';
 
 // Factory and utilities
 export {
@@ -29,3 +30,40 @@ export {
   type ModelProvider,
   type ModelClientConfig,
 } from './ModelClientFactory';
+
+// Rate limiting and token tracking
+export {
+  RateLimitManager,
+  createRateLimitManager,
+  type RateLimitConfig,
+  type RateLimitHistory,
+} from './RateLimitManager';
+
+export {
+  TokenUsageTracker,
+  createTokenUsageTracker,
+  createDefaultTokenUsageConfig,
+  type TokenUsageConfig,
+  type TokenUsageEntry,
+  type TimeRange,
+  type UsagePeriod,
+} from './TokenUsageTracker';
+
+// Authentication management
+export {
+  ChromeAuthManager,
+  chromeAuthManager,
+} from './ChromeAuthManager';
+
+// Performance optimizations (Phase 9)
+export {
+  SSEEventParser,
+} from './SSEEventParser';
+
+export {
+  RequestQueue,
+  RequestPriority,
+  type QueuedRequest,
+  type RateLimitConfig,
+  type QueueMetrics,
+} from './RequestQueue';

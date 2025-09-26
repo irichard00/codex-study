@@ -124,6 +124,42 @@ export type SandboxPolicy =
     };
 
 /**
+ * Response item for conversation history and API responses
+ */
+export interface ResponseItem {
+  id?: string;
+  type?: 'message' | 'reasoning' | 'function_call' | 'web_search_call' | 'local_shell_call' | 'custom_tool_call';
+  role?: 'assistant' | 'user' | 'system' | 'tool';
+  content?: string | ContentBlock[] | any[];
+  timestamp?: number; // Optional timestamp for compatibility with former HistoryEntry
+  metadata?: {
+    timestamp?: number;
+    model?: string;
+    [key: string]: any;
+  };
+}
+
+export interface ContentBlock {
+  type: 'text' | 'output_text' | 'input_text' | 'error_text';
+  text: string;
+}
+
+/**
+ * Conversation history wrapper
+ * Encapsulates a list of ResponseItems representing the conversation history
+ */
+export interface ConversationHistory {
+  items: ResponseItem[];
+  /** Optional metadata about the conversation */
+  metadata?: {
+    sessionId?: string;
+    startTime?: number;
+    lastUpdateTime?: number;
+    totalTokens?: number;
+  };
+}
+
+/**
  * User input types
  */
 export type InputItem =
@@ -183,4 +219,4 @@ export interface Event {
 }
 
 // Re-export EventMsg from events.ts
-export { EventMsg } from './events';
+export type { EventMsg } from './events';

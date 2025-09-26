@@ -5,6 +5,7 @@
 
 import type { Submission, Event } from '../protocol/types';
 import type { EventMsg } from '../protocol/events';
+import type { ResponseEvent } from '../models/types/ResponseEvent';
 
 /**
  * Message types for Chrome extension communication
@@ -58,6 +59,18 @@ export enum MessageType {
   TURN_STARTED = 'TURN_STARTED',
   TURN_COMPLETED = 'TURN_COMPLETED',
   TURN_ABORTED = 'TURN_ABORTED',
+
+  // ResponseEvent streaming messages (Phase 6)
+  RESPONSE_EVENT = 'RESPONSE_EVENT',
+  RESPONSE_CREATED = 'RESPONSE_CREATED',
+  RESPONSE_OUTPUT_ITEM_DONE = 'RESPONSE_OUTPUT_ITEM_DONE',
+  RESPONSE_COMPLETED = 'RESPONSE_COMPLETED',
+  RESPONSE_OUTPUT_TEXT_DELTA = 'RESPONSE_OUTPUT_TEXT_DELTA',
+  RESPONSE_REASONING_SUMMARY_DELTA = 'RESPONSE_REASONING_SUMMARY_DELTA',
+  RESPONSE_REASONING_CONTENT_DELTA = 'RESPONSE_REASONING_CONTENT_DELTA',
+  RESPONSE_REASONING_SUMMARY_PART_ADDED = 'RESPONSE_REASONING_SUMMARY_PART_ADDED',
+  RESPONSE_WEB_SEARCH_CALL_BEGIN = 'RESPONSE_WEB_SEARCH_CALL_BEGIN',
+  RESPONSE_RATE_LIMITS = 'RESPONSE_RATE_LIMITS',
 }
 
 /**
@@ -454,6 +467,92 @@ export class MessageRouter {
 
   async sendTurnAborted(turnId: string, reason: string): Promise<void> {
     await this.send(MessageType.TURN_ABORTED, { turnId, reason });
+  }
+
+  /**
+   * ResponseEvent operations (Phase 6)
+   */
+  async sendResponseEvent(event: ResponseEvent): Promise<void> {
+    await this.send(MessageType.RESPONSE_EVENT, event);
+  }
+
+  async sendResponseCreated(): Promise<void> {
+    await this.send(MessageType.RESPONSE_CREATED, {});
+  }
+
+  async sendResponseOutputItemDone(item: any): Promise<void> {
+    await this.send(MessageType.RESPONSE_OUTPUT_ITEM_DONE, { item });
+  }
+
+  async sendResponseCompleted(responseId: string, tokenUsage?: any): Promise<void> {
+    await this.send(MessageType.RESPONSE_COMPLETED, { responseId, tokenUsage });
+  }
+
+  async sendResponseOutputTextDelta(delta: string): Promise<void> {
+    await this.send(MessageType.RESPONSE_OUTPUT_TEXT_DELTA, { delta });
+  }
+
+  async sendResponseReasoningSummaryDelta(delta: string): Promise<void> {
+    await this.send(MessageType.RESPONSE_REASONING_SUMMARY_DELTA, { delta });
+  }
+
+  async sendResponseReasoningContentDelta(delta: string): Promise<void> {
+    await this.send(MessageType.RESPONSE_REASONING_CONTENT_DELTA, { delta });
+  }
+
+  async sendResponseReasoningSummaryPartAdded(): Promise<void> {
+    await this.send(MessageType.RESPONSE_REASONING_SUMMARY_PART_ADDED, {});
+  }
+
+  async sendResponseWebSearchCallBegin(callId: string): Promise<void> {
+    await this.send(MessageType.RESPONSE_WEB_SEARCH_CALL_BEGIN, { callId });
+  }
+
+  async sendResponseRateLimits(snapshot: any): Promise<void> {
+    await this.send(MessageType.RESPONSE_RATE_LIMITS, { snapshot });
+  }
+
+  /**
+   * Broadcast ResponseEvent to all tabs
+   */
+  async broadcastResponseEvent(event: ResponseEvent): Promise<void> {
+    await this.broadcast(MessageType.RESPONSE_EVENT, event);
+  }
+
+  /**
+   * Helper to convert ResponseEvent to specific message type
+   */
+  private getMessageTypeForResponseEvent(event: ResponseEvent): MessageType {
+    switch (event.type) {
+      case 'Created':
+        return MessageType.RESPONSE_CREATED;
+      case 'OutputItemDone':
+        return MessageType.RESPONSE_OUTPUT_ITEM_DONE;
+      case 'Completed':
+        return MessageType.RESPONSE_COMPLETED;
+      case 'OutputTextDelta':
+        return MessageType.RESPONSE_OUTPUT_TEXT_DELTA;
+      case 'ReasoningSummaryDelta':
+        return MessageType.RESPONSE_REASONING_SUMMARY_DELTA;
+      case 'ReasoningContentDelta':
+        return MessageType.RESPONSE_REASONING_CONTENT_DELTA;
+      case 'ReasoningSummaryPartAdded':
+        return MessageType.RESPONSE_REASONING_SUMMARY_PART_ADDED;
+      case 'WebSearchCallBegin':
+        return MessageType.RESPONSE_WEB_SEARCH_CALL_BEGIN;
+      case 'RateLimits':
+        return MessageType.RESPONSE_RATE_LIMITS;
+      default:
+        return MessageType.RESPONSE_EVENT;
+    }
+  }
+
+  /**
+   * Send typed ResponseEvent with automatic message type detection
+   */
+  async sendTypedResponseEvent(event: ResponseEvent): Promise<void> {
+    const messageType = this.getMessageTypeForResponseEvent(event);
+    await this.send(messageType, event);
   }
 
   /**

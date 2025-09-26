@@ -134,6 +134,8 @@ export interface RetryConfig {
   maxDelay: number;
   /** Multiplier for exponential backoff */
   backoffMultiplier: number;
+  /** Jitter percentage (0-1) for randomizing delays */
+  jitterPercent: number;
 }
 
 /**
@@ -144,7 +146,8 @@ export class ModelClientError extends Error {
     message: string,
     public readonly statusCode?: number,
     public readonly provider?: string,
-    public readonly retryable: boolean = false
+    public readonly retryable: boolean = false,
+    public readonly retryAfter?: number
   ) {
     super(message);
     this.name = 'ModelClientError';
@@ -163,6 +166,7 @@ export abstract class ModelClient {
       baseDelay: 1000,
       maxDelay: 30000,
       backoffMultiplier: 2,
+      jitterPercent: 0.1, // 10% jitter by default
       ...retryConfig,
     };
   }
@@ -262,7 +266,7 @@ export abstract class ModelClient {
 
     // Validate messages
     for (const message of request.messages) {
-      if (!['system', 'user', 'assistant', 'tool'].includes(message.role)) {
+      if (['system', 'user', 'assistant', 'tool'].indexOf(message.role) === -1) {
         throw new ModelClientError(`Invalid message role: ${message.role}`);
       }
 
@@ -273,6 +277,58 @@ export abstract class ModelClient {
   }
 
   /**
+   * Calculate backoff delay with proportional jitter
+   * @param attempt The current attempt number (0-based)
+   * @param retryAfter Optional retry-after value from server (in milliseconds)
+   * @returns Delay in milliseconds
+   */
+  protected calculateBackoff(attempt: number, retryAfter?: number): number {
+    // If server provides retry-after, use it with minimal jitter
+    if (retryAfter !== undefined) {
+      const jitter = retryAfter * this.retryConfig.jitterPercent;
+      return retryAfter + Math.random() * jitter;
+    }
+
+    // Exponential backoff
+    const exponentialDelay = this.retryConfig.baseDelay * Math.pow(this.retryConfig.backoffMultiplier, attempt);
+    const cappedDelay = Math.min(exponentialDelay, this.retryConfig.maxDelay);
+
+    // Add proportional jitter (10% by default)
+    const jitter = cappedDelay * this.retryConfig.jitterPercent;
+    return cappedDelay + Math.random() * jitter;
+  }
+
+  /**
+   * Check if an error is retryable based on its properties
+   * @param error The error to check
+   * @returns True if the error is retryable
+   */
+  protected isRetryableError(error: any): boolean {
+    // ModelClientError with retryable flag
+    if (error instanceof ModelClientError) {
+      return error.retryable;
+    }
+
+    // HTTP errors
+    if (error.status || error.statusCode) {
+      const statusCode = error.status || error.statusCode;
+      return this.isRetryableHttpError(statusCode);
+    }
+
+    // Network errors
+    if (error.code === 'ENOTFOUND' || error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT') {
+      return true;
+    }
+
+    // AbortError is not retryable
+    if (error.name === 'AbortError') {
+      return false;
+    }
+
+    return false;
+  }
+
+  /**
    * Execute a function with retry logic
    * @param fn The function to execute
    * @param retryableErrors Function to determine if an error is retryable
@@ -280,7 +336,7 @@ export abstract class ModelClient {
    */
   protected async withRetry<T>(
     fn: () => Promise<T>,
-    retryableErrors: (error: any) => boolean = () => false
+    retryableErrors: (error: any) => boolean = (error) => this.isRetryableError(error)
   ): Promise<T> {
     let lastError: any;
 
@@ -300,16 +356,14 @@ export abstract class ModelClient {
           break;
         }
 
-        // Calculate delay with exponential backoff and jitter
-        const delay = Math.min(
-          this.retryConfig.baseDelay * Math.pow(this.retryConfig.backoffMultiplier, attempt),
-          this.retryConfig.maxDelay
-        );
+        // Extract retry-after from error if available
+        let retryAfter: number | undefined;
+        if (error.retryAfter) {
+          retryAfter = error.retryAfter;
+        }
 
-        // Add jitter to prevent thundering herd
-        const jitteredDelay = delay + Math.random() * 1000;
-
-        await new Promise(resolve => setTimeout(resolve, jitteredDelay));
+        const delay = this.calculateBackoff(attempt, retryAfter);
+        await new Promise(resolve => setTimeout(resolve, delay));
       }
     }
 
