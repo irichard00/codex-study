@@ -3,6 +3,10 @@
   import { MessageRouter, MessageType } from '../core/MessageRouter';
   import type { Event } from '../protocol/types';
   import type { EventMsg } from '../protocol/events';
+  import TerminalContainer from './components/TerminalContainer.svelte';
+  import TerminalMessage from './components/TerminalMessage.svelte';
+  import TerminalInput from './components/TerminalInput.svelte';
+  import type { MessageType as TerminalMessageType } from '../types/terminal';
 
   let router: MessageRouter;
   let messages: Array<{ type: 'user' | 'agent'; content: string; timestamp: number }> = [];
@@ -125,72 +129,61 @@
       minute: '2-digit',
     });
   }
+
+  function getMessageType(message: { type: 'user' | 'agent'; content: string }): 'default' | 'warning' | 'error' | 'input' | 'system' {
+    if (message.type === 'user') return 'input';
+    if (message.content.toLowerCase().startsWith('error:')) return 'error';
+    if (message.content.toLowerCase().includes('warning')) return 'warning';
+    if (message.content.toLowerCase().includes('system')) return 'system';
+    return 'default';
+  }
 </script>
 
-<div class="flex flex-col h-full">
-  <!-- Header -->
-  <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200 dark:border-gray-700">
+<TerminalContainer>
+  <!-- Status Line -->
+  <div class="flex justify-between mb-2">
+    <TerminalMessage type="system" content="Codex Terminal v1.0.0" />
     <div class="flex items-center space-x-2">
-      <h1 class="text-lg font-semibold">Codex Assistant</h1>
       {#if isProcessing}
-        <div class="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+        <TerminalMessage type="warning" content="[PROCESSING]" />
       {/if}
-    </div>
-    <div class="flex items-center space-x-2">
-      <div class="w-2 h-2 rounded-full"
-           class:bg-green-500={isConnected}
-           class:bg-red-500={!isConnected}
-           title={isConnected ? 'Connected' : 'Disconnected'}>
-      </div>
+      <TerminalMessage
+        type={isConnected ? 'system' : 'error'}
+        content={isConnected ? '[CONNECTED]' : '[DISCONNECTED]'}
+      />
     </div>
   </div>
 
   <!-- Messages -->
-  <div class="flex-1 overflow-y-auto p-4 space-y-3">
+  <div class="flex-1 overflow-y-auto mb-4">
     {#if messages.length === 0}
-      <div class="text-center text-gray-500 dark:text-gray-400 mt-8">
-        <p class="text-lg mb-2">Welcome to Codex</p>
-        <p class="text-sm">Start a conversation or select text on the page</p>
-      </div>
+      <TerminalMessage type="system" content="Welcome to Codex Terminal" />
+      <TerminalMessage type="default" content="Ready for input. Type a command to begin..." />
     {/if}
 
     {#each messages as message}
-      <div class="flex {message.type === 'user' ? 'justify-end' : 'justify-start'}">
-        <div class="max-w-[80%] rounded-lg px-4 py-2 {message.type === 'user'
-             ? 'bg-blue-500 text-white'
-             : 'bg-gray-100 dark:bg-gray-800'}">
-          <div class="text-sm whitespace-pre-wrap">{message.content}</div>
-          <div class="text-xs mt-1 opacity-70">
-            {formatTime(message.timestamp)}
+      <div class="mb-1">
+        {#if message.type === 'user'}
+          <div class="terminal-prompt">
+            <TerminalMessage type="input" content={message.content} />
           </div>
-        </div>
+        {:else}
+          <TerminalMessage type={getMessageType(message)} content={message.content} />
+        {/if}
       </div>
     {/each}
   </div>
 
   <!-- Input -->
-  <div class="border-t border-gray-200 dark:border-gray-700 p-4">
-    <div class="flex space-x-2">
-      <textarea
-        bind:value={inputText}
-        on:keydown={handleKeydown}
-        placeholder="Type a message..."
-        disabled={!isConnected}
-        class="flex-1 px-3 py-2 border border-gray-300 dark:border-gray-600
-               rounded-lg resize-none focus:outline-none focus:ring-2
-               focus:ring-blue-500 dark:bg-gray-800"
-        rows="2" />
-      <button
-        on:click={sendMessage}
-        disabled={!isConnected || !inputText.trim()}
-        class="px-4 py-2 bg-blue-500 text-white rounded-lg
-               hover:bg-blue-600 disabled:opacity-50
-               disabled:cursor-not-allowed transition-colors">
-        Send
-      </button>
-    </div>
+  <div class="terminal-prompt flex items-center">
+    <span class="text-term-dim-green mr-2">&gt;</span>
+    <TerminalInput
+      bind:value={inputText}
+      onSubmit={sendMessage}
+      placeholder="Enter command..."
+    />
   </div>
-</div>
+</TerminalContainer>
 
 <style>
   /* Component-specific styles */

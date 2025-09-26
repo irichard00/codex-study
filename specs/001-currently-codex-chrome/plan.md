@@ -1,8 +1,8 @@
 
-# Implementation Plan: [FEATURE]
+# Implementation Plan: Terminal-Style UI for Codex Chrome Extension
 
-**Branch**: `[###-feature-name]` | **Date**: [DATE] | **Spec**: [link]
-**Input**: Feature specification from `/specs/[###-feature-name]/spec.md`
+**Branch**: `001-currently-codex-chrome` | **Date**: 2025-09-25 | **Spec**: [spec.md](./spec.md)
+**Input**: Feature specification from `/specs/001-currently-codex-chrome/spec.md`
 
 ## Execution Flow (/plan command scope)
 ```
@@ -31,23 +31,27 @@
 - Phase 3-4: Implementation execution (manual or via tools)
 
 ## Summary
-[Extract from feature spec: primary requirement + technical approach from research]
+Implement a terminal-style UI for the Codex Chrome extension's Svelte-based side panel, transforming the interface to have a black background with green default text, yellow for warnings, and red for errors. The implementation uses pure Tailwind CSS configuration for simplicity and maintainability, avoiding unnecessary dependencies while providing an authentic terminal appearance.
 
 ## Technical Context
-**Language/Version**: [e.g., Python 3.11, Swift 5.9, Rust 1.75 or NEEDS CLARIFICATION]  
-**Primary Dependencies**: [e.g., FastAPI, UIKit, LLVM or NEEDS CLARIFICATION]  
-**Storage**: [if applicable, e.g., PostgreSQL, CoreData, files or N/A]  
-**Testing**: [e.g., pytest, XCTest, cargo test or NEEDS CLARIFICATION]  
-**Target Platform**: [e.g., Linux server, iOS 15+, WASM or NEEDS CLARIFICATION]
-**Project Type**: [single/web/mobile - determines source structure]  
-**Performance Goals**: [domain-specific, e.g., 1000 req/s, 10k lines/sec, 60 fps or NEEDS CLARIFICATION]  
-**Constraints**: [domain-specific, e.g., <200ms p95, <100MB memory, offline-capable or NEEDS CLARIFICATION]  
-**Scale/Scope**: [domain-specific, e.g., 10k users, 1M LOC, 50 screens or NEEDS CLARIFICATION]
+**Language/Version**: TypeScript 5.x / Svelte 4.x
+**Primary Dependencies**: Tailwind CSS v4, PostCSS, Svelte
+**Storage**: N/A (presentation layer only)
+**Testing**: Vitest
+**Target Platform**: Chrome Extension (Manifest V3)
+**Project Type**: Chrome Extension (frontend-only)
+**Performance Goals**: < 100ms initial render, 60fps scrolling
+**Constraints**: Keep code concise and simple, CSP-compliant, < 10KB CSS bundle impact
+**Scale/Scope**: UI styling for single extension side panel
 
 ## Constitution Check
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-[Gates determined based on constitution file]
+- [x] **Simplicity**: Pure CSS solution, no complex dependencies
+- [x] **Maintainability**: Using existing Tailwind framework
+- [x] **Performance**: Minimal CSS additions, leveraging utility classes
+- [x] **Accessibility**: Maintaining WCAG contrast ratios
+- [x] **No unnecessary complexity**: Avoiding CRT effects and animations per requirements
 
 ## Project Structure
 
@@ -70,43 +74,23 @@ specs/[###-feature]/
   not include Option labels.
 -->
 ```
-# [REMOVE IF UNUSED] Option 1: Single project (DEFAULT)
-src/
-├── models/
-├── services/
-├── cli/
-└── lib/
-
-tests/
-├── contract/
-├── integration/
-└── unit/
-
-# [REMOVE IF UNUSED] Option 2: Web application (when "frontend" + "backend" detected)
-backend/
+codex-chrome/
 ├── src/
-│   ├── models/
-│   ├── services/
-│   └── api/
-└── tests/
-
-frontend/
-├── src/
-│   ├── components/
-│   ├── pages/
-│   └── services/
-└── tests/
-
-# [REMOVE IF UNUSED] Option 3: Mobile + API (when "iOS/Android" detected)
-api/
-└── [same as backend above]
-
-ios/ or android/
-└── [platform-specific structure: feature modules, UI flows, platform tests]
+│   ├── sidepanel/
+│   │   ├── components/
+│   │   │   ├── TerminalContainer.svelte
+│   │   │   ├── TerminalMessage.svelte
+│   │   │   └── TerminalInput.svelte
+│   │   ├── App.svelte
+│   │   ├── styles.css (terminal styles)
+│   │   └── main.ts
+│   └── tests/
+│       └── terminal-ui.test.ts
+├── tailwind.config.js (theme configuration)
+└── postcss.config.js
 ```
 
-**Structure Decision**: [Document the selected structure and reference the real
-directories captured above]
+**Structure Decision**: Chrome extension frontend structure with Svelte components for terminal UI elements
 
 ## Phase 0: Outline & Research
 1. **Extract unknowns from Technical Context** above:
@@ -127,7 +111,11 @@ directories captured above]
    - Rationale: [why chosen]
    - Alternatives considered: [what else evaluated]
 
-**Output**: research.md with all NEEDS CLARIFICATION resolved
+**Output**: ✅ research.md completed with all clarifications resolved
+- Decision to use pure Tailwind CSS approach
+- Terminal color scheme defined
+- Monospace font configuration determined
+- Accessibility considerations addressed
 
 ## Phase 1: Design & Contracts
 *Prerequisites: research.md complete*
@@ -160,7 +148,11 @@ directories captured above]
    - Keep under 150 lines for token efficiency
    - Output to repository root
 
-**Output**: data-model.md, /contracts/*, failing tests, quickstart.md, agent-specific file
+**Output**:
+✅ data-model.md - Theme configuration and CSS properties model
+✅ /contracts/terminal-theme.contract.md - Component styling contracts
+✅ quickstart.md - Implementation guide and verification steps
+✅ CLAUDE.md - Updated via script (partial update due to template placeholders)
 
 ## Phase 2: Task Planning Approach
 *This section describes what the /tasks command will do - DO NOT execute during /plan*
@@ -178,7 +170,11 @@ directories captured above]
 - Dependency order: Models before services before UI
 - Mark [P] for parallel execution (independent files)
 
-**Estimated Output**: 25-30 numbered, ordered tasks in tasks.md
+**Estimated Output**: 15-20 numbered, ordered tasks in tasks.md
+- Tailwind configuration tasks
+- Component creation tasks
+- Style implementation tasks
+- Testing and verification tasks
 
 **IMPORTANT**: This phase is executed by the /tasks command, NOT by /plan
 
@@ -202,18 +198,18 @@ directories captured above]
 *This checklist is updated during execution flow*
 
 **Phase Status**:
-- [ ] Phase 0: Research complete (/plan command)
-- [ ] Phase 1: Design complete (/plan command)
-- [ ] Phase 2: Task planning complete (/plan command - describe approach only)
+- [x] Phase 0: Research complete (/plan command)
+- [x] Phase 1: Design complete (/plan command)
+- [x] Phase 2: Task planning complete (/plan command - describe approach only)
 - [ ] Phase 3: Tasks generated (/tasks command)
 - [ ] Phase 4: Implementation complete
 - [ ] Phase 5: Validation passed
 
 **Gate Status**:
-- [ ] Initial Constitution Check: PASS
-- [ ] Post-Design Constitution Check: PASS
-- [ ] All NEEDS CLARIFICATION resolved
-- [ ] Complexity deviations documented
+- [x] Initial Constitution Check: PASS
+- [x] Post-Design Constitution Check: PASS
+- [x] All NEEDS CLARIFICATION resolved
+- [x] Complexity deviations documented (none required)
 
 ---
 *Based on Constitution v2.1.1 - See `/memory/constitution.md`*
