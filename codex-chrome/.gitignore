@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+*.log
+
+# Build outputs
+dist/
+build/
+*.tgz
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Keep .env.example and .env.defaults
+!.env.example
+!.env.defaults
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Generated config
+src/config/build-config.ts

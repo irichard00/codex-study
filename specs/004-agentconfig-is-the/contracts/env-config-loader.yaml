@@ -1,0 +1,231 @@
+openapi: 3.0.0
+info:
+  title: Environment Config Loader API
+  version: 1.0.0
+  description: Simplified environment configuration loading (no migration)
+
+paths:
+  /config/load:
+    post:
+      summary: Load environment configuration
+      operationId: loadEnvConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                envPath:
+                  type: string
+                  description: Path to .env file (optional)
+                environment:
+                  type: string
+                  enum: [development, production, test]
+                  description: Environment name for specific loading
+      responses:
+        '200':
+          description: Configuration loaded successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EnvironmentConfig'
+        '400':
+          description: Invalid request or malformed .env file
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+  /config/validate:
+    post:
+      summary: Validate environment configuration
+      operationId: validateEnvConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnvironmentConfig'
+      responses:
+        '200':
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationResult'
+
+  /config/transform:
+    post:
+      summary: Transform env vars to config object
+      operationId: transformEnvConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EnvironmentConfig'
+      responses:
+        '200':
+          description: Transformed configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ChromeConfig'
+        '400':
+          description: Transformation error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ValidationError'
+
+components:
+  schemas:
+    EnvironmentConfig:
+      type: object
+      additionalProperties:
+        type: string
+      description: Raw environment variables as key-value pairs
+
+    ChromeConfig:
+      type: object
+      properties:
+        model:
+          $ref: '#/components/schemas/ModelConfig'
+        providers:
+          type: object
+          additionalProperties:
+            $ref: '#/components/schemas/ProviderConfig'
+        preferences:
+          $ref: '#/components/schemas/UserPreferences'
+        cache:
+          $ref: '#/components/schemas/CacheSettings'
+        extension:
+          $ref: '#/components/schemas/ExtensionSettings'
+
+    ModelConfig:
+      type: object
+      properties:
+        selected:
+          type: string
+        provider:
+          type: string
+        contextWindow:
+          type: integer
+        maxOutputTokens:
+          type: integer
+        reasoningEffort:
+          type: string
+          enum: [low, medium, high]
+        verbosity:
+          type: string
+          enum: [low, medium, high]
+
+    ProviderConfig:
+      type: object
+      required: [id, name]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        apiKey:
+          type: string
+          description: Sanitized at build time
+        baseUrl:
+          type: string
+        timeout:
+          type: integer
+        organization:
+          type: string
+        version:
+          type: string
+
+    UserPreferences:
+      type: object
+      properties:
+        autoSync:
+          type: boolean
+        telemetryEnabled:
+          type: boolean
+        theme:
+          type: string
+          enum: [light, dark, system]
+
+    CacheSettings:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        ttl:
+          type: integer
+        maxSize:
+          type: integer
+        compressionEnabled:
+          type: boolean
+
+    ExtensionSettings:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        contentScriptEnabled:
+          type: boolean
+        allowedOrigins:
+          type: array
+          items:
+            type: string
+        storageQuotaWarning:
+          type: integer
+          minimum: 0
+          maximum: 100
+        permissions:
+          type: object
+          properties:
+            tabs:
+              type: boolean
+            storage:
+              type: boolean
+            notifications:
+              type: boolean
+            clipboardRead:
+              type: boolean
+            clipboardWrite:
+              type: boolean
+
+    ValidationResult:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        errors:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationError'
+        warnings:
+          type: array
+          items:
+            $ref: '#/components/schemas/ValidationWarning'
+
+    ValidationError:
+      type: object
+      required: [field, message]
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+        value:
+          type: any
+        suggestion:
+          type: string
+
+    ValidationWarning:
+      type: object
+      properties:
+        field:
+          type: string
+        message:
+          type: string
+        suggestion:
+          type: string

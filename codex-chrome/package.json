@@ -10,7 +10,8 @@
     "test": "vitest",
     "type-check": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.svelte",
-    "format": "prettier --write 'src/**/*.{ts,svelte,html,css}'"
+    "format": "prettier --write 'src/**/*.{ts,svelte,html,css}'",
+    "validate:env": "node scripts/validate-env.js"
   },
   "keywords": [],
   "author": "",
@@ -26,6 +27,7 @@
     "@vitest/ui": "^3.2.4",
     "autoprefixer": "^10.4.21",
     "chrome-mock": "^0.0.9",
+    "dotenv": "^17.2.2",
     "eslint": "^9.36.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-svelte": "^3.12.4",
@@ -43,6 +45,6 @@
     "@types/eventsource": "^1.1.15",
     "eventsource": "^2.0.2",
     "uuid": "^13.0.0",
-    "zod": "^3.23.8"
+    "zod": "^3.25.76"
   }
 }

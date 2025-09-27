@@ -24,18 +24,27 @@ function log(message, color = colors.reset) {
 function build() {
   try {
     log('\n🔨 Building Codex Chrome Extension...', colors.yellow);
-    
+
+    // Validate environment configuration first
+    log('\n🔍 Validating environment configuration...', colors.yellow);
+    try {
+      execSync('node scripts/validate-env.js', { stdio: 'inherit' });
+    } catch (error) {
+      log('❌ Environment validation failed. Please fix configuration errors before building.', colors.red);
+      process.exit(1);
+    }
+
     // Clean dist directory
     const distPath = path.join(__dirname, '..', 'dist');
     if (fs.existsSync(distPath)) {
       fs.rmSync(distPath, { recursive: true });
     }
     fs.mkdirSync(distPath, { recursive: true });
-    
+
     // Run Vite build
     log('\n📦 Building with Vite...', colors.yellow);
     execSync('npm run vite:build', { stdio: 'inherit' });
-    
+
     // Copy manifest
     log('\n📄 Copying manifest...', colors.yellow);
     const manifestSrc = path.join(__dirname, '..', 'manifest.json');

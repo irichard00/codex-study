@@ -1,12 +1,20 @@
 import { defineConfig } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import envConfigPlugin from './src/build/vite-plugin-env.js';
 import { resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 export default defineConfig({
-  plugins: [svelte()],
+  plugins: [
+    envConfigPlugin({
+      envPath: '.env',
+      defaultsPath: '.env.defaults',
+      outputPath: 'src/config/build-config.ts'
+    }),
+    svelte()
+  ],
   build: {
     rollupOptions: {
       input: {

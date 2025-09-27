@@ -52,11 +52,24 @@ export class AgentConfig implements IConfigService {
     if (this.initialized) return;
 
     try {
+      // Try to use build-time configuration if available
+      let buildConfig: Partial<IChromeConfig> | undefined;
+      try {
+        const { BUILD_CONFIG } = await import('./build-config');
+        buildConfig = BUILD_CONFIG;
+      } catch {
+        // Build config not available, use defaults
+      }
+
       const storedConfig = await this.storage.get();
       if (storedConfig) {
-        this.currentConfig = mergeWithDefaults(storedConfig);
+        this.currentConfig = mergeWithDefaults(storedConfig, buildConfig);
+      } else if (buildConfig) {
+        // Use build config as base
+        this.currentConfig = mergeWithDefaults(buildConfig);
+        await this.storage.set(this.currentConfig);
       } else {
-        // First time setup
+        // First time setup with defaults
         this.currentConfig = DEFAULT_CHROME_CONFIG;
         await this.storage.set(this.currentConfig);
       }
