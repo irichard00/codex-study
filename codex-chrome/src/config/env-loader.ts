@@ -137,17 +137,8 @@ export function initializeRuntime(secrets: Record<string, string>): IChromeConfi
   async validateRequired(env: EnvironmentConfig): Promise<ValidationResult> {
     const warnings: ValidationWarning[] = [];
 
-    // Check for API keys
-    const hasOpenAIKey = env.CODEX_PROVIDER_OPENAI_API_KEY;
-    const hasAnthropicKey = env.CODEX_PROVIDER_ANTHROPIC_API_KEY;
-
-    if (!hasOpenAIKey && !hasAnthropicKey) {
-      warnings.push({
-        field: 'API_KEY',
-        message: 'No API keys configured',
-        suggestion: 'Add CODEX_PROVIDER_OPENAI_API_KEY or CODEX_PROVIDER_ANTHROPIC_API_KEY to your .env file',
-      });
-    }
+    // API key validation removed - not required per requirements
+    // API keys are optional for build
 
     // Check for model selection
     if (!env.CODEX_MODEL_SELECTED) {

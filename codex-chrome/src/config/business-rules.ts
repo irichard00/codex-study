@@ -46,30 +46,11 @@ export function validateStorageQuota(quotaWarning?: number): BusinessRuleViolati
 }
 
 /**
- * Validates that at least one provider has an API key
+ * Validates API keys - currently disabled per requirements
+ * API keys are optional and not required for build
  */
 export function validateApiKeys(config: Partial<IChromeConfig>): BusinessRuleViolation | null {
-  if (config.providers) {
-    const hasValidKey = Object.values(config.providers).some(
-      provider => provider.apiKey && provider.apiKey.trim() !== '' && provider.apiKey !== '{{RUNTIME_REPLACE}}'
-    );
-
-    if (!hasValidKey) {
-      return {
-        rule: 'api-keys',
-        message: 'At least one provider must have a valid API key',
-        field: 'providers',
-        suggestion: 'Add an API key for at least one provider (e.g., CODEX_PROVIDER_OPENAI_API_KEY)',
-      };
-    }
-  } else {
-    return {
-      rule: 'api-keys',
-      message: 'No providers configured',
-      field: 'providers',
-      suggestion: 'Configure at least one provider with an API key',
-    };
-  }
+  // API key validation disabled - not required for build
   return null;
 }
 

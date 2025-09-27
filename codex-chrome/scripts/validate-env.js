@@ -137,13 +137,8 @@ function validateBusinessRules(env) {
     }
   }
 
-  // Rule: At least one provider must have an API key
-  const hasOpenAIKey = env.CODEX_PROVIDER_OPENAI_API_KEY && env.CODEX_PROVIDER_OPENAI_API_KEY !== '';
-  const hasAnthropicKey = env.CODEX_PROVIDER_ANTHROPIC_API_KEY && env.CODEX_PROVIDER_ANTHROPIC_API_KEY !== '';
-
-  if (!hasOpenAIKey && !hasAnthropicKey) {
-    errors.push('At least one provider must have an API key configured');
-  }
+  // API key validation removed - not required per requirements
+  // API keys are optional for build
 
   return errors;
 }
@@ -196,10 +191,6 @@ function validateEnvironment() {
 
   // Check for missing recommended values
   log('\n⚠️  Checking for missing values...', colors.yellow);
-
-  if (!userEnv.CODEX_PROVIDER_OPENAI_API_KEY && !userEnv.CODEX_PROVIDER_ANTHROPIC_API_KEY) {
-    warnings.push('No API keys configured - using defaults may not work');
-  }
 
   if (warnings.length > 0) {
     warnings.forEach(warning => {

@@ -150,10 +150,10 @@ npm run build
 ```
 
 Common validation rules:
-- At least one provider must have an API key
 - `maxOutputTokens` must not exceed `contextWindow`
 - Storage quota warning must be between 0-100
 - Selected provider must be configured
+- API keys are optional (not required for build)
 
 #### Security Notes
 
