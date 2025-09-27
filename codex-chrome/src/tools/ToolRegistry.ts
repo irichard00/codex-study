@@ -7,6 +7,7 @@
 
 import { Event } from '../protocol/types';
 import { EventCollector } from '../tests/utils/test-helpers';
+import type { AgentConfig } from '../config/AgentConfig';
 
 /**
  * Tool definition structure
@@ -143,10 +144,20 @@ interface ToolRegistryEntry {
  */
 export class ToolRegistry {
   private tools: Map<string, ToolRegistryEntry> = new Map();
+  private config?: AgentConfig;
   private eventCollector?: EventCollector;
 
-  constructor(eventCollector?: EventCollector) {
-    this.eventCollector = eventCollector;
+  constructor(configOrEventCollector?: AgentConfig | EventCollector, eventCollector?: EventCollector) {
+    // Handle both signatures for backward compatibility
+    if (configOrEventCollector && typeof configOrEventCollector === 'object' &&
+        'getConfig' in configOrEventCollector) {
+      // New signature: ToolRegistry(config?: AgentConfig, eventCollector?: EventCollector)
+      this.config = configOrEventCollector as AgentConfig;
+      this.eventCollector = eventCollector;
+    } else {
+      // Old signature: ToolRegistry(eventCollector?: EventCollector)
+      this.eventCollector = configOrEventCollector as EventCollector;
+    }
   }
 
   /**
@@ -499,6 +510,48 @@ export class ToolRegistry {
    */
   clear(): void {
     this.tools.clear();
+  }
+
+  /**
+   * Initialize with configuration
+   */
+  async initialize(config: AgentConfig): Promise<void> {
+    this.config = config;
+    // Load configured tools based on config
+    await this.loadConfiguredTools();
+  }
+
+  /**
+   * Get enabled tools from config
+   */
+  getEnabledTools(): string[] {
+    // Config integration placeholder - returns default
+    return [];
+  }
+
+  /**
+   * Get tool timeout from config
+   */
+  getToolTimeout(): number {
+    // Config integration placeholder - returns default
+    return 30000;
+  }
+
+  /**
+   * Get sandbox policy from config
+   */
+  getSandboxPolicy(): any {
+    // Config integration placeholder - returns default
+    return { mode: 'workspace-write' };
+  }
+
+  /**
+   * Load tools based on configuration
+   */
+  private async loadConfiguredTools(): Promise<void> {
+    const enabledTools = this.getEnabledTools();
+    // Implementation would load only the enabled tools
+    // For now, this is a placeholder
   }
 
   /**
