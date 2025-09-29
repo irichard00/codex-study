@@ -10,7 +10,8 @@
     "scripting",
     "webNavigation",
     "sidePanel",
-    "contextMenus"
+    "contextMenus",
+    "alarms"
   ],
   "host_permissions": ["<all_urls>"],
   "web_accessible_resources": [{

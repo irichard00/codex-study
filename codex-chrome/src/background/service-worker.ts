@@ -553,33 +553,59 @@ function setupPeriodicTasks(): void {
   }, 100); // Check every 100ms
 
   // Cleanup old data and manage storage periodically
-  chrome.alarms.create('storage-cleanup', { periodInMinutes: 60 });
-  chrome.alarms.create('cache-cleanup', { periodInMinutes: 30 });
-  chrome.alarms.create('quota-check', { periodInMinutes: 10 });
+  // Check if chrome.alarms API is available
+  if (typeof chrome !== 'undefined' && chrome.alarms) {
+    chrome.alarms.create('storage-cleanup', { periodInMinutes: 60 });
+    chrome.alarms.create('cache-cleanup', { periodInMinutes: 30 });
+    chrome.alarms.create('quota-check', { periodInMinutes: 10 });
 
-  // Handle alarms
-  chrome.alarms.onAlarm.addListener(async (alarm) => {
-    switch (alarm.name) {
-      case 'storage-cleanup':
-        await performStorageCleanup();
-        break;
-      case 'cache-cleanup':
-        if (cacheManager) {
-          const removed = await cacheManager.cleanup();
-          console.log(`Cache cleanup: ${removed} expired entries removed`);
-        }
-        break;
-      case 'quota-check':
-        if (storageQuotaManager) {
-          const shouldCleanup = await storageQuotaManager.shouldCleanup();
-          if (shouldCleanup) {
-            const results = await storageQuotaManager.cleanup(70);
-            console.log('Quota cleanup results:', results);
+    // Handle alarms
+    chrome.alarms.onAlarm.addListener(async (alarm) => {
+      switch (alarm.name) {
+        case 'storage-cleanup':
+          await performStorageCleanup();
+          break;
+        case 'cache-cleanup':
+          if (cacheManager) {
+            const removed = await cacheManager.cleanup();
+            console.log(`Cache cleanup: ${removed} expired entries removed`);
           }
+          break;
+        case 'quota-check':
+          if (storageQuotaManager) {
+            const shouldCleanup = await storageQuotaManager.shouldCleanup();
+            if (shouldCleanup) {
+              const results = await storageQuotaManager.cleanup(70);
+              console.log('Quota cleanup results:', results);
+            }
+          }
+          break;
+      }
+    });
+  } else {
+    console.warn('chrome.alarms API not available, periodic cleanup disabled');
+    // Fallback: Use setInterval for cleanup tasks if alarms API is not available
+    setInterval(async () => {
+      await performStorageCleanup();
+    }, 60 * 60 * 1000); // Every hour
+
+    setInterval(async () => {
+      if (cacheManager) {
+        const removed = await cacheManager.cleanup();
+        console.log(`Cache cleanup: ${removed} expired entries removed`);
+      }
+    }, 30 * 60 * 1000); // Every 30 minutes
+
+    setInterval(async () => {
+      if (storageQuotaManager) {
+        const shouldCleanup = await storageQuotaManager.shouldCleanup();
+        if (shouldCleanup) {
+          const results = await storageQuotaManager.cleanup(70);
+          console.log('Quota cleanup results:', results);
         }
-        break;
-    }
-  });
+      }
+    }, 10 * 60 * 1000); // Every 10 minutes
+  }
 }
 
 /**
