@@ -30,11 +30,40 @@ let conversationStore: ConversationStore | null = null;
 let cacheManager: CacheManager | null = null;
 let storageQuotaManager: StorageQuotaManager | null = null;
 let agentConfig: AgentConfig | null = null;
+let isInitialized = false;
+let initializationPromise: Promise<void> | null = null;
 
 /**
  * Initialize the service worker
  */
 async function initialize(): Promise<void> {
+  // If already initialized, return immediately
+  if (isInitialized) {
+    console.log('Service worker already initialized, skipping...');
+    return;
+  }
+
+  // If initialization is in progress, wait for it
+  if (initializationPromise) {
+    console.log('Initialization already in progress, waiting...');
+    return initializationPromise;
+  }
+
+  // Start initialization
+  initializationPromise = doInitialize();
+
+  try {
+    await initializationPromise;
+    isInitialized = true;
+  } finally {
+    initializationPromise = null;
+  }
+}
+
+/**
+ * Actual initialization logic
+ */
+async function doInitialize(): Promise<void> {
   console.log('Initializing Codex background service worker');
 
   // Initialize configuration singleton first
@@ -714,6 +743,10 @@ chrome.runtime.onSuspend.addListener(async () => {
   if (storageQuotaManager) {
     storageQuotaManager.destroy();
   }
+
+  // Reset initialization flag so it can be re-initialized if the service worker restarts
+  isInitialized = false;
+  initializationPromise = null;
 });
 
 // Initialize on script load
