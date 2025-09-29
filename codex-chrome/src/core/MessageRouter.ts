@@ -600,18 +600,19 @@ interface PendingRequest {
 export function createRouter(): MessageRouter {
   // Determine source based on context
   let source: ExtensionMessage['source'] = 'background';
-  
+
   if (typeof chrome !== 'undefined') {
     if (chrome.sidePanel) {
       source = 'sidepanel';
-    } else if (window.location.protocol === 'chrome-extension:') {
+    } else if (typeof window !== 'undefined' && window.location?.protocol === 'chrome-extension:') {
       // Could be popup or background
-      if (document.querySelector('body')) {
+      if (typeof document !== 'undefined' && document.querySelector('body')) {
         source = 'popup';
       }
-    } else {
+    } else if (typeof window !== 'undefined') {
       source = 'content';
     }
+    // If window is not defined, we're in a service worker, so keep 'background'
   }
 
   return new MessageRouter(source);

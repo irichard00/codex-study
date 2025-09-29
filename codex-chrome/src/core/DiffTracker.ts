@@ -553,7 +553,11 @@ export class DiffTracker {
    * Start storage observation
    */
   private startStorageObservation(target: ChangeTarget): void {
-    if (typeof window === 'undefined') return;
+    // Check if window is available (not in service worker context)
+    if (typeof window === 'undefined') {
+      console.debug('Storage observation not available in service worker context');
+      return;
+    }
 
     const storageType = target.storageType || 'local';
     const handlerKey = `${storageType}_${target.storageKey}`;
@@ -587,6 +591,7 @@ export class DiffTracker {
       }
     };
 
+    // Safe to use window here after the check above
     window.addEventListener('storage', handler);
     this.storageHandlers.set(handlerKey, handler);
   }
