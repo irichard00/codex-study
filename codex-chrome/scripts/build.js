@@ -93,6 +93,21 @@ function build() {
       });
     }
     
+    // Copy prompts directory
+    const promptsSrc = path.join(__dirname, '..', 'src', 'prompts');
+    const promptsDest = path.join(distPath, 'prompts');
+    if (fs.existsSync(promptsSrc)) {
+      log('\n📝 Copying prompts...', colors.yellow);
+      fs.mkdirSync(promptsDest, { recursive: true });
+      fs.readdirSync(promptsSrc).forEach(file => {
+        fs.copyFileSync(
+          path.join(promptsSrc, file),
+          path.join(promptsDest, file)
+        );
+      });
+      log('  ✓ Copied prompts directory', colors.green);
+    }
+
     // Create placeholder icons if they don't exist
     const iconsDest = path.join(distPath, 'icons');
     if (!fs.existsSync(iconsDest)) {

@@ -6,6 +6,7 @@
   import TerminalContainer from './components/TerminalContainer.svelte';
   import TerminalMessage from './components/TerminalMessage.svelte';
   import TerminalInput from './components/TerminalInput.svelte';
+  import Settings from './Settings.svelte';
   import type { MessageType as TerminalMessageType } from '../types/terminal';
 
   let router: MessageRouter;
@@ -13,6 +14,8 @@
   let inputText = '';
   let isConnected = false;
   let isProcessing = false;
+  let showSettings = false;
+  let showTooltip = false;
 
   onMount(() => {
     // Initialize router
@@ -137,6 +140,19 @@
     if (message.content.toLowerCase().includes('system')) return 'system';
     return 'default';
   }
+
+  function toggleSettings() {
+    showSettings = !showSettings;
+  }
+
+  function handleSettingsClose() {
+    showSettings = false;
+  }
+
+  function handleAuthUpdated(event: CustomEvent) {
+    // Handle auth updates if needed
+    console.log('Auth updated:', event.detail);
+  }
 </script>
 
 <TerminalContainer>
@@ -183,24 +199,69 @@
       placeholder="Enter command..."
     />
   </div>
+
+  <!-- Settings Gear Icon -->
+  <div class="fixed bottom-4 right-4">
+    <button
+      class="settings-button p-2 rounded-full bg-term-bg-dark border border-term-border hover:bg-term-bg-hover transition-colors relative"
+      on:click={toggleSettings}
+      on:mouseenter={() => showTooltip = true}
+      on:mouseleave={() => showTooltip = false}
+      aria-label="Settings"
+    >
+      <!-- Gear Icon SVG -->
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-term-dim-green" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+      </svg>
+
+      <!-- Tooltip -->
+      {#if showTooltip}
+        <div class="tooltip absolute bottom-full mb-2 right-0 px-2 py-1 bg-term-bg-dark border border-term-border rounded text-xs text-term-dim-green whitespace-nowrap">
+          setting
+        </div>
+      {/if}
+    </button>
+  </div>
 </TerminalContainer>
+
+<!-- Settings Modal -->
+{#if showSettings}
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
+    <div class="bg-term-bg-dark border border-term-border rounded-lg max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+      <Settings
+        on:authUpdated={handleAuthUpdated}
+        on:close={handleSettingsClose}
+      />
+    </div>
+  </div>
+{/if}
 
 <style>
   /* Component-specific styles */
-  textarea {
-    font-family: inherit;
+
+  .settings-button {
+    z-index: 40;
+    transition: all 0.2s ease;
   }
 
-  .animate-pulse {
-    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  .settings-button:hover {
+    transform: rotate(30deg);
   }
 
-  @keyframes pulse {
-    0%, 100% {
-      opacity: 1;
+  .tooltip {
+    animation: fadeIn 0.2s ease;
+    z-index: 50;
+  }
+
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+      transform: translateY(4px);
     }
-    50% {
-      opacity: .5;
+    to {
+      opacity: 1;
+      transform: translateY(0);
     }
   }
 </style>

@@ -1,0 +1,183 @@
+{
+  "events": {
+    "settings": {
+      "openSettings": {
+        "trigger": "Click on gear icon",
+        "payload": null,
+        "response": {
+          "action": "Display settings modal",
+          "state": {
+            "isOpen": true,
+            "isLoading": true
+          }
+        }
+      },
+      "closeSettings": {
+        "trigger": "Click on close button or outside modal",
+        "payload": null,
+        "response": {
+          "action": "Hide settings modal",
+          "state": {
+            "isOpen": false,
+            "error": null,
+            "success": null
+          }
+        }
+      },
+      "showTooltip": {
+        "trigger": "Hover over gear icon",
+        "payload": null,
+        "response": {
+          "action": "Display tooltip",
+          "content": "setting"
+        }
+      }
+    },
+    "apiKey": {
+      "addApiKey": {
+        "trigger": "Click on 'Add API Key' button",
+        "payload": null,
+        "response": {
+          "action": "Show API key input form",
+          "state": {
+            "showInput": true,
+            "error": null
+          }
+        }
+      },
+      "saveApiKey": {
+        "trigger": "Submit API key form",
+        "payload": {
+          "apiKey": "string"
+        },
+        "validation": {
+          "pattern": "^sk-[A-Za-z0-9]{40,}$",
+          "minLength": 43,
+          "maxLength": 200
+        },
+        "response": {
+          "success": {
+            "action": "Save to storage and update UI",
+            "state": {
+              "hasApiKey": true,
+              "maskedKey": "sk-abc***",
+              "success": "API key saved successfully",
+              "showInput": false
+            }
+          },
+          "failure": {
+            "action": "Display error message",
+            "state": {
+              "error": "Invalid API key format",
+              "showInput": true
+            }
+          }
+        }
+      },
+      "updateApiKey": {
+        "trigger": "Click on 'Update' button",
+        "payload": null,
+        "response": {
+          "action": "Show input with current key cleared",
+          "state": {
+            "showInput": true,
+            "error": null,
+            "success": null
+          }
+        }
+      },
+      "deleteApiKey": {
+        "trigger": "Click on 'Clear API Key' button",
+        "confirmation": {
+          "required": true,
+          "message": "Are you sure you want to delete your API key?"
+        },
+        "response": {
+          "confirmed": {
+            "action": "Remove from storage",
+            "state": {
+              "hasApiKey": false,
+              "maskedKey": null,
+              "success": "API key deleted successfully"
+            }
+          },
+          "cancelled": {
+            "action": "No change",
+            "state": "unchanged"
+          }
+        }
+      }
+    },
+    "validation": {
+      "validateInput": {
+        "trigger": "Input change or blur",
+        "payload": {
+          "value": "string"
+        },
+        "response": {
+          "valid": {
+            "action": "Clear error state",
+            "state": {
+              "error": null,
+              "inputValid": true
+            }
+          },
+          "invalid": {
+            "action": "Show validation error",
+            "state": {
+              "error": "API key must start with 'sk-' and be at least 43 characters",
+              "inputValid": false
+            }
+          }
+        }
+      }
+    }
+  },
+  "states": {
+    "initial": {
+      "isOpen": false,
+      "hasApiKey": false,
+      "maskedKey": null,
+      "showInput": false,
+      "error": null,
+      "success": null,
+      "isLoading": false
+    },
+    "withApiKey": {
+      "isOpen": true,
+      "hasApiKey": true,
+      "maskedKey": "sk-abc***",
+      "showInput": false,
+      "error": null,
+      "success": null,
+      "isLoading": false
+    },
+    "withoutApiKey": {
+      "isOpen": true,
+      "hasApiKey": false,
+      "maskedKey": null,
+      "showInput": false,
+      "error": null,
+      "success": null,
+      "isLoading": false
+    },
+    "inputting": {
+      "isOpen": true,
+      "hasApiKey": false,
+      "maskedKey": null,
+      "showInput": true,
+      "error": null,
+      "success": null,
+      "isLoading": false
+    },
+    "saving": {
+      "isOpen": true,
+      "hasApiKey": false,
+      "maskedKey": null,
+      "showInput": true,
+      "error": null,
+      "success": null,
+      "isLoading": true
+    }
+  }
+}

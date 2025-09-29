@@ -1,0 +1,208 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Chrome Storage API Contract",
+    "version": "1.0.0",
+    "description": "Contract for Chrome extension storage operations for API key management"
+  },
+  "paths": {
+    "/storage/apikey": {
+      "get": {
+        "summary": "Retrieve API key from storage",
+        "operationId": "getApiKey",
+        "responses": {
+          "200": {
+            "description": "API key retrieved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No API key found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "Save API key to storage",
+        "operationId": "saveApiKey",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "API key saved successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid API key format",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "507": {
+            "description": "Storage quota exceeded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "Remove API key from storage",
+        "operationId": "deleteApiKey",
+        "responses": {
+          "200": {
+            "description": "API key deleted successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SuccessResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No API key to delete",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ApiKeyData": {
+        "type": "object",
+        "required": ["apiKey", "createdAt", "lastModified", "isValid"],
+        "properties": {
+          "apiKey": {
+            "type": "string",
+            "pattern": "^sk-[A-Za-z0-9]{40,}$",
+            "minLength": 43,
+            "maxLength": 200,
+            "description": "OpenAI API key"
+          },
+          "createdAt": {
+            "type": "integer",
+            "description": "Unix timestamp of creation"
+          },
+          "lastModified": {
+            "type": "integer",
+            "description": "Unix timestamp of last modification"
+          },
+          "isValid": {
+            "type": "boolean",
+            "description": "Whether key passes format validation"
+          }
+        }
+      },
+      "ApiKeyRequest": {
+        "type": "object",
+        "required": ["apiKey"],
+        "properties": {
+          "apiKey": {
+            "type": "string",
+            "minLength": 43,
+            "maxLength": 200,
+            "description": "OpenAI API key to save"
+          }
+        }
+      },
+      "ApiKeyResponse": {
+        "type": "object",
+        "required": ["exists", "maskedKey"],
+        "properties": {
+          "exists": {
+            "type": "boolean",
+            "description": "Whether an API key exists"
+          },
+          "maskedKey": {
+            "type": "string",
+            "nullable": true,
+            "description": "Masked version of API key (first 6 chars + ***)",
+            "example": "sk-abc***"
+          },
+          "createdAt": {
+            "type": "integer",
+            "description": "Unix timestamp of creation"
+          },
+          "lastModified": {
+            "type": "integer",
+            "description": "Unix timestamp of last modification"
+          }
+        }
+      },
+      "SuccessResponse": {
+        "type": "object",
+        "required": ["success", "message"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [true]
+          },
+          "message": {
+            "type": "string",
+            "description": "Success message"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["success", "error", "code"],
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "enum": [false]
+          },
+          "error": {
+            "type": "string",
+            "description": "Error message"
+          },
+          "code": {
+            "type": "string",
+            "enum": ["INVALID_KEY", "QUOTA_EXCEEDED", "STORAGE_ERROR", "KEY_NOT_FOUND"],
+            "description": "Error code"
+          }
+        }
+      }
+    }
+  }
+}
