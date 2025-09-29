@@ -61,7 +61,7 @@ export class Session {
       cwd: this.getDefaultCwd(),
       approval_policy: 'on-request',
       sandbox_policy: { mode: 'workspace-write' },
-      model: 'claude-3-sonnet',
+      model: 'gpt-5',
       summary: { enabled: false },
     });
   }
@@ -691,7 +691,7 @@ export class Session {
   getDefaultModel(): string {
     // AgentConfig.getConfig() might return synchronously or via property
     // For now, return default until config structure is clarified
-    return 'claude-3-sonnet';
+    return 'gpt-5';
   }
 
   /**

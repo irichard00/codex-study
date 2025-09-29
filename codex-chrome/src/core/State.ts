@@ -73,7 +73,7 @@ export class State {
   private sessionId: string;
 
   // Model state
-  private currentModel: string = 'claude-3-sonnet';
+  private currentModel: string = 'gpt-5';
 
   // Approval state
   private pendingApprovals: Map<string, any> = new Map();
@@ -481,7 +481,7 @@ export class State {
     state.rolloutHistory = data.rolloutHistory || [];
     state.sessionStartTime = data.sessionStartTime || Date.now();
     state.lastActivityTime = data.lastActivityTime || Date.now();
-    state.currentModel = data.currentModel || 'claude-3-sonnet';
+    state.currentModel = data.currentModel || 'gpt-5';
 
     return state;
   }

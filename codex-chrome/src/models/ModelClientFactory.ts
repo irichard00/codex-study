@@ -49,6 +49,7 @@ const STORAGE_KEYS = {
  */
 const MODEL_PROVIDER_MAP: Record<string, ModelProvider> = {
   // OpenAI models
+  'gpt-5': 'openai',
   'gpt-4': 'openai',
   'gpt-4-turbo': 'openai',
   'gpt-4o': 'openai',

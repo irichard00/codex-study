@@ -5,10 +5,10 @@
 import type { IChromeConfig, IModelConfig, IUserPreferences, ICacheSettings, IExtensionSettings, IPermissionSettings } from './types';
 
 export const DEFAULT_MODEL_CONFIG: IModelConfig = {
-  selected: 'gpt-3.5-turbo',
+  selected: 'gpt-5',
   provider: 'openai',
-  contextWindow: 16385,
-  maxOutputTokens: 4096,
+  contextWindow: 128000,
+  maxOutputTokens: 16384,
   autoCompactTokenLimit: null,
   reasoningEffort: null,
   reasoningSummary: 'none',
@@ -34,9 +34,9 @@ export const DEFAULT_CACHE_SETTINGS: ICacheSettings = {
 export const DEFAULT_PERMISSION_SETTINGS: IPermissionSettings = {
   tabs: true,
   storage: true, // Always required
-  notifications: false,
-  clipboardRead: false,
-  clipboardWrite: false
+  notifications: true,
+  clipboardRead: true,
+  clipboardWrite: true
 };
 
 export const DEFAULT_EXTENSION_SETTINGS: IExtensionSettings = {

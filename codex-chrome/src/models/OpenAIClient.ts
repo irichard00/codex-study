@@ -113,11 +113,10 @@ interface OpenAIStreamChunk {
  * Token counting mappings for different models
  */
 const TOKEN_MULTIPLIERS: Record<string, number> = {
+  'gpt-5': 1.2,
   'gpt-4': 1.3,
   'gpt-4-turbo': 1.3,
-  'gpt-4o': 1.2,
-  'gpt-3.5-turbo': 1.5,
-  'gpt-3.5-turbo-16k': 1.5,
+  'gpt-4o': 1.2
 };
 
 /**
@@ -128,7 +127,7 @@ export class OpenAIClient extends ModelClient {
   private readonly baseUrl: string;
   private readonly organization?: string;
   private streamProcessor: StreamProcessor | null = null;
-  private currentModel: string = 'gpt-4o';
+  private currentModel: string = 'gpt-5';
   private reasoningEffort: any = null;
   private reasoningSummary: any = { enabled: false };
 
@@ -521,6 +520,7 @@ export class OpenAIClient extends ModelClient {
   getContextWindow(): number | undefined {
     // Return context window sizes for known models
     const contextWindows: Record<string, number> = {
+      'gpt-5': 128000,
       'gpt-4': 8192,
       'gpt-4-32k': 32768,
       'gpt-4-turbo': 128000,
