@@ -1,10 +1,10 @@
 /**
- * Chrome Extension Configuration Type Definitions
- * T025-T029: Type definitions for the config system
+ * Agent Configuration Type Definitions
+ * Type definitions for the centralized config system
  */
 
-// T025: Main configuration interface
-export interface IChromeConfig {
+// Main centralized configuration interface for the agent
+export interface IAgentConfig {
   version: string;
   model: IModelConfig;
   providers: Record<string, IProviderConfig>;
@@ -13,9 +13,10 @@ export interface IChromeConfig {
   preferences: IUserPreferences;
   cache: ICacheSettings;
   extension: IExtensionSettings;
+  tools?: IToolsConfig;
 }
 
-// T026: Model configuration
+// Model configuration
 export interface IModelConfig {
   selected: string;
   provider: string;
@@ -27,7 +28,7 @@ export interface IModelConfig {
   verbosity?: 'low' | 'medium' | 'high' | null;
 }
 
-// T027: Provider configuration
+// Provider configuration
 export interface IProviderConfig {
   id: string;
   name: string;
@@ -40,7 +41,7 @@ export interface IProviderConfig {
   retryConfig?: IRetryConfig;
 }
 
-// T028: Profile configuration
+// Profile configuration
 export interface IProfileConfig {
   name: string;
   description?: string | null;
@@ -51,7 +52,7 @@ export interface IProfileConfig {
   lastUsed?: number | null;
 }
 
-// T029: Remaining interfaces
+// Remaining interfaces
 export interface IUserPreferences {
   autoSync?: boolean;
   telemetryEnabled?: boolean;
@@ -92,10 +93,30 @@ export interface IRetryConfig {
   backoffMultiplier?: number;
 }
 
+// Tool configuration
+export interface IToolsConfig {
+  enabled: string[];
+  disabled?: string[];
+  timeout?: number;
+  sandboxPolicy?: {
+    mode: 'danger-full-access' | 'read-only' | 'workspace-write';
+    writable_roots?: string[];
+    network_access?: boolean;
+  };
+  perToolConfig?: Record<string, IToolSpecificConfig>;
+}
+
+export interface IToolSpecificConfig {
+  enabled?: boolean;
+  timeout?: number;
+  maxRetries?: number;
+  options?: Record<string, any>;
+}
+
 // Storage interfaces
 export interface IConfigStorage {
-  get(): Promise<IChromeConfig | null>;
-  set(config: IChromeConfig): Promise<void>;
+  get(): Promise<IAgentConfig | null>;
+  set(config: IAgentConfig): Promise<void>;
   clear(): Promise<void>;
   getStorageInfo(): Promise<IStorageInfo>;
 }
@@ -109,9 +130,9 @@ export interface IStorageInfo {
 // Service interfaces
 export interface IConfigService {
   // Core operations
-  getConfig(): Promise<IChromeConfig>;
-  updateConfig(config: Partial<IChromeConfig>): Promise<IChromeConfig>;
-  resetConfig(preserveApiKeys?: boolean): Promise<IChromeConfig>;
+  getConfig(): Promise<IAgentConfig>;
+  updateConfig(config: Partial<IAgentConfig>): Promise<IAgentConfig>;
+  resetConfig(preserveApiKeys?: boolean): Promise<IAgentConfig>;
 
   // Model operations
   getModelConfig(): Promise<IModelConfig>;
@@ -134,14 +155,14 @@ export interface IConfigService {
 
   // Import/Export
   exportConfig(includeApiKeys?: boolean): Promise<IExportData>;
-  importConfig(data: IExportData): Promise<IChromeConfig>;
+  importConfig(data: IExportData): Promise<IAgentConfig>;
 }
 
 // Export/Import data structure
 export interface IExportData {
   version: string;
   exportDate: number;
-  config: IChromeConfig;
+  config: IAgentConfig;
 }
 
 // Event interfaces for config changes
@@ -161,9 +182,9 @@ export interface IConfigEventEmitter {
 
 // Factory interface
 export interface IConfigFactory {
-  createDefault(): IChromeConfig;
-  createFromStorage(data: any): IChromeConfig;
-  validateConfig(config: any): config is IChromeConfig;
+  createDefault(): IAgentConfig;
+  createFromStorage(data: any): IAgentConfig;
+  validateConfig(config: any): config is IAgentConfig;
 }
 
 // Error types

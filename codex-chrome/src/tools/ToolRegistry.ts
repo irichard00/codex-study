@@ -383,8 +383,8 @@ export class ToolRegistry {
         metadata: entry.definition.metadata,
       };
 
-      // Execute with timeout
-      const timeout = request.timeout || 30000; // 30 second default
+      // Execute with timeout (use config timeout if not specified)
+      const timeout = request.timeout || this.getToolTimeout();
       let result: any;
 
       try {
@@ -525,33 +525,52 @@ export class ToolRegistry {
    * Get enabled tools from config
    */
   getEnabledTools(): string[] {
-    // Config integration placeholder - returns default
-    return [];
+    if (!this.config) {
+      return [];
+    }
+    return this.config.getEnabledTools() as any as string[];
   }
 
   /**
    * Get tool timeout from config
    */
   getToolTimeout(): number {
-    // Config integration placeholder - returns default
-    return 30000;
+    if (!this.config) {
+      return 30000;
+    }
+    return this.config.getToolTimeout() as any as number;
   }
 
   /**
    * Get sandbox policy from config
    */
   getSandboxPolicy(): any {
-    // Config integration placeholder - returns default
-    return { mode: 'workspace-write' };
+    if (!this.config) {
+      return { mode: 'workspace-write' };
+    }
+    return this.config.getToolSandboxPolicy() as any;
   }
 
   /**
    * Load tools based on configuration
    */
   private async loadConfiguredTools(): Promise<void> {
-    const enabledTools = this.getEnabledTools();
-    // Implementation would load only the enabled tools
-    // For now, this is a placeholder
+    if (!this.config) {
+      return;
+    }
+
+    const enabledTools = await this.config.getEnabledTools();
+
+    // Filter out tools that are not enabled
+    const currentTools = Array.from(this.tools.keys());
+    for (const toolName of currentTools) {
+      if (!enabledTools.includes(toolName)) {
+        console.log(`Tool '${toolName}' is disabled by configuration, unregistering...`);
+        await this.unregister(toolName);
+      }
+    }
+
+    console.log(`Loaded ${enabledTools.length} enabled tools from configuration`);
   }
 
   /**

@@ -319,14 +319,22 @@ export class TurnManager {
    * Build completion request for model client
    */
   private async buildCompletionRequest(prompt: Prompt): Promise<CompletionRequest> {
-    return {
-      model: this.turnContext.getModel(),
+    const model = this.turnContext.getModel();
+    const request: CompletionRequest = {
+      model,
       messages: await this.convertPromptToMessages(prompt),
       tools: prompt.tools,
       stream: true,
-      temperature: 0.7,
       maxTokens: 4096,
     };
+
+    // For gpt-5, temperature must be 1 (default) or omitted
+    // For other models, use 0.7
+    if (model !== 'gpt-5') {
+      request.temperature = 0.7;
+    }
+
+    return request;
   }
 
   /**

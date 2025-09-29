@@ -1,20 +1,22 @@
 /**
- * T033-T036, T043: Main Chrome extension configuration class
+ * T033-T036, T043: Main centralized agent configuration class
  */
 
 import type {
-  IChromeConfig,
+  IAgentConfig,
   IModelConfig,
   IProviderConfig,
   IProfileConfig,
   IConfigService,
   IConfigChangeEvent,
-  IExportData
+  IExportData,
+  IToolsConfig,
+  IToolSpecificConfig
 } from './types';
 import { ConfigValidationError } from './types';
 import { ConfigStorage } from '../storage/ConfigStorage';
 import {
-  DEFAULT_CHROME_CONFIG,
+  DEFAULT_AGENT_CONFIG,
   mergeWithDefaults,
   getDefaultProviders
 } from './defaults';
@@ -23,13 +25,13 @@ import { validateConfig, validateModelConfig, validateProviderConfig } from './v
 export class AgentConfig implements IConfigService {
   private static instance: AgentConfig | null = null;
   private storage: ConfigStorage;
-  private currentConfig: IChromeConfig;
+  private currentConfig: IAgentConfig;
   private eventHandlers: Map<string, Set<(e: IConfigChangeEvent) => void>>;
   private initialized: boolean = false;
 
   private constructor() {
     this.storage = new ConfigStorage();
-    this.currentConfig = DEFAULT_CHROME_CONFIG;
+    this.currentConfig = DEFAULT_AGENT_CONFIG;
     this.eventHandlers = new Map();
   }
 
@@ -57,24 +59,24 @@ export class AgentConfig implements IConfigService {
         this.currentConfig = mergeWithDefaults(storedConfig);
       } else {
         // First time setup
-        this.currentConfig = DEFAULT_CHROME_CONFIG;
+        this.currentConfig = DEFAULT_AGENT_CONFIG;
         await this.storage.set(this.currentConfig);
       }
       this.initialized = true;
     } catch (error) {
       console.error('Failed to initialize config:', error);
-      this.currentConfig = DEFAULT_CHROME_CONFIG;
+      this.currentConfig = DEFAULT_AGENT_CONFIG;
       this.initialized = true;
     }
   }
 
-  // T034: Core CRUD operations
-  async getConfig(): Promise<IChromeConfig> {
+  // Core CRUD operations
+  async getConfig(): Promise<IAgentConfig> {
     await this.initialize();
     return { ...this.currentConfig };
   }
 
-  async updateConfig(config: Partial<IChromeConfig>): Promise<IChromeConfig> {
+  async updateConfig(config: Partial<IAgentConfig>): Promise<IAgentConfig> {
     await this.initialize();
 
     const oldConfig = { ...this.currentConfig };
@@ -99,10 +101,10 @@ export class AgentConfig implements IConfigService {
     return { ...this.currentConfig };
   }
 
-  async resetConfig(preserveApiKeys?: boolean): Promise<IChromeConfig> {
+  async resetConfig(preserveApiKeys?: boolean): Promise<IAgentConfig> {
     await this.initialize();
 
-    let newConfig = DEFAULT_CHROME_CONFIG;
+    let newConfig = DEFAULT_AGENT_CONFIG;
 
     if (preserveApiKeys && this.currentConfig.providers) {
       // Preserve API keys from existing providers
@@ -353,7 +355,7 @@ export class AgentConfig implements IConfigService {
     };
   }
 
-  async importConfig(data: IExportData): Promise<IChromeConfig> {
+  async importConfig(data: IExportData): Promise<IAgentConfig> {
     const validation = validateConfig(data.config);
     if (!validation.valid) {
       throw new ConfigValidationError(
@@ -367,6 +369,108 @@ export class AgentConfig implements IConfigService {
     await this.storage.set(this.currentConfig);
 
     return { ...this.currentConfig };
+  }
+
+  // Tool configuration operations
+  async getToolsConfig(): Promise<IToolsConfig> {
+    await this.initialize();
+    return { ...(this.currentConfig.tools || {}) } as IToolsConfig;
+  }
+
+  async updateToolsConfig(config: Partial<IToolsConfig>): Promise<IToolsConfig> {
+    await this.initialize();
+
+    const oldConfig = this.currentConfig.tools;
+    const newConfig = {
+      ...(this.currentConfig.tools || {}),
+      ...config,
+      sandboxPolicy: {
+        ...(this.currentConfig.tools?.sandboxPolicy || {}),
+        ...(config.sandboxPolicy || {})
+      },
+      perToolConfig: {
+        ...(this.currentConfig.tools?.perToolConfig || {}),
+        ...(config.perToolConfig || {})
+      }
+    };
+
+    this.currentConfig.tools = newConfig as IToolsConfig;
+    await this.storage.set(this.currentConfig);
+    this.emitChangeEvent('tools' as any, oldConfig, newConfig);
+
+    return newConfig as IToolsConfig;
+  }
+
+  async getEnabledTools(): Promise<string[]> {
+    await this.initialize();
+    return this.currentConfig.tools?.enabled || [];
+  }
+
+  async enableTool(toolName: string): Promise<void> {
+    await this.initialize();
+
+    const tools = this.currentConfig.tools || { enabled: [], disabled: [] };
+    if (!tools.enabled.includes(toolName)) {
+      tools.enabled.push(toolName);
+    }
+    tools.disabled = (tools.disabled || []).filter(name => name !== toolName);
+
+    this.currentConfig.tools = tools as IToolsConfig;
+    await this.storage.set(this.currentConfig);
+    this.emitChangeEvent('tools' as any, null, tools);
+  }
+
+  async disableTool(toolName: string): Promise<void> {
+    await this.initialize();
+
+    const tools = this.currentConfig.tools || { enabled: [], disabled: [] };
+    tools.enabled = tools.enabled.filter(name => name !== toolName);
+    if (!tools.disabled) tools.disabled = [];
+    if (!tools.disabled.includes(toolName)) {
+      tools.disabled.push(toolName);
+    }
+
+    this.currentConfig.tools = tools as IToolsConfig;
+    await this.storage.set(this.currentConfig);
+    this.emitChangeEvent('tools' as any, null, tools);
+  }
+
+  async getToolTimeout(): Promise<number> {
+    await this.initialize();
+    return this.currentConfig.tools?.timeout || 30000;
+  }
+
+  async getToolSandboxPolicy(): Promise<any> {
+    await this.initialize();
+    return this.currentConfig.tools?.sandboxPolicy || { mode: 'workspace-write' };
+  }
+
+  async getToolSpecificConfig(toolName: string): Promise<IToolSpecificConfig | null> {
+    await this.initialize();
+    return this.currentConfig.tools?.perToolConfig?.[toolName] || null;
+  }
+
+  async updateToolSpecificConfig(
+    toolName: string,
+    config: Partial<IToolSpecificConfig>
+  ): Promise<void> {
+    await this.initialize();
+
+    if (!this.currentConfig.tools) {
+      this.currentConfig.tools = { enabled: [], disabled: [] } as IToolsConfig;
+    }
+    if (!this.currentConfig.tools.perToolConfig) {
+      this.currentConfig.tools.perToolConfig = {};
+    }
+
+    const oldConfig = this.currentConfig.tools.perToolConfig[toolName];
+    this.currentConfig.tools.perToolConfig[toolName] = {
+      ...(oldConfig || {}),
+      ...config
+    };
+
+    await this.storage.set(this.currentConfig);
+    this.emitChangeEvent('tools' as any, oldConfig, this.currentConfig.tools.perToolConfig[toolName]);
   }
 
   // T043: Event emitter functionality

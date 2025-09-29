@@ -21,7 +21,7 @@ interface OpenAICompletionRequest {
   model: string;
   messages: OpenAIMessage[];
   temperature?: number;
-  max_tokens?: number;
+  max_completion_tokens?: number;
   tools?: OpenAITool[];
   stream?: boolean;
 }
@@ -244,7 +244,7 @@ export class OpenAIClient extends ModelClient {
       model: request.model,
       messages: request.messages.map(this.convertMessage),
       temperature: request.temperature,
-      max_tokens: request.maxTokens,
+      max_completion_tokens: request.maxTokens,
       tools: request.tools?.map(tool => ({
         type: tool.type,
         function: tool.function,

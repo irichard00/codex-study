@@ -1,8 +1,8 @@
 /**
- * T037: Default configuration values
+ * T037: Default centralized agent configuration values
  */
 
-import type { IChromeConfig, IModelConfig, IUserPreferences, ICacheSettings, IExtensionSettings, IPermissionSettings } from './types';
+import type { IAgentConfig, IModelConfig, IUserPreferences, ICacheSettings, IExtensionSettings, IPermissionSettings, IToolsConfig } from './types';
 
 export const DEFAULT_MODEL_CONFIG: IModelConfig = {
   selected: 'gpt-5',
@@ -48,7 +48,60 @@ export const DEFAULT_EXTENSION_SETTINGS: IExtensionSettings = {
   permissions: DEFAULT_PERMISSION_SETTINGS
 };
 
-export const DEFAULT_CHROME_CONFIG: IChromeConfig = {
+export const DEFAULT_TOOLS_CONFIG: IToolsConfig = {
+  enabled: [
+    'web_scraping',
+    'form_automation',
+    'network_intercept',
+    'data_extraction',
+    'dom_tool',
+    'navigation_tool',
+    'tab_tool',
+    'storage_tool'
+  ],
+  disabled: [],
+  timeout: 30000, // 30 seconds default
+  sandboxPolicy: {
+    mode: 'workspace-write',
+    writable_roots: [],
+    network_access: true
+  },
+  perToolConfig: {
+    'web_scraping': {
+      enabled: true,
+      timeout: 45000,
+      options: {
+        maxDepth: 3,
+        followLinks: false
+      }
+    },
+    'form_automation': {
+      enabled: true,
+      timeout: 30000,
+      options: {
+        validateInputs: true,
+        waitForNavigation: true
+      }
+    },
+    'network_intercept': {
+      enabled: true,
+      timeout: 60000,
+      options: {
+        captureHeaders: true,
+        captureBody: true
+      }
+    },
+    'data_extraction': {
+      enabled: true,
+      timeout: 30000,
+      options: {
+        maxRecords: 1000
+      }
+    }
+  }
+};
+
+export const DEFAULT_AGENT_CONFIG: IAgentConfig = {
   version: '1.0.0',
   model: DEFAULT_MODEL_CONFIG,
   providers: {},
@@ -56,7 +109,8 @@ export const DEFAULT_CHROME_CONFIG: IChromeConfig = {
   activeProfile: null,
   preferences: DEFAULT_USER_PREFERENCES,
   cache: DEFAULT_CACHE_SETTINGS,
-  extension: DEFAULT_EXTENSION_SETTINGS
+  extension: DEFAULT_EXTENSION_SETTINGS,
+  tools: DEFAULT_TOOLS_CONFIG
 };
 
 // Storage keys
@@ -101,9 +155,9 @@ export const DEFAULT_TIMEOUTS = {
 /**
  * Merge partial config with defaults
  */
-export function mergeWithDefaults(partial: Partial<IChromeConfig>): IChromeConfig {
+export function mergeWithDefaults(partial: Partial<IAgentConfig>): IAgentConfig {
   return {
-    ...DEFAULT_CHROME_CONFIG,
+    ...DEFAULT_AGENT_CONFIG,
     ...partial,
     model: {
       ...DEFAULT_MODEL_CONFIG,
@@ -123,6 +177,18 @@ export function mergeWithDefaults(partial: Partial<IChromeConfig>): IChromeConfi
       permissions: {
         ...DEFAULT_PERMISSION_SETTINGS,
         ...(partial.extension?.permissions || {})
+      }
+    },
+    tools: {
+      ...DEFAULT_TOOLS_CONFIG,
+      ...(partial.tools || {}),
+      sandboxPolicy: {
+        ...DEFAULT_TOOLS_CONFIG.sandboxPolicy,
+        ...(partial.tools?.sandboxPolicy || {})
+      },
+      perToolConfig: {
+        ...DEFAULT_TOOLS_CONFIG.perToolConfig,
+        ...(partial.tools?.perToolConfig || {})
       }
     }
   };

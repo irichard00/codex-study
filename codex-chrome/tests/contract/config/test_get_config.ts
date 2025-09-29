@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import { AgentConfig } from '@config/AgentConfig';
-import { IChromeConfig } from '@config/types';
+import { IAgentConfig } from '@config/types';
 import { resetChromeStorageMock } from '../../helpers/chrome-storage-mock';
 
 describe('GET /config - Contract Test', () => {

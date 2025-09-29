@@ -3,7 +3,7 @@
  */
 
 import type {
-  IChromeConfig,
+  IAgentConfig,
   IModelConfig,
   IProviderConfig,
   IProfileConfig
