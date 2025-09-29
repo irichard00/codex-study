@@ -6,6 +6,7 @@
 import { Session, ToolDefinition } from './Session';
 import { TurnContext } from './TurnContext';
 import { ModelClient, CompletionRequest, CompletionResponse } from '../models/ModelClient';
+import { loadPrompt } from './PromptLoader';
 import { EventMsg, TokenUsage, StreamErrorEvent } from '../protocol/events';
 import { Event, InputItem } from '../protocol/types';
 import { v4 as uuidv4 } from 'uuid';
@@ -158,7 +159,7 @@ export class TurnManager {
     const processedPrompt = this.processMissingCalls(prompt);
 
     // Create streaming request
-    const request = this.buildCompletionRequest(processedPrompt);
+    const request = await this.buildCompletionRequest(processedPrompt);
 
     // Start model streaming
     const stream = await this.modelClient.streamCompletion(request);
@@ -317,10 +318,10 @@ export class TurnManager {
   /**
    * Build completion request for model client
    */
-  private buildCompletionRequest(prompt: Prompt): CompletionRequest {
+  private async buildCompletionRequest(prompt: Prompt): Promise<CompletionRequest> {
     return {
       model: this.turnContext.getModel(),
-      messages: this.convertPromptToMessages(prompt),
+      messages: await this.convertPromptToMessages(prompt),
       tools: prompt.tools,
       stream: true,
       temperature: 0.7,
@@ -331,10 +332,14 @@ export class TurnManager {
   /**
    * Convert prompt format to model client message format
    */
-  private convertPromptToMessages(prompt: Prompt): any[] {
+  private async convertPromptToMessages(prompt: Prompt): Promise<any[]> {
     const messages: any[] = [];
 
-    // Add base instructions if provided
+    // Load and add the agent prompt as system message
+    const systemPrompt = await loadPrompt();
+    messages.push({ role: 'system', content: systemPrompt });
+
+    // Add base instructions if provided (as override)
     if (prompt.baseInstructionsOverride) {
       messages.push({
         role: 'system',

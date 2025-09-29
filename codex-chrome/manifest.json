@@ -13,6 +13,10 @@
     "contextMenus"
   ],
   "host_permissions": ["<all_urls>"],
+  "web_accessible_resources": [{
+    "resources": ["prompts/agent_prompt.md"],
+    "matches": ["<all_urls>"]
+  }],
   "background": {
     "service_worker": "background.js",
     "type": "module"
