@@ -62,16 +62,13 @@
    * Mask API key for display
    */
   function maskApiKey(key: string): string {
-    if (!key || key.length < 8) {
+    if (!key || key.length < 6) {
       return key;
     }
 
-    // Show first 7 characters and last 4 characters
-    const start = key.substring(0, 7);
-    const end = key.substring(key.length - 4);
-    const middle = '*'.repeat(Math.max(0, key.length - 11));
-
-    return `${start}${middle}${end}`;
+    // Show only first 6 characters followed by ***
+    const start = key.substring(0, 6);
+    return `${start}***`;
   }
 
   /**
@@ -279,18 +276,33 @@
           OpenAI or Anthropic API Key
         </label>
         <div class="input-group">
-          <input
-            id="api-key"
-            type={showApiKey ? 'text' : 'password'}
-            bind:value={apiKey}
-            on:input={handleApiKeyInput}
-            on:keydown={handleKeydown}
-            placeholder={isAuthenticated ? maskedApiKey : 'sk-...'}
-            class="api-key-input"
-            disabled={isLoading}
-            autocomplete="off"
-            spellcheck="false"
-          />
+          {#if showApiKey}
+            <input
+              id="api-key"
+              type="text"
+              bind:value={apiKey}
+              on:input={handleApiKeyInput}
+              on:keydown={handleKeydown}
+              placeholder={isAuthenticated ? maskedApiKey : 'sk-...'}
+              class="api-key-input"
+              disabled={isLoading}
+              autocomplete="off"
+              spellcheck="false"
+            />
+          {:else}
+            <input
+              id="api-key"
+              type="password"
+              bind:value={apiKey}
+              on:input={handleApiKeyInput}
+              on:keydown={handleKeydown}
+              placeholder={isAuthenticated ? maskedApiKey : 'sk-...'}
+              class="api-key-input"
+              disabled={isLoading}
+              autocomplete="off"
+              spellcheck="false"
+            />
+          {/if}
           <button
             type="button"
             class="visibility-toggle"
