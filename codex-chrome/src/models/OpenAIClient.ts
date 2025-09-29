@@ -434,13 +434,52 @@ export class OpenAIClient extends ModelClient {
       throw new ModelClientError('Stream response body is null');
     }
 
-    // Initialize StreamProcessor for this stream
-    this.streamProcessor = new StreamProcessor('model');
-    await this.streamProcessor.start(response.body);
+    // Parse SSE stream and yield events
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
 
-    // Yield chunks from the StreamProcessor
-    for await (const chunk of this.streamProcessor.getChunks()) {
-      yield chunk;
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+
+          if (!trimmed || !trimmed.startsWith('data: ')) {
+            continue;
+          }
+
+          const data = trimmed.slice(6); // Remove 'data: ' prefix
+
+          if (data === '[DONE]') {
+            return;
+          }
+
+          try {
+            const chunk: OpenAIStreamChunk = JSON.parse(data);
+
+            // Yield the raw chunk for event processing
+            yield {
+              type: 'chunk',
+              data: chunk,
+              delta: chunk.choices[0]?.delta?.content || '',
+              finishReason: chunk.choices[0]?.finish_reason
+            };
+          } catch (error) {
+            // Skip malformed chunks
+            console.warn('Failed to parse stream chunk:', error);
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
     }
   }
 
