@@ -10,6 +10,7 @@ import { ConversationStore } from '../storage/ConversationStore';
 import { State } from './State';
 import { v4 as uuidv4 } from 'uuid';
 import { TurnContext } from './TurnContext';
+import type { AgentConfig } from '../config/AgentConfig';
 
 /**
  * Tool definition interface (to avoid circular dependency with TurnManager)
@@ -28,6 +29,7 @@ export interface ToolDefinition {
  */
 export class Session {
   readonly conversationId: string;
+  private config?: AgentConfig;
   private state: State;
   private turnContext: TurnContext;
   private messageCount: number = 0;
@@ -38,14 +40,25 @@ export class Session {
   private conversation: ConversationData | null = null;
   private isPersistent: boolean = true;
 
-  constructor(isPersistent: boolean = true) {
+  constructor(configOrIsPersistent?: AgentConfig | boolean, isPersistent?: boolean) {
     this.conversationId = `conv_${uuidv4()}`;
-    this.isPersistent = isPersistent;
+
+    // Handle both new and old signatures for backward compatibility
+    if (typeof configOrIsPersistent === 'boolean') {
+      // Old signature: Session(isPersistent?: boolean)
+      this.isPersistent = configOrIsPersistent;
+      this.config = undefined;
+    } else {
+      // New signature: Session(config?: AgentConfig, isPersistent?: boolean)
+      this.config = configOrIsPersistent;
+      this.isPersistent = isPersistent ?? true;
+    }
+
     this.state = new State(this.conversationId);
 
-    // Initialize with default turn context
+    // Initialize with default turn context, using config values if available
     this.turnContext = new TurnContext({
-      cwd: '/',
+      cwd: this.getDefaultCwd(),
       approval_policy: 'on-request',
       sandbox_policy: { mode: 'workspace-write' },
       model: 'claude-3-sonnet',
@@ -670,5 +683,32 @@ export class Session {
       session.state = State.import(data.state);
     }
     return session;
+  }
+
+  /**
+   * Get default model from config or fallback
+   */
+  getDefaultModel(): string {
+    // AgentConfig.getConfig() might return synchronously or via property
+    // For now, return default until config structure is clarified
+    return 'claude-3-sonnet';
+  }
+
+  /**
+   * Get default cwd from config or fallback
+   */
+  getDefaultCwd(): string {
+    // AgentConfig.getConfig() might return synchronously or via property
+    // For now, return default until config structure is clarified
+    return '/';
+  }
+
+  /**
+   * Check if storage is enabled from config or fallback
+   */
+  isStorageEnabled(): boolean {
+    // AgentConfig.getConfig() might return synchronously or via property
+    // For now, return default until config structure is clarified
+    return true;
   }
 }

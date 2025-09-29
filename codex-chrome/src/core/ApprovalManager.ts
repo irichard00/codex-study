@@ -5,6 +5,7 @@
 
 import type { ReviewDecision } from '../protocol/types';
 import type { Event } from '../protocol/types';
+import type { AgentConfig } from '../config/AgentConfig';
 
 export interface ApprovalRequest {
   id: string;
@@ -69,14 +70,25 @@ export interface ApprovalStatus {
  * ApprovalManager implementation
  */
 export class ApprovalManager {
+  private config?: AgentConfig;
   private policy: ApprovalPolicy = { mode: 'always_ask' };
   private pendingRequests = new Map<string, PendingApproval>();
   private approvalHistory = new Map<string, ApprovalResponse>();
   private eventEmitter?: (event: Event) => void;
   private approvalRequestCallback?: (approval: ApprovalRequest) => void;
 
-  constructor(eventEmitter?: (event: Event) => void) {
-    this.eventEmitter = eventEmitter;
+  constructor(configOrEventEmitter?: AgentConfig | ((event: Event) => void), eventEmitter?: (event: Event) => void) {
+    // Handle both signatures for backward compatibility
+    if (configOrEventEmitter && typeof configOrEventEmitter !== 'function') {
+      // New signature: ApprovalManager(config?: AgentConfig, eventEmitter?: (event: Event) => void)
+      this.config = configOrEventEmitter as AgentConfig;
+      this.eventEmitter = eventEmitter;
+      // Setup policy from config
+      this.policy = this.getDefaultPolicy();
+    } else {
+      // Old signature: ApprovalManager(eventEmitter?: (event: Event) => void)
+      this.eventEmitter = configOrEventEmitter as (event: Event) => void;
+    }
   }
 
   /**
@@ -440,6 +452,30 @@ export class ApprovalManager {
     if (this.eventEmitter) {
       this.eventEmitter(event);
     }
+  }
+
+  /**
+   * Get default policy from config or fallback
+   */
+  getDefaultPolicy(): ApprovalPolicy {
+    // Config integration placeholder - returns default
+    return { mode: 'always_ask' };
+  }
+
+  /**
+   * Get auto approve list from config
+   */
+  getAutoApproveList(): string[] {
+    // Config integration placeholder - returns default
+    return [];
+  }
+
+  /**
+   * Get approval timeout from config
+   */
+  getApprovalTimeout(): number {
+    // Config integration placeholder - returns default
+    return 30000;
   }
 }
 

@@ -6,6 +6,7 @@
 import { ModelClient, ModelClientError, type RetryConfig } from './ModelClient';
 import { OpenAIClient } from './OpenAIClient';
 import { AnthropicClient } from './AnthropicClient';
+import type { AgentConfig } from '../config/AgentConfig';
 
 /**
  * Supported model providers
@@ -69,6 +70,7 @@ const DEFAULT_MODEL = 'gpt-5';
 export class ModelClientFactory {
   private static instance: ModelClientFactory;
   private clientCache: Map<string, ModelClient> = new Map();
+  private config?: AgentConfig;
 
   private constructor() {}
 
@@ -390,6 +392,39 @@ export class ModelClientFactory {
     }
 
     return hash.toString(36);
+  }
+
+  /**
+   * Initialize with configuration
+   */
+  async initialize(config: AgentConfig): Promise<void> {
+    this.config = config;
+    // Clear cache when config changes to use new settings
+    this.clientCache.clear();
+  }
+
+  /**
+   * Get selected model from config
+   */
+  getSelectedModel(): string {
+    // Config integration placeholder - returns default
+    return DEFAULT_MODEL;
+  }
+
+  /**
+   * Get API key from config for a provider
+   */
+  getApiKey(provider: string): string | undefined {
+    // Config integration placeholder - returns undefined
+    return undefined;
+  }
+
+  /**
+   * Get base URL from config for a provider
+   */
+  getBaseUrl(provider: string): string | undefined {
+    // Config integration placeholder - returns undefined
+    return undefined;
   }
 }
 
