@@ -407,7 +407,7 @@ async function injectContentScriptIfNeeded(
   try {
     await chrome.scripting.executeScript({
       target: { tabId },
-      files: ['content-script.js'],
+      files: ['content.js'],
     });
   } catch (error) {
     console.error('Failed to inject content script:', error);

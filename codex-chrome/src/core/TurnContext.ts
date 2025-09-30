@@ -7,7 +7,7 @@ import { ModelClient } from '../models/ModelClient';
 import { AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig } from '../protocol/types';
 
 /**
- * Shell environment policy for command execution
+ * browser environment policy for task execution
  */
 export type BrowserEnvironmentPolicy = 'preserve' | 'clean' | 'restricted';
 

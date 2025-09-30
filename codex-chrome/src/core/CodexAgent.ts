@@ -423,7 +423,7 @@ export class CodexAgent {
    * Uses the current persistent TurnContext
    */
   private async handleUserInput(op: Extract<Op, { type: 'UserInput' }>): Promise<void> {
-    await this.processUserInputWithTask(op.items);
+    await this.processUserInputWithTask(op.items, undefined, true);
   }
 
   /**

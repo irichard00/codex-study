@@ -426,60 +426,35 @@ export class OpenAIClient extends ModelClient {
   async *streamCompletion(request: CompletionRequest): AsyncGenerator<any> {
     this.validateRequest(request);
 
-    const openaiRequest = this.convertToOpenAIRequest({ ...request, stream: true });
-    const response = await this.makeStreamRequest(openaiRequest);
+    // Use non-streaming request for OpenAI
+    const openaiRequest = this.convertToOpenAIRequest({ ...request, stream: false });
+    const response = await this.withRetry(
+      () => this.makeRequest(openaiRequest),
+      (error) => this.isRetryableError(error)
+    );
 
-    if (!response.body) {
-      throw new ModelClientError('Stream response body is null');
+    // Convert the complete response to streaming format for compatibility
+    const completionResponse = this.convertFromOpenAIResponse(response);
+
+    // Yield the complete message as a single event
+    const choice = completionResponse.choices[0];
+    if (choice?.message?.content) {
+      yield {
+        type: 'chunk',
+        data: response,
+        delta: choice.message.content,
+        finishReason: choice.finishReason
+      };
     }
 
-    // Parse SSE stream and yield events
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder('utf-8');
-    let buffer = '';
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-
-          if (!trimmed || !trimmed.startsWith('data: ')) {
-            continue;
-          }
-
-          const data = trimmed.slice(6); // Remove 'data: ' prefix
-
-          if (data === '[DONE]') {
-            return;
-          }
-
-          try {
-            const chunk: OpenAIStreamChunk = JSON.parse(data);
-
-            // Yield the raw chunk for event processing
-            yield {
-              type: 'chunk',
-              data: chunk,
-              delta: chunk.choices[0]?.delta?.content || '',
-              finishReason: chunk.choices[0]?.finish_reason
-            };
-          } catch (error) {
-            // Skip malformed chunks
-            console.warn('Failed to parse stream chunk:', error);
-          }
-        }
+    // Yield completion event with usage
+    yield {
+      type: 'completion',
+      data: {
+        ...response,
+        usage: completionResponse.usage
       }
-    } finally {
-      reader.releaseLock();
-    }
+    };
   }
 
   /**
@@ -491,21 +466,30 @@ export class OpenAIClient extends ModelClient {
   ): Promise<StreamProcessor> {
     this.validateRequest(request);
 
-    const openaiRequest = this.convertToOpenAIRequest({ ...request, stream: true });
-    const response = await this.makeStreamRequest(openaiRequest);
-
-    if (!response.body) {
-      throw new ModelClientError('Stream response body is null');
-    }
+    // Use non-streaming request for OpenAI
+    const openaiRequest = this.convertToOpenAIRequest({ ...request, stream: false });
+    const response = await this.withRetry(
+      () => this.makeRequest(openaiRequest),
+      (error) => this.isRetryableError(error)
+    );
 
     const processor = new StreamProcessor('model');
 
     // Set up UI update callback if provided
     if (onUpdate) {
-      processor.onUpdate(onUpdate);
+      const completionResponse = this.convertFromOpenAIResponse(response);
+      const choice = completionResponse.choices[0];
+
+      if (choice?.message?.content) {
+        onUpdate({
+          type: 'chunk',
+          data: response,
+          delta: choice.message.content,
+          finishReason: choice.finishReason
+        });
+      }
     }
 
-    await processor.start(response.body);
     return processor;
   }
 

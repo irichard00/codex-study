@@ -53,8 +53,6 @@ const MODEL_PROVIDER_MAP: Record<string, ModelProvider> = {
   'gpt-4': 'openai',
   'gpt-4-turbo': 'openai',
   'gpt-4o': 'openai',
-  'gpt-3.5-turbo': 'openai',
-  'gpt-3.5-turbo-16k': 'openai',
 
   // Anthropic models
   'claude-3-opus-20240229': 'anthropic',
