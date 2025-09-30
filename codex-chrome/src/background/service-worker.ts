@@ -467,7 +467,7 @@ async function initializeBrowserTools(): Promise<void> {
 
   const toolRegistry = agent.getToolRegistry();
   // Register all tools (await them to ensure they're registered before listTools is called)
-  await registerTools(toolRegistry, await agentConfig!.getToolsConfig());
+  await registerTools(toolRegistry, agentConfig!.getToolsConfig());
 
   console.log('Browser tools initialized');
 }

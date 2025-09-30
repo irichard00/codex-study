@@ -89,9 +89,9 @@ export class CodexAgent {
   /**
    * Handle model configuration changes
    */
-  private async handleModelConfigChange(event: IConfigChangeEvent): Promise<void> {
+  private handleModelConfigChange(event: IConfigChangeEvent): void {
     // Update model client factory with new config
-    const modelConfig = await this.config.getModelConfig();
+    const modelConfig = this.config.getModelConfig();
     console.log('Model configuration changed:', modelConfig.selected);
 
     // Emit event for UI update
@@ -107,8 +107,8 @@ export class CodexAgent {
   /**
    * Handle security configuration changes
    */
-  private async handleSecurityConfigChange(event: IConfigChangeEvent): Promise<void> {
-    const config = await this.config.getConfig();
+  private handleSecurityConfigChange(event: IConfigChangeEvent): void {
+    const config = this.config.getConfig();
     console.log('Security configuration changed:', config.security?.approvalPolicy);
 
     // Update approval manager policies

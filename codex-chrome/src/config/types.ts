@@ -152,32 +152,32 @@ export interface IStorageInfo {
 // Service interfaces
 export interface IConfigService {
   // Core operations
-  getConfig(): Promise<IAgentConfig>;
-  updateConfig(config: Partial<IAgentConfig>): Promise<IAgentConfig>;
-  resetConfig(preserveApiKeys?: boolean): Promise<IAgentConfig>;
+  getConfig(): IAgentConfig;
+  updateConfig(config: Partial<IAgentConfig>): IAgentConfig;
+  resetConfig(preserveApiKeys?: boolean): IAgentConfig;
 
   // Model operations
-  getModelConfig(): Promise<IModelConfig>;
-  updateModelConfig(config: Partial<IModelConfig>): Promise<IModelConfig>;
+  getModelConfig(): IModelConfig;
+  updateModelConfig(config: Partial<IModelConfig>): IModelConfig;
 
   // Provider operations
-  getProviders(): Promise<Record<string, IProviderConfig>>;
-  getProvider(id: string): Promise<IProviderConfig | null>;
-  addProvider(provider: IProviderConfig): Promise<IProviderConfig>;
-  updateProvider(id: string, provider: Partial<IProviderConfig>): Promise<IProviderConfig>;
-  deleteProvider(id: string): Promise<void>;
+  getProviders(): Record<string, IProviderConfig>;
+  getProvider(id: string): IProviderConfig | null;
+  addProvider(provider: IProviderConfig): IProviderConfig;
+  updateProvider(id: string, provider: Partial<IProviderConfig>): IProviderConfig;
+  deleteProvider(id: string): void;
 
   // Profile operations
-  getProfiles(): Promise<Record<string, IProfileConfig>>;
-  getProfile(name: string): Promise<IProfileConfig | null>;
-  createProfile(profile: IProfileConfig): Promise<IProfileConfig>;
-  updateProfile(name: string, profile: Partial<IProfileConfig>): Promise<IProfileConfig>;
-  deleteProfile(name: string): Promise<void>;
-  activateProfile(name: string): Promise<void>;
+  getProfiles(): Record<string, IProfileConfig>;
+  getProfile(name: string): IProfileConfig | null;
+  createProfile(profile: IProfileConfig): IProfileConfig;
+  updateProfile(name: string, profile: Partial<IProfileConfig>): IProfileConfig;
+  deleteProfile(name: string): void;
+  activateProfile(name: string): void;
 
   // Import/Export
-  exportConfig(includeApiKeys?: boolean): Promise<IExportData>;
-  importConfig(data: IExportData): Promise<IAgentConfig>;
+  exportConfig(includeApiKeys?: boolean): IExportData;
+  importConfig(data: IExportData): IAgentConfig;
 }
 
 // Export/Import data structure
