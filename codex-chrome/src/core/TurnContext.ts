@@ -6,6 +6,7 @@
 import { ModelClient } from '../models/ModelClient';
 import { AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig } from '../protocol/types';
 import type { IToolsConfig } from '../config/types';
+import { DEFAULT_TOOLS_CONFIG } from '../config/defaults';
 
 /**
  * browser environment policy for task execution
@@ -70,13 +71,9 @@ export class TurnContext {
     this.browserEnvironmentPolicy = config.browserEnvironmentPolicy || 'preserve';
     this.reviewMode = config.reviewMode || false;
 
-    // Default tools configuration
+    // Default tools configuration with all IToolsConfig fields
     this.toolsConfig = {
-      execCommand: true,
-      webSearch: true,
-      fileOperations: true,
-      mcpTools: true,
-      customTools: {},
+      ...DEFAULT_TOOLS_CONFIG,
       ...config.toolsConfig,
     };
   }

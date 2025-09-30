@@ -49,6 +49,25 @@ export const DEFAULT_EXTENSION_SETTINGS: IExtensionSettings = {
 };
 
 export const DEFAULT_TOOLS_CONFIG: IToolsConfig = {
+  // Browser tool toggles
+  enable_all_tools: false,
+  storage_tool: false,
+  tab_tool: false,
+  web_scraping_tool: false,
+  dom_tool: false,
+  form_automation_tool: false,
+  navigation_tool: false,
+  network_intercept_tool: false,
+  data_extraction_tool: false,
+
+  // Agent execution tool toggles
+  execCommand: true,
+  webSearch: true,
+  fileOperations: true,
+  mcpTools: true,
+  customTools: {},
+
+  // Shared configuration metadata
   enabled: [
     'web_scraping',
     'form_automation',
