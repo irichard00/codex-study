@@ -6,8 +6,7 @@
  * Integrates with the new DomService architecture while maintaining backward compatibility.
  */
 
-import { BaseTool, BaseToolRequest, BaseToolOptions, createToolDefinition } from './BaseTool';
-import { ToolDefinition } from './ToolRegistry';
+import { BaseTool, createToolDefinition, type BaseToolRequest, type BaseToolOptions, type ToolDefinition } from './BaseTool';
 import { DomService } from './dom/service';
 import {
   DOMOperationRequest,
@@ -25,7 +24,7 @@ import {
   BoundingBox as ContractBoundingBox,
   ErrorCode,
   DOMError
-} from '../../specs/001-dom-tool-integration/contracts/dom-operations';
+} from '../../../specs/001-dom-tool-integration/contracts/dom-operations';
 import {
   findElements,
   clickElement as contentClickElement,

@@ -7,124 +7,20 @@
 
 import type { Event } from '../protocol/types';
 import { EventCollector } from '../tests/utils/test-helpers';
-
-/**
- * Tool definition structure
- */
-export interface ToolDefinition {
-  name: string;
-  description: string;
-  parameters: ToolParameterSchema;
-  category?: string;
-  version?: string;
-  metadata?: Record<string, any>;
-}
-
-/**
- * JSON Schema for tool parameters
- */
-export interface ToolParameterSchema {
-  type: 'object';
-  properties: Record<string, ParameterProperty>;
-  required?: string[];
-  additionalProperties?: boolean;
-}
-
-/**
- * Parameter property definition
- */
-export interface ParameterProperty {
-  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
-  description?: string;
-  enum?: string[];
-  items?: ParameterProperty;
-  properties?: Record<string, ParameterProperty>;
-  default?: any;
-}
-
-/**
- * Tool execution request
- */
-export interface ToolExecutionRequest {
-  toolName: string;
-  parameters: Record<string, any>;
-  sessionId: string;
-  turnId: string;
-  timeout?: number;
-}
-
-/**
- * Tool execution response
- */
-export interface ToolExecutionResponse {
-  success: boolean;
-  data?: any;
-  error?: ToolError;
-  duration: number;
-  metadata?: Record<string, any>;
-}
-
-/**
- * Tool error details
- */
-export interface ToolError {
-  code: string;
-  message: string;
-  details?: any;
-}
-
-/**
- * Tool discovery query
- */
-export interface ToolDiscoveryQuery {
-  category?: string;
-  namePattern?: string;
-  capabilities?: string[];
-  version?: string;
-}
-
-/**
- * Tool discovery result
- */
-export interface ToolDiscoveryResult {
-  tools: ToolDefinition[];
-  total: number;
-  categories: string[];
-}
-
-/**
- * Parameter validation result
- */
-export interface ToolValidationResult {
-  valid: boolean;
-  errors: ValidationError[];
-}
-
-/**
- * Validation error details
- */
-export interface ValidationError {
-  parameter: string;
-  message: string;
-  code: string;
-}
-
-/**
- * Tool execution context
- */
-export interface ToolContext {
-  sessionId: string;
-  turnId: string;
-  toolName: string;
-  metadata?: Record<string, any>;
-}
-
-/**
- * Tool handler function signature
- */
-export interface ToolHandler {
-  (parameters: Record<string, any>, context: ToolContext): Promise<any>;
-}
+import type {
+  ToolDefinition,
+  ToolParameterSchema,
+  ParameterProperty,
+  ToolExecutionRequest,
+  ToolExecutionResponse,
+  ToolError,
+  ToolDiscoveryQuery,
+  ToolDiscoveryResult,
+  ToolValidationResult,
+  ValidationError,
+  ToolContext,
+  ToolHandler,
+} from './BaseTool';
 
 /**
  * Tool registry entry

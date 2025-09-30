@@ -5,8 +5,7 @@
  * Handles get/set/remove operations, storage quota management, and data migration.
  */
 
-import { BaseTool, BaseToolRequest, BaseToolOptions, createToolDefinition } from './BaseTool';
-import { ToolDefinition } from './ToolRegistry';
+import { BaseTool, createToolDefinition, type BaseToolRequest, type BaseToolOptions, type ToolDefinition } from './BaseTool';
 
 /**
  * Storage tool request interface

@@ -6,8 +6,7 @@ import type {
   StructuredData,
   ExportFormat
 } from '../types/tools';
-import { BaseTool } from './BaseTool';
-import type { ToolDefinition } from './ToolRegistry';
+import { BaseTool, type ToolDefinition } from './BaseTool';
 
 export class DataExtractionTool extends BaseTool {
   protected toolDefinition: ToolDefinition;

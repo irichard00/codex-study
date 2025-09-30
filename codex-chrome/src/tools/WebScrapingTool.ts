@@ -5,8 +5,7 @@
  * handles pagination, table extraction, and pattern-based scraping.
  */
 
-import { BaseTool, BaseToolRequest, BaseToolOptions, createToolDefinition } from './BaseTool';
-import type { ToolDefinition } from './ToolRegistry';
+import { BaseTool, createToolDefinition, type BaseToolRequest, type BaseToolOptions, type ToolDefinition } from './BaseTool';
 
 /**
  * Scraping pattern configuration

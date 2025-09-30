@@ -44,7 +44,7 @@ export class CodexAgent {
     // Initialize components with config
     this.session = new Session(this.config);
     this.modelClientFactory = ModelClientFactory.getInstance();
-    this.toolRegistry = new ToolRegistry(this.config);
+    this.toolRegistry = new ToolRegistry();
     this.approvalManager = new ApprovalManager(this.config);
     this.diffTracker = new DiffTracker();
     this.userNotifier = new UserNotifier();
