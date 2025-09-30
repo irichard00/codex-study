@@ -10,6 +10,8 @@ import { loadPrompt } from './PromptLoader';
 import { EventMsg, TokenUsage, StreamErrorEvent } from '../protocol/events';
 import { Event, InputItem } from '../protocol/types';
 import { v4 as uuidv4 } from 'uuid';
+import { toolRegistry } from '../tools/ToolRegistry';
+import { IToolsConfig } from '../config/types';
 
 /**
  * Result of processing a single response item
@@ -203,11 +205,40 @@ export class TurnManager {
   private async buildToolsFromContext(): Promise<ToolDefinition[]> {
     const tools: ToolDefinition[] = [];
 
-    // Add core tools based on turn context configuration
-    const toolsConfig = this.turnContext.getToolsConfig();
+    // Get tools configuration from turn context
+    const toolsConfig = this.turnContext.getToolsConfig() as IToolsConfig;
 
-    // Add exec_command tool if enabled
-    if (toolsConfig.execCommand !== false) {
+    // Get all registered browser tools from ToolRegistry
+    const registeredTools = toolRegistry.listTools();
+
+    // Check if all tools should be enabled
+    const enableAllTools = toolsConfig.enable_all_tools ?? false;
+
+    // Add browser tools from registry based on config
+    for (const toolDef of registeredTools) {
+      // Check if tool should be enabled
+      const isEnabled = enableAllTools ||
+        (toolsConfig[toolDef.name as keyof IToolsConfig] === true) ||
+        (toolsConfig.enabled?.includes(toolDef.name));
+
+      // Check if tool is explicitly disabled
+      const isDisabled = toolsConfig.disabled?.includes(toolDef.name);
+
+      if (isEnabled && !isDisabled) {
+        // Convert ToolRegistry definition to Session ToolDefinition format
+        tools.push({
+          type: 'function',
+          function: {
+            name: toolDef.name,
+            description: toolDef.description,
+            parameters: toolDef.parameters as any,
+          },
+        });
+      }
+    }
+
+    // Add agent execution tools based on config
+    if (enableAllTools || toolsConfig.execCommand !== false) {
       tools.push({
         type: 'function',
         function: {
@@ -225,8 +256,7 @@ export class TurnManager {
       });
     }
 
-    // Add web_search tool if enabled
-    if (toolsConfig.webSearch !== false) {
+    if (enableAllTools || toolsConfig.webSearch !== false) {
       tools.push({
         type: 'function',
         function: {
@@ -243,7 +273,7 @@ export class TurnManager {
       });
     }
 
-    // Add update_plan tool
+    // Add update_plan tool (always enabled for task management)
     tools.push({
       type: 'function',
       function: {
@@ -270,9 +300,31 @@ export class TurnManager {
       },
     });
 
-    // Add MCP tools if available
-    const mcpTools = await this.session.getMcpTools();
-    tools.push(...mcpTools);
+    // Add MCP tools if enabled and available
+    if (enableAllTools || toolsConfig.mcpTools !== false) {
+      const mcpTools = await this.session.getMcpTools();
+      tools.push(...mcpTools);
+    }
+
+    // Add custom tools if configured
+    if (toolsConfig.customTools) {
+      for (const [toolName, isEnabled] of Object.entries(toolsConfig.customTools)) {
+        if (isEnabled || enableAllTools) {
+          // Custom tools would be loaded from registry or another source
+          const customTool = toolRegistry.getTool(toolName);
+          if (customTool) {
+            tools.push({
+              type: 'function',
+              function: {
+                name: customTool.name,
+                description: customTool.description,
+                parameters: customTool.parameters as any,
+              },
+            });
+          }
+        }
+      }
+    }
 
     return tools;
   }
