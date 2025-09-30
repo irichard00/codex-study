@@ -93,24 +93,46 @@ export interface IRetryConfig {
   backoffMultiplier?: number;
 }
 
-// Tool configuration
-export interface IToolsConfig {
-  enabled: string[];
-  disabled?: string[];
-  timeout?: number;
-  sandboxPolicy?: {
-    mode: 'danger-full-access' | 'read-only' | 'workspace-write';
-    writable_roots?: string[];
-    network_access?: boolean;
-  };
-  perToolConfig?: Record<string, IToolSpecificConfig>;
+// Tool configuration helpers
+export interface IToolSandboxPolicy {
+  mode: 'read-only' | 'workspace-write' | 'danger-full-access';
+  writable_roots?: string[];
+  network_access?: boolean;
 }
 
 export interface IToolSpecificConfig {
   enabled?: boolean;
   timeout?: number;
   maxRetries?: number;
-  options?: Record<string, any>;
+  options?: Record<string, unknown>;
+}
+
+// Tool configuration
+export interface IToolsConfig {
+  // Browser tool toggles
+  enable_all_tools?: boolean;
+  storage_tool?: boolean;
+  tab_tool?: boolean;
+  web_scraping_tool?: boolean;
+  dom_tool?: boolean;
+  form_automation_tool?: boolean;
+  navigation_tool?: boolean;
+  network_intercept_tool?: boolean;
+  data_extraction_tool?: boolean;
+
+  // Agent execution tool toggles
+  execCommand?: boolean;
+  webSearch?: boolean;
+  fileOperations?: boolean;
+  mcpTools?: boolean;
+  customTools?: Record<string, boolean>;
+
+  // Shared configuration metadata
+  enabled?: string[];
+  disabled?: string[];
+  timeout?: number;
+  sandboxPolicy?: IToolSandboxPolicy;
+  perToolConfig?: Record<string, IToolSpecificConfig>;
 }
 
 // Storage interfaces

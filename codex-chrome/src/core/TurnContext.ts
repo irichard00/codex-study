@@ -5,27 +5,12 @@
 
 import { ModelClient } from '../models/ModelClient';
 import { AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig } from '../protocol/types';
+import type { IToolsConfig } from '../config/types';
 
 /**
  * browser environment policy for task execution
  */
 export type BrowserEnvironmentPolicy = 'preserve' | 'clean' | 'restricted';
-
-/**
- * Tools configuration for the turn
- */
-export interface ToolsConfig {
-  /** Enable/disable exec_command tool */
-  execCommand?: boolean;
-  /** Enable/disable web_search tool */
-  webSearch?: boolean;
-  /** Enable/disable file operations */
-  fileOperations?: boolean;
-  /** Enable/disable MCP tools */
-  mcpTools?: boolean;
-  /** Custom tool configurations */
-  customTools?: Record<string, any>;
-}
 
 /**
  * Turn configuration that can be updated during execution
@@ -44,7 +29,7 @@ export interface TurnContextConfig {
   /** Shell environment handling */
   browserEnvironmentPolicy?: BrowserEnvironmentPolicy;
   /** Tools configuration */
-  toolsConfig?: ToolsConfig;
+  toolsConfig?: IToolsConfig;
   /** Model identifier */
   model?: string;
   /** Reasoning effort configuration */
@@ -67,7 +52,7 @@ export class TurnContext {
   private approvalPolicy: AskForApproval;
   private sandboxPolicy: SandboxPolicy;
   private browserEnvironmentPolicy: BrowserEnvironmentPolicy;
-  private toolsConfig: ToolsConfig;
+  private toolsConfig: IToolsConfig;
   private reviewMode: boolean;
 
   constructor(
@@ -324,14 +309,14 @@ export class TurnContext {
   /**
    * Get tools configuration
    */
-  getToolsConfig(): ToolsConfig {
+  getToolsConfig(): IToolsConfig {
     return { ...this.toolsConfig };
   }
 
   /**
    * Update tools configuration
    */
-  updateToolsConfig(config: Partial<ToolsConfig>): void {
+  updateToolsConfig(config: Partial<IToolsConfig>): void {
     this.toolsConfig = { ...this.toolsConfig, ...config };
   }
 
@@ -430,7 +415,7 @@ export class TurnContext {
     approvalPolicy: AskForApproval;
     sandboxPolicy: SandboxPolicy;
     browserEnvironmentPolicy: BrowserEnvironmentPolicy;
-    toolsConfig: ToolsConfig;
+    toolsConfig: IToolsConfig;
     model: string;
     effort?: ReasoningEffortConfig;
     summary: ReasoningSummaryConfig;
@@ -463,7 +448,7 @@ export class TurnContext {
       approvalPolicy: AskForApproval;
       sandboxPolicy: SandboxPolicy;
       browserEnvironmentPolicy: BrowserEnvironmentPolicy;
-      toolsConfig: ToolsConfig;
+      toolsConfig: IToolsConfig;
       model: string;
       effort?: ReasoningEffortConfig;
       summary: ReasoningSummaryConfig;
