@@ -577,6 +577,53 @@ export class Session {
   }
 
   /**
+   * Reset session to initial state (for new conversation)
+   */
+  async reset(): Promise<void> {
+    // Clear conversation history
+    this.clearHistory();
+
+    // Clear current turn items and pending input
+    this.currentTurnItems = [];
+    this.pendingInput = [];
+
+    // Reset state
+    this.state = new State(this.conversationId);
+
+    // Close old conversation if exists
+    if (this.conversation && this.conversationStore) {
+      await this.conversationStore.updateConversation(this.conversation.id, {
+        status: 'inactive',
+        metadata: {
+          ...this.conversation.metadata,
+          closedAt: Date.now()
+        }
+      });
+    }
+
+    // Create new conversation ID
+    Object.assign(this, { conversationId: `conv_${uuidv4()}` });
+    this.state = new State(this.conversationId);
+
+    // Reinitialize with storage if enabled
+    if (this.isPersistent && this.conversationStore) {
+      const newConvId = await this.conversationStore.createConversation({
+        title: 'New Conversation',
+        status: 'active',
+        metadata: {
+          model: this.turnContext.model,
+          cwd: this.turnContext.cwd
+        }
+      });
+
+      Object.assign(this, { conversationId: newConvId });
+      this.conversation = await this.conversationStore.getConversation(newConvId);
+    }
+
+    console.log('Session reset complete:', this.conversationId);
+  }
+
+  /**
    * Close session and cleanup resources
    */
   async close(): Promise<void> {

@@ -71,6 +71,10 @@ export enum MessageType {
   RESPONSE_REASONING_SUMMARY_PART_ADDED = 'RESPONSE_REASONING_SUMMARY_PART_ADDED',
   RESPONSE_WEB_SEARCH_CALL_BEGIN = 'RESPONSE_WEB_SEARCH_CALL_BEGIN',
   RESPONSE_RATE_LIMITS = 'RESPONSE_RATE_LIMITS',
+
+  // Session management
+  SESSION_RESET = 'SESSION_RESET',
+  SESSION_RESET_COMPLETE = 'SESSION_RESET_COMPLETE',
 }
 
 /**
@@ -563,6 +567,13 @@ export class MessageRouter {
   }
 
   /**
+   * Request session reset
+   */
+  async requestSessionReset(): Promise<void> {
+    return this.send(MessageType.SESSION_RESET);
+  }
+
+  /**
    * Clean up pending requests
    */
   cleanup(): void {
@@ -571,7 +582,7 @@ export class MessageRouter {
       request.reject(new Error('Router cleanup'));
     }
     this.pendingRequests.clear();
-    
+
     // Clear handlers
     this.handlers.clear();
   }

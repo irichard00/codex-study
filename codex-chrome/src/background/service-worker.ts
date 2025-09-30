@@ -143,6 +143,20 @@ function setupMessageHandlers(): void {
   router.on(MessageType.PING, async () => {
     return { type: MessageType.PONG, timestamp: Date.now() };
   });
+
+  // Handle session reset
+  router.on(MessageType.SESSION_RESET, async () => {
+    console.log('Session reset requested');
+    if (agent) {
+      // Reset the current session
+      const session = agent.getSession();
+      await session.reset();
+
+      console.log('Session reset complete');
+      return { type: MessageType.SESSION_RESET_COMPLETE, timestamp: Date.now() };
+    }
+    return { success: false, error: 'Agent not initialized' };
+  });
   
   // Handle storage operations
   router.on(MessageType.STORAGE_GET, async (message) => {

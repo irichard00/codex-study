@@ -17,9 +17,20 @@
   let showSettings = false;
   let showTooltip = false;
 
-  onMount(() => {
+  onMount(async () => {
+    // Clear messages from previous session
+    messages = [];
+
     // Initialize router
     router = new MessageRouter('sidepanel');
+
+    // Request session reset when side panel opens
+    try {
+      await router.requestSessionReset();
+      console.log('Session reset on side panel open');
+    } catch (error) {
+      console.error('Failed to reset session:', error);
+    }
 
     // Setup event handlers
     router.on(MessageType.EVENT, (message) => {
