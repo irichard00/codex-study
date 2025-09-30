@@ -7,6 +7,11 @@ import { WebScrapingTool } from './WebScrapingTool';
 import { FormAutomationTool } from './FormAutomationTool';
 import { NetworkInterceptTool } from './NetworkInterceptTool';
 import { DataExtractionTool } from './DataExtractionTool';
+import { DOMTool } from './DOMTool';
+import { NavigationTool } from './NavigationTool';
+import { StorageTool } from './StorageTool';
+import { TabTool } from './TabTool';
+import type { IToolsConfig } from '../config/types';
 
 // Re-export all tools
 export { ToolRegistry } from './ToolRegistry';
@@ -15,32 +20,71 @@ export { WebScrapingTool } from './WebScrapingTool';
 export { FormAutomationTool } from './FormAutomationTool';
 export { NetworkInterceptTool } from './NetworkInterceptTool';
 export { DataExtractionTool } from './DataExtractionTool';
+export { DOMTool } from './DOMTool';
+export { NavigationTool } from './NavigationTool';
+export { StorageTool } from './StorageTool';
+export { TabTool } from './TabTool';
 
 /**
- * Register all basic/existing tools
+ * Register browser automation tools based on configuration
  */
-export function registerBasicTools(registry: ToolRegistry): void {
-  // Register existing basic tools here
-  // These would be the original tools from the codebase
-  // For now, just a placeholder
-  console.log('Registering basic tools...');
-}
-
-/**
- * Register advanced browser automation tools
- */
-export function registerAdvancedTools(registry: ToolRegistry): void {
+export async function registerTools(registry: ToolRegistry, toolsConfig: IToolsConfig): Promise<void> {
   try {
-    // Register new browser-specific tools
     console.log('Starting advanced tool registration...');
 
+    // Helper function to check if a tool should be enabled
+    const isToolEnabled = (toolName: string): boolean => {
+      // Check if enable_all_tools is true
+      if (toolsConfig.enable_all_tools === true) {
+        return true;
+      }
+
+      // Check specific tool configuration
+      switch (toolName) {
+        case 'web_scraping':
+          return toolsConfig.web_scraping_tool === true;
+        case 'form_automation':
+          return toolsConfig.form_automation_tool === true;
+        case 'network_intercept':
+          return toolsConfig.network_intercept_tool === true;
+        case 'data_extraction':
+          return toolsConfig.data_extraction_tool === true;
+        case 'dom_tool':
+          return toolsConfig.dom_tool === true;
+        case 'navigation_tool':
+          return toolsConfig.navigation_tool === true;
+        case 'storage_tool':
+          return toolsConfig.storage_tool === true;
+        case 'tab_tool':
+          return toolsConfig.tab_tool === true;
+        default:
+          return false;
+      }
+    };
+
+    // Helper function to register a tool with error handling
+    const registerTool = async (toolName: string, toolInstance: any, getDefinition: () => any) => {
+      if (!registry.getTool(toolName)) {
+        const definition = getDefinition();
+        console.log(`Registering ${toolName}...`);
+
+        if (definition && definition.name) {
+          await registry.register(definition, async (params, context) => {
+            return toolInstance.execute(params);
+          });
+        } else {
+          console.error(`${toolName} definition missing name`);
+        }
+      } else {
+        console.log(`${toolName} already registered, skipping...`);
+      }
+    };
+
     // Web Scraping Tool
-    if (!registry.getTool('web_scraping')) {
+    if (isToolEnabled('web_scraping')) {
       const webScrapingTool = new WebScrapingTool();
       const webScrapingDefinition = webScrapingTool.getDefinition();
-      console.log('Registering WebScrapingTool...');
 
-      // Check if definition has a name
       if (!webScrapingDefinition || !webScrapingDefinition.name) {
         console.error('WebScrapingTool definition is missing name. Definition:', webScrapingDefinition);
 
@@ -49,7 +93,7 @@ export function registerAdvancedTools(registry: ToolRegistry): void {
           name: 'web_scraping',
           description: 'Extract structured data from web pages using patterns',
           parameters: {
-            type: 'object',
+            type: 'object' as const,
             properties: {},
             required: [],
             additionalProperties: false
@@ -57,70 +101,73 @@ export function registerAdvancedTools(registry: ToolRegistry): void {
         };
 
         console.log('Using fallback definition for web_scraping');
-        registry.register(fallbackDefinition, async (params, context) => {
+        await registry.register(fallbackDefinition, async (params, context) => {
           return webScrapingTool.execute(params);
         });
       } else {
-        registry.register(webScrapingDefinition, async (params, context) => {
-          return webScrapingTool.execute(params);
-        });
+        await registerTool('web_scraping', webScrapingTool, () => webScrapingTool.getDefinition());
       }
     } else {
-      console.log('WebScrapingTool already registered, skipping...');
+      console.log('WebScrapingTool disabled in configuration, skipping...');
     }
 
     // Form Automation Tool
-    if (!registry.getTool('form_automation')) {
+    if (isToolEnabled('form_automation')) {
       const formAutomationTool = new FormAutomationTool();
-      const formDefinition = formAutomationTool.getDefinition();
-      console.log('Registering FormAutomationTool...');
-
-      if (formDefinition && formDefinition.name) {
-        registry.register(formDefinition, async (params, context) => {
-          return formAutomationTool.execute(params);
-        });
-      } else {
-        console.error('FormAutomationTool definition missing name');
-      }
+      await registerTool('form_automation', formAutomationTool, () => formAutomationTool.getDefinition());
     } else {
-      console.log('FormAutomationTool already registered, skipping...');
+      console.log('FormAutomationTool disabled in configuration, skipping...');
     }
 
     // Network Intercept Tool
-    if (!registry.getTool('network_intercept')) {
+    if (isToolEnabled('network_intercept')) {
       const networkInterceptTool = new NetworkInterceptTool();
-      const networkDefinition = networkInterceptTool.getDefinition();
-      console.log('Registering NetworkInterceptTool...');
-
-      if (networkDefinition && networkDefinition.name) {
-        registry.register(networkDefinition, async (params, context) => {
-          return networkInterceptTool.execute(params);
-        });
-      } else {
-        console.error('NetworkInterceptTool definition missing name');
-      }
+      await registerTool('network_intercept', networkInterceptTool, () => networkInterceptTool.getDefinition());
     } else {
-      console.log('NetworkInterceptTool already registered, skipping...');
+      console.log('NetworkInterceptTool disabled in configuration, skipping...');
     }
 
     // Data Extraction Tool
-    if (!registry.getTool('data_extraction')) {
+    if (isToolEnabled('data_extraction')) {
       const dataExtractionTool = new DataExtractionTool();
-      const dataDefinition = dataExtractionTool.getDefinition();
-      console.log('Registering DataExtractionTool...');
-
-      if (dataDefinition && dataDefinition.name) {
-        registry.register(dataDefinition, async (params, context) => {
-          return dataExtractionTool.execute(params);
-        });
-      } else {
-        console.error('DataExtractionTool definition missing name');
-      }
+      await registerTool('data_extraction', dataExtractionTool, () => dataExtractionTool.getDefinition());
     } else {
-      console.log('DataExtractionTool already registered, skipping...');
+      console.log('DataExtractionTool disabled in configuration, skipping...');
     }
 
-    console.log('Advanced browser tools registered successfully');
+    // DOM Tool
+    if (isToolEnabled('dom_tool')) {
+      const domTool = new DOMTool();
+      await registerTool('dom_tool', domTool, () => domTool.getDefinition());
+    } else {
+      console.log('DOMTool disabled in configuration, skipping...');
+    }
+
+    // Navigation Tool
+    if (isToolEnabled('navigation_tool')) {
+      const navigationTool = new NavigationTool();
+      await registerTool('navigation_tool', navigationTool, () => navigationTool.getDefinition());
+    } else {
+      console.log('NavigationTool disabled in configuration, skipping...');
+    }
+
+    // Storage Tool
+    if (isToolEnabled('storage_tool')) {
+      const storageTool = new StorageTool();
+      await registerTool('storage_tool', storageTool, () => storageTool.getDefinition());
+    } else {
+      console.log('StorageTool disabled in configuration, skipping...');
+    }
+
+    // Tab Tool
+    if (isToolEnabled('tab_tool')) {
+      const tabTool = new TabTool();
+      await registerTool('tab_tool', tabTool, () => tabTool.getDefinition());
+    } else {
+      console.log('TabTool disabled in configuration, skipping...');
+    }
+
+    console.log('Advanced browser tools registration completed');
   } catch (error) {
     console.error('Failed to register advanced tools:', error);
   }
@@ -129,17 +176,17 @@ export function registerAdvancedTools(registry: ToolRegistry): void {
 /**
  * Initialize all tools
  */
-export async function initializeTools(): Promise<ToolRegistry> {
+export async function initializeTools(toolsConfig?: IToolsConfig): Promise<ToolRegistry> {
   const registry = new ToolRegistry();
 
-  // Register all tool categories
-  registerBasicTools(registry);
-  registerAdvancedTools(registry);
+  // Only register tools if configuration is provided
+  if (toolsConfig) {
+    await registerTools(registry, toolsConfig);
+  } else {
+    console.log('No tools configuration provided, skipping advanced tools registration');
+  }
 
-  // Initialize the registry
-  await registry.initialize();
-
-  console.log(`Total tools registered: ${registry.getToolCount()}`);
+  console.log(`Total tools registered: ${registry.listTools().length}`);
   return registry;
 }
 
@@ -147,12 +194,12 @@ export async function initializeTools(): Promise<ToolRegistry> {
  * Get tool definitions for OpenAI/model format
  */
 export function getToolDefinitions(registry: ToolRegistry): any[] {
-  return registry.getAllTools().map(tool => ({
+  return registry.listTools().map((tool: any) => ({
     type: 'function',
     function: {
       name: tool.name,
       description: tool.description,
-      parameters: tool.getParameterSchema()
+      parameters: tool.parameters
     }
   }));
 }
@@ -163,14 +210,21 @@ export function getToolDefinitions(registry: ToolRegistry): any[] {
 export async function executeTool(
   registry: ToolRegistry,
   name: string,
-  parameters: any
+  parameters: any,
+  sessionId: string = 'default-session',
+  turnId: string = 'default-turn'
 ): Promise<any> {
-  return registry.execute(name, parameters);
+  return registry.execute({
+    toolName: name,
+    parameters: parameters,
+    sessionId: sessionId,
+    turnId: turnId
+  });
 }
 
 /**
  * Cleanup all tools
  */
 export async function cleanupTools(registry: ToolRegistry): Promise<void> {
-  await registry.cleanup();
+  registry.clear();
 }

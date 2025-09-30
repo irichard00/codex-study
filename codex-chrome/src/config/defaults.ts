@@ -51,12 +51,12 @@ export const DEFAULT_EXTENSION_SETTINGS: IExtensionSettings = {
 export const DEFAULT_TOOLS_CONFIG: IToolsConfig = {
   // Browser tool toggles
   enable_all_tools: false,
-  storage_tool: false,
-  tab_tool: false,
+  storage_tool: true,
+  tab_tool: true,
   web_scraping_tool: false,
-  dom_tool: false,
+  dom_tool: true,
   form_automation_tool: false,
-  navigation_tool: false,
+  navigation_tool: true,
   network_intercept_tool: false,
   data_extraction_tool: false,
 

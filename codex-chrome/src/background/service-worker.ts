@@ -12,7 +12,7 @@ import { ToolRegistry } from '../tools/ToolRegistry';
 import { ConversationStore } from '../storage/ConversationStore';
 import { CacheManager } from '../storage/CacheManager';
 import { StorageQuotaManager } from '../storage/StorageQuotaManager';
-import { registerBasicTools, registerAdvancedTools } from '../tools';
+import { registerTools } from '../tools';
 import { AgentConfig } from '../config/AgentConfig';
 import type { ChromeConfigMessage, ConfigMessage } from '../protocol/config-messages';
 import {
@@ -73,9 +73,6 @@ async function doInitialize(): Promise<void> {
 
   // Initialize ModelClientFactory
   modelClientFactory = ModelClientFactory.getInstance();
-
-  // Initialize ToolRegistry with config
-  toolRegistry = new ToolRegistry(agentConfig!);
 
   // Create agent instance with config
   agent = new CodexAgent(agentConfig!);
@@ -481,9 +478,8 @@ async function initializeBrowserTools(): Promise<void> {
 
   const agentToolRegistry = agent.getToolRegistry();
 
-  // Register all tools
-  registerBasicTools(agentToolRegistry);
-  registerAdvancedTools(agentToolRegistry);
+  // Register all tools (await them to ensure they're registered before listTools is called)
+  await registerTools(agentToolRegistry, agentConfig!.getToolsConfig());
 
   // Register browser tools in the agent's tool registry
   const browserTools = [
