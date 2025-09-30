@@ -113,10 +113,9 @@ interface OpenAIStreamChunk {
  * Token counting mappings for different models
  */
 const TOKEN_MULTIPLIERS: Record<string, number> = {
-  'gpt-5': 1.2,
   'gpt-4': 1.3,
   'gpt-4-turbo': 1.3,
-  'gpt-4o': 1.2
+  'gpt-4o': 1.2,
 };
 
 /**
@@ -426,35 +425,21 @@ export class OpenAIClient extends ModelClient {
   async *streamCompletion(request: CompletionRequest): AsyncGenerator<any> {
     this.validateRequest(request);
 
-    // Use non-streaming request for OpenAI
-    const openaiRequest = this.convertToOpenAIRequest({ ...request, stream: false });
-    const response = await this.withRetry(
-      () => this.makeRequest(openaiRequest),
-      (error) => this.isRetryableError(error)
-    );
+    const openaiRequest = this.convertToOpenAIRequest({ ...request, stream: true });
+    const response = await this.makeStreamRequest(openaiRequest);
 
-    // Convert the complete response to streaming format for compatibility
-    const completionResponse = this.convertFromOpenAIResponse(response);
-
-    // Yield the complete message as a single event
-    const choice = completionResponse.choices[0];
-    if (choice?.message?.content) {
-      yield {
-        type: 'chunk',
-        data: response,
-        delta: choice.message.content,
-        finishReason: choice.finishReason
-      };
+    if (!response.body) {
+      throw new ModelClientError('Stream response body is null');
     }
 
-    // Yield completion event with usage
-    yield {
-      type: 'completion',
-      data: {
-        ...response,
-        usage: completionResponse.usage
-      }
-    };
+    // Initialize StreamProcessor for this stream
+    this.streamProcessor = new StreamProcessor('model');
+    await this.streamProcessor.start(response.body);
+
+    // Yield chunks from the StreamProcessor
+    for await (const chunk of this.streamProcessor.getChunks()) {
+      yield chunk;
+    }
   }
 
   /**
@@ -466,30 +451,21 @@ export class OpenAIClient extends ModelClient {
   ): Promise<StreamProcessor> {
     this.validateRequest(request);
 
-    // Use non-streaming request for OpenAI
-    const openaiRequest = this.convertToOpenAIRequest({ ...request, stream: false });
-    const response = await this.withRetry(
-      () => this.makeRequest(openaiRequest),
-      (error) => this.isRetryableError(error)
-    );
+    const openaiRequest = this.convertToOpenAIRequest({ ...request, stream: true });
+    const response = await this.makeStreamRequest(openaiRequest);
+
+    if (!response.body) {
+      throw new ModelClientError('Stream response body is null');
+    }
 
     const processor = new StreamProcessor('model');
 
     // Set up UI update callback if provided
     if (onUpdate) {
-      const completionResponse = this.convertFromOpenAIResponse(response);
-      const choice = completionResponse.choices[0];
-
-      if (choice?.message?.content) {
-        onUpdate({
-          type: 'chunk',
-          data: response,
-          delta: choice.message.content,
-          finishReason: choice.finishReason
-        });
-      }
+      processor.onUpdate(onUpdate);
     }
 
+    await processor.start(response.body);
     return processor;
   }
 
@@ -508,9 +484,7 @@ export class OpenAIClient extends ModelClient {
       'gpt-4': 8192,
       'gpt-4-32k': 32768,
       'gpt-4-turbo': 128000,
-      'gpt-4o': 128000,
-      'gpt-3.5-turbo': 4096,
-      'gpt-3.5-turbo-16k': 16384,
+      'gpt-4o': 128000
     };
     return contextWindows[this.currentModel];
   }

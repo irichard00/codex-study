@@ -238,24 +238,6 @@ export class TurnManager {
     }
 
     // Add agent execution tools based on config
-    if (enableAllTools || toolsConfig.execCommand !== false) {
-      tools.push({
-        type: 'function',
-        function: {
-          name: 'exec_command',
-          description: 'Execute a command in the browser context',
-          parameters: {
-            type: 'object',
-            properties: {
-              command: { type: 'string', description: 'Command to execute' },
-              cwd: { type: 'string', description: 'Working directory' },
-            },
-            required: ['command'],
-          },
-        },
-      });
-    }
-
     if (enableAllTools || toolsConfig.webSearch !== false) {
       tools.push({
         type: 'function',
