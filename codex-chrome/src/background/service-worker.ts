@@ -8,24 +8,15 @@ import { MessageRouter, MessageType } from '../core/MessageRouter';
 import type { Submission, Event } from '../protocol/types';
 import { validateSubmission } from '../protocol/schemas';
 import { ModelClientFactory } from '../models/ModelClientFactory';
-import { ToolRegistry } from '../tools/ToolRegistry';
 import { ConversationStore } from '../storage/ConversationStore';
 import { CacheManager } from '../storage/CacheManager';
 import { StorageQuotaManager } from '../storage/StorageQuotaManager';
 import { registerTools } from '../tools';
 import { AgentConfig } from '../config/AgentConfig';
-import type { ChromeConfigMessage, ConfigMessage } from '../protocol/config-messages';
-import {
-  createConfigResponse,
-  createConfigChangeNotification,
-  createConfigUpdate
-} from '../protocol/config-messages';
 
 // Global instances
 let agent: CodexAgent | null = null;
 let router: MessageRouter | null = null;
-let modelClientFactory: ModelClientFactory | null = null;
-let toolRegistry: ToolRegistry | null = null;
 let conversationStore: ConversationStore | null = null;
 let cacheManager: CacheManager | null = null;
 let storageQuotaManager: StorageQuotaManager | null = null;
@@ -71,10 +62,7 @@ async function doInitialize(): Promise<void> {
   await agentConfig.initialize();
   console.log('AgentConfig initialized');
 
-  // Initialize ModelClientFactory
-  modelClientFactory = ModelClientFactory.getInstance();
-
-  // Create agent instance with config
+  // Create agent instance with config (agent will initialize ModelClientFactory and ToolRegistry)
   agent = new CodexAgent(agentConfig!);
   await agent.initialize();
 
@@ -170,9 +158,10 @@ function setupMessageHandlers(): void {
 
   // Handle model client messages
   router.on(MessageType.MODEL_REQUEST, async (message) => {
-    if (!modelClientFactory) throw new Error('Model client factory not initialized');
+    if (!agent) throw new Error('Agent not initialized');
 
     const { config, prompt } = message.payload;
+    const modelClientFactory = ModelClientFactory.getInstance();
     const client = await modelClientFactory.createClient(config);
     return await client.complete(prompt);
   });
@@ -474,33 +463,13 @@ async function executeTabCommand(
  * Initialize browser-specific tools
  */
 async function initializeBrowserTools(): Promise<void> {
-  if (!toolRegistry || !agent) return;
+  if (!agent) return;
 
-  const agentToolRegistry = agent.getToolRegistry();
-
+  const toolRegistry = agent.getToolRegistry();
   // Register all tools (await them to ensure they're registered before listTools is called)
-  await registerTools(agentToolRegistry, agentConfig!.getToolsConfig());
+  await registerTools(toolRegistry, await agentConfig!.getToolsConfig());
 
-  // Register browser tools in the agent's tool registry
-  const browserTools = [
-    'browser_action',
-    'tab_navigate',
-    'tab_screenshot',
-    'dom_query',
-    'dom_click',
-    'dom_type',
-    'dom_extract',
-    'storage_get',
-    'storage_set'
-  ];
-
-  for (const toolName of browserTools) {
-    const tool = toolRegistry.getTool(toolName);
-    if (tool) {
-      // For now, just log tool registration - proper integration pending
-      console.log(`Registering browser tool: ${toolName}`);
-    }
-  }
+  console.log('Browser tools initialized');
 }
 
 /**
@@ -738,10 +707,6 @@ chrome.runtime.onSuspend.addListener(async () => {
     router.cleanup();
   }
 
-  if (toolRegistry) {
-    toolRegistry.clear();
-  }
-
   if (conversationStore) {
     await conversationStore.close();
   }
@@ -763,4 +728,4 @@ chrome.runtime.onSuspend.addListener(async () => {
 initialize();
 
 // Export for testing
-export { agent, router, modelClientFactory, toolRegistry, initialize };
+export { agent, router, initialize };
