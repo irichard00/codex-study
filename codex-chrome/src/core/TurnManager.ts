@@ -3,15 +3,17 @@
  * Manages individual conversation turns, handles model streaming, and coordinates tool calls
  */
 
-import { Session, ToolDefinition } from './Session';
+import { Session } from './Session';
+import type { ToolDefinition } from '../models/ModelClient';
 import { TurnContext } from './TurnContext';
-import { ModelClient, CompletionRequest, CompletionResponse } from '../models/ModelClient';
+import { ModelClient } from '../models/ModelClient';
+import type { CompletionRequest, CompletionResponse } from '../models/ModelClient';
 import { loadPrompt } from './PromptLoader';
-import { EventMsg, TokenUsage, StreamErrorEvent } from '../protocol/events';
-import { Event, InputItem } from '../protocol/types';
+import type { EventMsg, TokenUsage, StreamErrorEvent } from '../protocol/events';
+import type { Event, InputItem } from '../protocol/types';
 import { v4 as uuidv4 } from 'uuid';
-import { toolRegistry } from '../tools/ToolRegistry';
-import { IToolsConfig } from '../config/types';
+import { ToolRegistry } from '../tools/ToolRegistry';
+import type { IToolsConfig } from '../config/types';
 
 /**
  * Result of processing a single response item
@@ -66,6 +68,7 @@ export class TurnManager {
   private session: Session;
   private turnContext: TurnContext;
   private modelClient: ModelClient;
+  private toolRegistry: ToolRegistry;
   private config: TurnConfig;
   private cancelled = false;
 
@@ -73,11 +76,13 @@ export class TurnManager {
     session: Session,
     turnContext: TurnContext,
     modelClient: ModelClient,
+    toolRegistry: ToolRegistry,
     config: TurnConfig = {}
   ) {
     this.session = session;
     this.turnContext = turnContext;
     this.modelClient = modelClient;
+    this.toolRegistry = toolRegistry;
     this.config = {
       maxRetries: 3,
       retryDelayMs: 1000,
@@ -135,7 +140,7 @@ export class TurnManager {
 
           // Notify about retry attempt
           await this.emitStreamError(
-            `Stream error: ${error.message}; retrying ${retries}/${this.config.maxRetries} in ${delay}ms`,
+            `Stream error: ${error instanceof Error ? error.message : String(error)}; retrying ${retries}/${this.config.maxRetries} in ${delay}ms`,
             true,
             retries
           );
@@ -192,7 +197,7 @@ export class TurnManager {
 
     } catch (error) {
       // Handle streaming errors
-      if (error.message?.includes('stream closed') || error.name === 'StreamError') {
+      if (error instanceof Error && (error.message?.includes('stream closed') || error.name === 'StreamError')) {
         throw new Error(`Stream error: ${error.message}`);
       }
       throw error;
@@ -209,7 +214,7 @@ export class TurnManager {
     const toolsConfig = this.turnContext.getToolsConfig() as IToolsConfig;
 
     // Get all registered browser tools from ToolRegistry
-    const registeredTools = toolRegistry.listTools();
+    const registeredTools = this.toolRegistry.listTools();
 
     // Check if all tools should be enabled
     const enableAllTools = toolsConfig.enable_all_tools ?? false;
@@ -231,7 +236,7 @@ export class TurnManager {
           function: {
             name: toolDef.name,
             description: toolDef.description,
-            parameters: toolDef.parameters as any,
+            parameters: toolDef.parameters || {},
           },
         });
       }
@@ -285,7 +290,16 @@ export class TurnManager {
     // Add MCP tools if enabled and available
     if (enableAllTools || toolsConfig.mcpTools !== false) {
       const mcpTools = await this.session.getMcpTools();
-      tools.push(...mcpTools);
+      // Convert MCP tools to ModelClient format
+      const convertedMcpTools = mcpTools.map(tool => ({
+        type: 'function' as const,
+        function: {
+          name: tool.function.name,
+          description: tool.function.description,
+          parameters: tool.function.parameters || {},
+        },
+      }));
+      tools.push(...convertedMcpTools);
     }
 
     // Add custom tools if configured
@@ -293,14 +307,14 @@ export class TurnManager {
       for (const [toolName, isEnabled] of Object.entries(toolsConfig.customTools)) {
         if (isEnabled || enableAllTools) {
           // Custom tools would be loaded from registry or another source
-          const customTool = toolRegistry.getTool(toolName);
+          const customTool = this.toolRegistry.getTool(toolName);
           if (customTool) {
             tools.push({
               type: 'function',
               function: {
                 name: customTool.name,
                 description: customTool.description,
-                parameters: customTool.parameters as any,
+                parameters: customTool.parameters || {},
               },
             });
           }
@@ -531,7 +545,7 @@ export class TurnManager {
       return {
         type: 'function_call_output',
         call_id: callId,
-        content: `Error: ${error.message}`,
+        content: `Error: ${error instanceof Error ? error.message : String(error)}`,
         success: false,
       };
     }
@@ -664,7 +678,7 @@ export class TurnManager {
         type: 'McpToolCallEnd',
         data: {
           tool_name: toolName,
-          error: error.message,
+          error: error instanceof Error ? error.message : String(error),
         },
       });
       throw error;

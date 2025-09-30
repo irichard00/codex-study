@@ -61,10 +61,10 @@ export const DEFAULT_TOOLS_CONFIG: IToolsConfig = {
   data_extraction_tool: false,
 
   // Agent execution tool toggles
-  execCommand: true,
+  execCommand: false,
   webSearch: true,
-  fileOperations: true,
-  mcpTools: true,
+  fileOperations: false,
+  mcpTools: false,
   customTools: {},
 
   // Shared configuration metadata

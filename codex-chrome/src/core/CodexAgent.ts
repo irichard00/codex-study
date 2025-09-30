@@ -353,7 +353,8 @@ export class CodexAgent {
         const turnManager = new TurnManager(
           this.session,
           taskContext,
-          modelClient
+          modelClient,
+          this.toolRegistry
         );
 
         // Create and run AgentTask - AgentTask will create its own TaskRunner
