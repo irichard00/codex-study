@@ -18,6 +18,7 @@ import { ToolRegistry } from '../tools/ToolRegistry';
 import { ModelClientFactory } from '../models/ModelClientFactory';
 import { UserNotifier } from './UserNotifier';
 import { v4 as uuidv4 } from 'uuid';
+import { loadUserInstructions } from './PromptLoader';
 
 /**
  * Main agent class managing the submission and event queues
@@ -67,6 +68,10 @@ export class CodexAgent {
 
     // Initialize session
     await this.session.initialize();
+
+    // Load user instructions and set in session's turn context
+    const userInstructions = await loadUserInstructions();
+    this.session.updateTurnContext({ userInstructions });
   }
 
   /**

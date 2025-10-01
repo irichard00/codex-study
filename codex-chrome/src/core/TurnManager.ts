@@ -8,7 +8,7 @@ import type { ToolDefinition } from '../models/ModelClient';
 import { TurnContext } from './TurnContext';
 import { ModelClient } from '../models/ModelClient';
 import type { CompletionRequest, CompletionResponse } from '../models/ModelClient';
-import { loadPrompt } from './PromptLoader';
+import { loadPrompt, loadUserInstructions } from './PromptLoader';
 import type { EventMsg, TokenUsage, StreamErrorEvent } from '../protocol/events';
 import type { Event, InputItem } from '../protocol/types';
 import { v4 as uuidv4 } from 'uuid';
@@ -389,6 +389,15 @@ export class TurnManager {
     // Load and add the agent prompt as system message
     const systemPrompt = await loadPrompt();
     messages.push({ role: 'system', content: systemPrompt });
+
+    // Add user instructions (development guidelines from user_instruction.md)
+    const userInstructions = this.turnContext.getUserInstructions();
+    if (userInstructions) {
+      messages.push({
+        role: 'system',
+        content: `<user_instructions>\n${userInstructions}\n</user_instructions>`,
+      });
+    }
 
     // Add base instructions if provided (as override)
     if (prompt.baseInstructionsOverride) {
