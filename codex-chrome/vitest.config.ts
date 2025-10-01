@@ -1,13 +1,12 @@
 import { defineConfig } from 'vitest/config';
-import { svelte } from '@sveltejs/vite-plugin-svelte';
 import { resolve } from 'path';
 
 export default defineConfig({
-  plugins: [svelte()],
+  plugins: [],
   test: {
     globals: true,
     environment: 'jsdom',
-    setupFiles: ['./src/tests/setup.ts', './tests/helpers/chrome-storage-mock.ts'],
+    setupFiles: [],
     coverage: {
       reporter: ['text', 'json', 'html'],
       exclude: [
@@ -20,7 +19,8 @@ export default defineConfig({
     },
     include: [
       'tests/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}',
-      'src/tests/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'
+      'src/tests/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}',
+      'src/**/__tests__/**/*.{test,spec}.{js,mjs,cjs,ts,mts,cts,jsx,tsx}'
     ],
     mockReset: true,
     restoreMocks: true
