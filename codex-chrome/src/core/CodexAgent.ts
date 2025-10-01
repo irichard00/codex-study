@@ -231,10 +231,11 @@ export class CodexAgent {
       }
 
       // Emit TaskComplete event with turn metadata if available
-      const history = this.session.getHistory();
-      const lastAgentMessage = history
-        .filter(h => h.type === 'agent')
-        .pop()?.text;
+      const conversationHistory = this.session.getConversationHistory();
+      const lastAgentMessage = conversationHistory.items
+        .filter(item => item.role === 'assistant')
+        .map(item => typeof item.content === 'string' ? item.content : JSON.stringify(item.content))
+        .pop();
 
       this.emitEvent({
         type: 'TaskComplete',
@@ -372,10 +373,11 @@ export class CodexAgent {
           const result = await agentTask.run();
 
           // Extract last assistant message from session history
-          const history = this.session.getHistory();
-          const lastAgentMessage = history
-            .filter(h => h.type === 'agent')
-            .pop()?.text;
+          const conversationHistory = this.session.getConversationHistory();
+          const lastAgentMessage = conversationHistory.items
+            .filter(item => item.role === 'assistant')
+            .map(item => typeof item.content === 'string' ? item.content : JSON.stringify(item.content))
+            .pop();
 
           // Extract input messages from this turn
           const inputMessages = responseItems
@@ -518,12 +520,12 @@ export class CodexAgent {
    * Handle get path request
    */
   private async handleGetPath(): Promise<void> {
-    const history = this.session.getHistory();
+    const conversationHistory = this.session.getConversationHistory();
     this.emitEvent({
       type: 'ConversationPath',
       data: {
         path: this.session.conversationId,
-        messages_count: history.length,
+        messages_count: conversationHistory.items.length,
       },
     });
   }

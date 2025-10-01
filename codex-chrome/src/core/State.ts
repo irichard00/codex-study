@@ -157,18 +157,6 @@ export class State {
   }
 
   /**
-   * Get conversation history
-   * Returns in old format for backward compatibility
-   */
-  getHistory(): Array<{ timestamp: number; text: string; type: 'user' | 'agent' | 'system' }> {
-    return this.conversationHistory.items.map(item => ({
-      timestamp: item.timestamp || Date.now(),
-      text: typeof item.content === 'string' ? item.content : JSON.stringify(item.content),
-      type: item.role === 'user' ? 'user' as const : item.role === 'system' ? 'system' as const : 'agent' as const
-    }));
-  }
-
-  /**
    * Get conversation history as ConversationHistory
    */
   getConversationHistory(): ConversationHistory {

@@ -180,14 +180,6 @@ export class Session {
   }
 
   /**
-   * Get conversation history
-   * Returns items in the old format for backward compatibility
-   */
-  getHistory(): Array<{ timestamp: number; text: string; type: 'user' | 'agent' | 'system' }> {
-    return this.state.getHistory();
-  }
-
-  /**
    * Get conversation history as ConversationHistory
    */
   getConversationHistory(): ConversationHistory {
