@@ -103,7 +103,15 @@ interface OpenAIStreamChunk {
     delta: {
       role?: string;
       content?: string;
-      tool_calls?: OpenAIToolCall[];
+      tool_calls?: Array<{
+        index?: number;
+        id?: string;
+        type?: 'function';
+        function?: {
+          name?: string;
+          arguments?: string;
+        };
+      }>;
     };
     finish_reason?: 'stop' | 'length' | 'tool_calls' | 'content_filter';
   }>;
@@ -420,7 +428,8 @@ export class OpenAIClient extends ModelClient {
   }
 
   /**
-   * Stream completion with StreamProcessor integration
+   * Stream completion with ResponseEvent format (matching codex-rs ResponseEvent)
+   * This is the main streaming method used by TurnManager
    */
   async *streamCompletion(request: CompletionRequest): AsyncGenerator<any> {
     this.validateRequest(request);
@@ -432,13 +441,179 @@ export class OpenAIClient extends ModelClient {
       throw new ModelClientError('Stream response body is null');
     }
 
-    // Initialize StreamProcessor for this stream
-    this.streamProcessor = new StreamProcessor('model');
-    await this.streamProcessor.start(response.body);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
 
-    // Yield chunks from the StreamProcessor
-    for await (const chunk of this.streamProcessor.getChunks()) {
-      yield chunk;
+    // Track accumulated tool calls and content for the current message
+    const accumulatedToolCalls = new Map<number, { id: string; name: string; arguments: string }>();
+    let accumulatedContent = '';
+    let currentRole: string | undefined;
+    let responseId: string | undefined;
+    let hasEmittedCreated = false;
+
+    try {
+      // Emit Created event
+      yield { type: 'Created' };
+      hasEmittedCreated = true;
+
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+
+        // Keep the last potentially incomplete line in the buffer
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+
+          if (!trimmed || !trimmed.startsWith('data: ')) {
+            continue;
+          }
+
+          const data = trimmed.slice(6); // Remove 'data: ' prefix
+
+          if (data === '[DONE]') {
+            // Emit OutputItemDone for final message if we have content
+            if (accumulatedContent || accumulatedToolCalls.size > 0) {
+              const item: any = {
+                type: 'message',
+                role: currentRole || 'assistant',
+              };
+
+              if (accumulatedContent) {
+                item.content = accumulatedContent;
+              }
+
+              if (accumulatedToolCalls.size > 0) {
+                // Convert tool calls to function_call items
+                for (const [index, toolCall] of accumulatedToolCalls.entries()) {
+                  yield {
+                    type: 'OutputItemDone',
+                    item: {
+                      type: 'function_call',
+                      call_id: toolCall.id,
+                      name: toolCall.name,
+                      arguments: toolCall.arguments,
+                    },
+                  };
+                }
+              } else {
+                // Regular message without tool calls
+                yield { type: 'OutputItemDone', item };
+              }
+            }
+
+            // Emit Completed event (with no token usage for now)
+            yield {
+              type: 'Completed',
+              responseId: responseId || 'unknown',
+              tokenUsage: undefined,
+            };
+            return;
+          }
+
+          try {
+            const chunk: OpenAIStreamChunk = JSON.parse(data);
+
+            // Capture response ID
+            if (!responseId) {
+              responseId = chunk.id;
+            }
+
+            const choice = chunk.choices[0];
+            if (!choice) continue;
+
+            const delta = choice.delta;
+
+            // Track role
+            if (delta.role) {
+              currentRole = delta.role;
+            }
+
+            // Handle content deltas
+            if (delta.content) {
+              accumulatedContent += delta.content;
+              yield {
+                type: 'OutputTextDelta',
+                delta: delta.content,
+              };
+            }
+
+            // Handle tool calls
+            if (delta.tool_calls) {
+              for (const toolCallDelta of delta.tool_calls) {
+                const index = toolCallDelta.index || 0;
+
+                if (!accumulatedToolCalls.has(index)) {
+                  accumulatedToolCalls.set(index, {
+                    id: toolCallDelta.id || '',
+                    name: toolCallDelta.function?.name || '',
+                    arguments: toolCallDelta.function?.arguments || '',
+                  });
+                } else {
+                  const existing = accumulatedToolCalls.get(index)!;
+                  if (toolCallDelta.id) existing.id = toolCallDelta.id;
+                  if (toolCallDelta.function?.name) existing.name = toolCallDelta.function.name;
+                  if (toolCallDelta.function?.arguments) {
+                    existing.arguments += toolCallDelta.function.arguments;
+                  }
+                }
+              }
+            }
+
+            // Handle finish_reason
+            if (choice.finish_reason) {
+              // Message/tool calls are complete - will be emitted when we see [DONE]
+            }
+          } catch (error) {
+            // Skip malformed chunks
+            console.warn('Failed to parse stream chunk:', error);
+          }
+        }
+      }
+
+      // If we didn't get [DONE], still try to emit final events
+      if (accumulatedContent || accumulatedToolCalls.size > 0) {
+        const item: any = {
+          type: 'message',
+          role: currentRole || 'assistant',
+        };
+
+        if (accumulatedContent) {
+          item.content = accumulatedContent;
+        }
+
+        if (accumulatedToolCalls.size > 0) {
+          for (const [index, toolCall] of accumulatedToolCalls.entries()) {
+            yield {
+              type: 'OutputItemDone',
+              item: {
+                type: 'function_call',
+                call_id: toolCall.id,
+                name: toolCall.name,
+                arguments: toolCall.arguments,
+              },
+            };
+          }
+        } else {
+          yield { type: 'OutputItemDone', item };
+        }
+      }
+
+      yield {
+        type: 'Completed',
+        responseId: responseId || 'unknown',
+        tokenUsage: undefined,
+      };
+    } finally {
+      reader.releaseLock();
     }
   }
 

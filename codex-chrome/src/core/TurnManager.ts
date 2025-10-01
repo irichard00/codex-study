@@ -11,6 +11,7 @@ import type { CompletionRequest, CompletionResponse } from '../models/ModelClien
 import { loadPrompt, loadUserInstructions } from './PromptLoader';
 import type { EventMsg, TokenUsage, StreamErrorEvent } from '../protocol/events';
 import type { Event, InputItem } from '../protocol/types';
+import type { ResponseEvent } from '../models/types/ResponseEvent';
 import { v4 as uuidv4 } from 'uuid';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import type { IToolsConfig } from '../config/types';
@@ -176,24 +177,98 @@ export class TurnManager {
 
     try {
       // Process streaming response
+      // Loop processes ResponseEvent items from the model stream.
+      // We must inspect *both* Ok and Err cases so that transient stream failures
+      // bubble up and trigger the caller's retry logic.
       for await (const event of stream) {
         // Check for cancellation
         if (this.cancelled) {
           throw new Error('Turn cancelled');
         }
 
-        await this.handleStreamEvent(event, processedItems);
+        // Handle null/undefined event (stream closed without completion)
+        if (!event) {
+          throw new Error('stream closed before response.completed');
+        }
 
-        // Capture final token usage
-        if (event.type === 'completion' && event.data.usage) {
-          totalTokenUsage = this.convertTokenUsage(event.data.usage);
+        // Process the event based on ResponseEvent type
+        switch (event.type) {
+          case 'Created':
+            // Initial event, no action needed
+            break;
+
+          case 'OutputItemDone': {
+            // Item (message or tool call) is complete
+            const response = await this.handleResponseItem(event.item);
+            processedItems.push({
+              item: event.item,
+              response,
+            });
+            break;
+          }
+
+          case 'WebSearchCallBegin':
+            // Web search started
+            await this.emitEvent({
+              type: 'WebSearchBegin',
+              data: { call_id: event.callId },
+            });
+            break;
+
+          case 'RateLimits':
+            // Update rate limits (deferred until token usage available)
+            // In the Rust version, this is handled by sess.update_rate_limits
+            break;
+
+          case 'Completed': {
+            // Stream completed with final token usage
+            totalTokenUsage = event.tokenUsage;
+
+            return {
+              processedItems,
+              totalTokenUsage,
+            };
+          }
+
+          case 'OutputTextDelta':
+            // Streaming text delta
+            await this.emitEvent({
+              type: 'AgentMessageDelta',
+              data: { delta: event.delta },
+            });
+            break;
+
+          case 'ReasoningSummaryDelta':
+            // Reasoning summary delta (for o1/o3 models)
+            await this.emitEvent({
+              type: 'ReasoningSummaryDelta',
+              data: { delta: event.delta },
+            });
+            break;
+
+          case 'ReasoningContentDelta':
+            // Reasoning content delta (for o1/o3 models)
+            await this.emitEvent({
+              type: 'ReasoningContentDelta',
+              data: { delta: event.delta },
+            });
+            break;
+
+          case 'ReasoningSummaryPartAdded':
+            // Reasoning summary part added
+            await this.emitEvent({
+              type: 'ReasoningSummaryPartAdded',
+              data: {},
+            });
+            break;
+
+          default:
+            console.warn('Unknown ResponseEvent type:', event);
         }
       }
 
-      return {
-        processedItems,
-        totalTokenUsage,
-      };
+      // If loop exits without Completed event, stream was closed prematurely
+      throw new Error('stream closed before response.completed');
 
     } catch (error) {
       // Handle streaming errors
@@ -423,93 +498,62 @@ export class TurnManager {
   }
 
   /**
-   * Handle individual stream events
+   * Handle a complete response item from the model
+   * Port of handle_response_item from codex-rs
    */
-  private async handleStreamEvent(
-    event: any,
-    processedItems: ProcessedResponseItem[]
-  ): Promise<void> {
-    switch (event.type) {
-      case 'content_delta':
-        await this.handleContentDelta(event.data);
-        break;
+  private async handleResponseItem(item: any): Promise<any | undefined> {
+    // Check item type and handle accordingly
+    if (item.type === 'function_call') {
+      // Function call - execute and return response
+      const { name, arguments: args, call_id } = item;
 
-      case 'tool_call':
-        await this.handleToolCall(event.data, processedItems);
-        break;
-
-      case 'message_complete':
-        await this.handleMessageComplete(event.data, processedItems);
-        break;
-
-      case 'error':
-        throw new Error(`Stream error: ${event.data.message}`);
-
-      default:
-        // Unknown event type, log but don't fail
-        console.warn('Unknown stream event type:', event.type);
-    }
-  }
-
-  /**
-   * Handle content delta events (streaming text)
-   */
-  private async handleContentDelta(data: any): Promise<void> {
-    await this.emitEvent({
-      type: 'AgentMessageDelta',
-      data: {
-        delta: data.text || data.content || '',
-      },
-    });
-  }
-
-  /**
-   * Handle tool call events
-   */
-  private async handleToolCall(data: any, processedItems: ProcessedResponseItem[]): Promise<void> {
-    const { toolName, parameters, callId } = data;
-
-    // Create the tool call item
-    const toolCallItem = {
-      type: 'function_call',
-      call_id: callId,
-      name: toolName,
-      parameters,
-    };
-
-    // Execute the tool call
-    const toolResponse = await this.executeToolCall(toolName, parameters, callId);
-
-    processedItems.push({
-      item: toolCallItem,
-      response: toolResponse,
-    });
-  }
-
-  /**
-   * Handle message completion events
-   */
-  private async handleMessageComplete(data: any, processedItems: ProcessedResponseItem[]): Promise<void> {
-    if (data.role === 'assistant' && data.content) {
-      // This is a final assistant message (no tool calls)
-      const messageItem = {
-        role: 'assistant',
-        content: data.content,
-      };
-
-      processedItems.push({
-        item: messageItem,
-        response: undefined, // No response needed for final messages
-      });
-
-      // Emit the complete message
+      try {
+        const result = await this.executeToolCall(name, args, call_id);
+        return result;
+      } catch (error) {
+        return {
+          type: 'function_call_output',
+          call_id,
+          content: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          success: false,
+        };
+      }
+    } else if (item.type === 'message' && item.role === 'assistant') {
+      // Assistant message - emit event but no response needed
       await this.emitEvent({
         type: 'AgentMessage',
         data: {
-          message: data.content,
+          message: typeof item.content === 'string' ? item.content : JSON.stringify(item.content),
         },
       });
+      return undefined;
+    } else if (item.type === 'reasoning') {
+      // Reasoning item (for o1/o3 models) - no response needed
+      return undefined;
+    } else if (item.type === 'web_search_call') {
+      // Web search call - execute and return response
+      const { call_id, query } = item;
+
+      try {
+        const result = await this.executeWebSearch(query);
+        return {
+          type: 'function_call_output',
+          call_id,
+          content: JSON.stringify(result),
+          success: true,
+        };
+      } catch (error) {
+        return {
+          type: 'function_call_output',
+          call_id,
+          content: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          success: false,
+        };
+      }
     }
+
+    // Other item types don't require responses
+    return undefined;
   }
 
   /**
