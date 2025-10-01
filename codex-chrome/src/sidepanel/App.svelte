@@ -3,23 +3,32 @@
   import { MessageRouter, MessageType } from '../core/MessageRouter';
   import type { Event } from '../protocol/types';
   import type { EventMsg } from '../protocol/events';
+  import type { ProcessedEvent } from '../types/ui';
   import TerminalContainer from './components/TerminalContainer.svelte';
   import TerminalMessage from './components/TerminalMessage.svelte';
   import TerminalInput from './components/TerminalInput.svelte';
   import Settings from './Settings.svelte';
-  import type { MessageType as TerminalMessageType } from '../types/terminal';
+  import EventDisplay from './components/event_display/EventDisplay.svelte';
+  import { EventProcessor } from './components/event_display/EventProcessor';
 
   let router: MessageRouter;
+  let eventProcessor: EventProcessor;
   let messages: Array<{ type: 'user' | 'agent'; content: string; timestamp: number }> = [];
+  let processedEvents: ProcessedEvent[] = [];
   let inputText = '';
   let isConnected = false;
   let isProcessing = false;
   let showSettings = false;
   let showTooltip = false;
+  let scrollContainer: HTMLDivElement;
 
   onMount(async () => {
     // Clear messages from previous session
     messages = [];
+    processedEvents = [];
+
+    // Initialize EventProcessor
+    eventProcessor = new EventProcessor();
 
     // Initialize router
     router = new MessageRouter('sidepanel');
@@ -66,6 +75,40 @@
   function handleEvent(event: Event) {
     const msg = event.msg;
 
+    // Process event through EventProcessor
+    const processed = eventProcessor.processEvent(event);
+
+    if (processed) {
+      processedEvents = [...processedEvents, processed];
+
+      // Auto-scroll to bottom if user is at bottom
+      if (scrollContainer) {
+        const isAtBottom =
+          scrollContainer.scrollHeight - scrollContainer.scrollTop <=
+          scrollContainer.clientHeight + 100;
+
+        if (isAtBottom) {
+          setTimeout(() => {
+            scrollContainer.scrollTo({
+              top: scrollContainer.scrollHeight,
+              behavior: 'smooth'
+            });
+          }, 100);
+        }
+      }
+    }
+
+    // Update processing state
+    if (msg.type === 'TaskStarted') {
+      isProcessing = true;
+      // Clear history on new task
+      processedEvents = [];
+      eventProcessor.reset();
+    } else if (msg.type === 'TaskComplete' || msg.type === 'TaskFailed') {
+      isProcessing = false;
+    }
+
+    // Keep legacy message handling for backward compatibility
     switch (msg.type) {
       case 'AgentMessage':
         if ('data' in msg && msg.data && 'message' in msg.data) {
@@ -77,14 +120,6 @@
         }
         break;
 
-      case 'TaskStarted':
-        isProcessing = true;
-        break;
-
-      case 'TaskComplete':
-        isProcessing = false;
-        break;
-
       case 'Error':
         if ('data' in msg && msg.data && 'message' in msg.data) {
           messages = [...messages, {
@@ -93,7 +128,6 @@
             timestamp: Date.now(),
           }];
         }
-        isProcessing = false;
         break;
     }
   }
@@ -182,22 +216,14 @@
   </div>
 
   <!-- Messages -->
-  <div class="flex-1 overflow-y-auto mb-4">
-    {#if messages.length === 0}
+  <div class="flex-1 overflow-y-auto mb-4 space-y-2" bind:this={scrollContainer}>
+    {#if processedEvents.length === 0}
       <TerminalMessage type="system" content="Welcome to Codex Terminal" />
       <TerminalMessage type="default" content="Ready for input. Type a command to begin..." />
     {/if}
 
-    {#each messages as message}
-      <div class="mb-1">
-        {#if message.type === 'user'}
-          <div class="terminal-prompt">
-            <TerminalMessage type="input" content={message.content} />
-          </div>
-        {:else}
-          <TerminalMessage type={getMessageType(message)} content={message.content} />
-        {/if}
-      </div>
+    {#each processedEvents as event (event.id)}
+      <EventDisplay {event} />
     {/each}
   </div>
 
