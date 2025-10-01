@@ -143,6 +143,7 @@ export class State {
   /**
    * Add to conversation history
    * Accepts old format for backward compatibility
+   * Filters messages based on is_api_message logic from Rust implementation
    */
   addToHistory(entry: { timestamp: number; text: string; type: 'user' | 'agent' | 'system' }): void {
     const responseItem: ResponseItem = {
@@ -151,9 +152,62 @@ export class State {
       timestamp: entry.timestamp
     };
 
+    // Filter out non-API messages (matches Rust is_api_message logic)
+    if (!this.isApiMessage(responseItem)) {
+      return;
+    }
+
     this.conversationHistory.items.push(responseItem);
     this.conversationHistory.metadata!.lastUpdateTime = Date.now();
     this.lastActivityTime = Date.now();
+  }
+
+  /**
+   * Record multiple items into conversation history
+   * Port of record_items() from codex-rs/core/src/conversation_history.rs
+   * Items are ordered from oldest to newest
+   */
+  recordItems(items: ResponseItem[]): void {
+    for (const item of items) {
+      if (!this.isApiMessage(item)) {
+        continue;
+      }
+
+      this.conversationHistory.items.push(item);
+    }
+
+    this.conversationHistory.metadata!.lastUpdateTime = Date.now();
+    this.lastActivityTime = Date.now();
+  }
+
+  /**
+   * Check if a message should be recorded in conversation history
+   * Port of is_api_message() from codex-rs/core/src/conversation_history.rs
+   *
+   * Anything that is not a system message is considered an API message.
+   * System messages and certain types are filtered out.
+   */
+  private isApiMessage(item: ResponseItem): boolean {
+    // System messages are not API messages
+    if (item.role === 'system') {
+      return false;
+    }
+
+    // Handle different ResponseItem types based on Rust enum
+    // Message with non-system role -> true
+    // FunctionCallOutput, FunctionCall, CustomToolCall, CustomToolCallOutput -> true
+    // LocalShellCall, Reasoning, WebSearchCall -> true
+    // Other -> false
+
+    // For now, we filter based on role and type
+    // If type is explicitly set and is a valid type, allow it
+    if (item.type) {
+      // All known types except 'Other' are API messages
+      return item.type !== 'other';
+    }
+
+    // If no type, but role is not system, it's an API message
+    return item.role !== 'system';
   }
 
   /**

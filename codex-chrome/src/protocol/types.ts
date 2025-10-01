@@ -128,7 +128,7 @@ export type SandboxPolicy =
  */
 export interface ResponseItem {
   id?: string;
-  type?: 'message' | 'reasoning' | 'function_call' | 'web_search_call' | 'local_shell_call' | 'custom_tool_call';
+  type?: 'message' | 'reasoning' | 'function_call' | 'function_call_output' | 'web_search_call' | 'custom_tool_call' | 'custom_tool_call_output' | 'other';
   role?: 'assistant' | 'user' | 'system' | 'tool';
   content?: string | ContentBlock[] | any[];
   timestamp?: number; // Optional timestamp for compatibility with former HistoryEntry

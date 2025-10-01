@@ -507,10 +507,10 @@ export class TaskRunner {
    * Build turn input for normal mode
    */
   private async buildNormalTurnInput(pendingInput: ResponseItem[]): Promise<ResponseItem[]> {
+    const turnInput = await this.session.buildTurnInputWithHistory(pendingInput);
     if (pendingInput.length > 0) {
       await this.session.recordConversationItems(pendingInput);
     }
-    const turnInput = await this.session.buildTurnInputWithHistory(pendingInput);
     return turnInput as ResponseItem[];
   }
 
