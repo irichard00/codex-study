@@ -244,6 +244,21 @@ export class DOMTool extends BaseTool {
       sequence: {
         type: 'array',
         description: 'Array of DOM operations to execute in sequence',
+        items: {
+          type: 'object',
+          properties: {
+            action: { type: 'string', description: 'DOM action to perform' },
+            selector: { type: 'string', description: 'CSS selector' },
+            text: { type: 'string', description: 'Text input' },
+            attribute: { type: 'string', description: 'Attribute name' },
+            property: { type: 'string', description: 'Property name' },
+            value: { type: 'string', description: 'Value to set' },
+            xpath: { type: 'string', description: 'XPath expression' },
+            formData: { type: 'object', description: 'Form data' },
+            formSelector: { type: 'string', description: 'Form selector' },
+            options: { type: 'object', description: 'Operation options' }
+          }
+        }
       },
       options: {
         type: 'object',
