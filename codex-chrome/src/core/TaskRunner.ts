@@ -52,8 +52,6 @@ export interface TaskResult {
  * Task execution options
  */
 export interface TaskOptions {
-  /** Enable review mode for isolated execution */
-  reviewMode?: boolean;
   /** Task timeout in milliseconds */
   timeoutMs?: number;
   /** Auto-compact when token limit reached */
@@ -241,15 +239,7 @@ export class TaskRunner {
   }
 
   private async runLoop(signal?: AbortSignal): Promise<LoopOutcome> {
-    const reviewHistory = this.options.reviewMode
-      ? await this.buildInitialReviewContext()
-      : undefined;
-
-    if (reviewHistory) {
-      reviewHistory.push(...this.convertInputItemsToResponses(this.input));
-    } else {
-      await this.session.recordInput(this.input);
-    }
+    await this.session.recordInput(this.input);
 
     let turnCount = 0;
     let lastAgentMessage: string | undefined;
@@ -283,9 +273,7 @@ export class TaskRunner {
       }
 
       const pendingInput = (await this.session.getPendingInput()) as ResponseItem[];
-      const turnInput = this.options.reviewMode
-        ? this.buildReviewTurnInput(reviewHistory!, pendingInput)
-        : await this.buildNormalTurnInput(pendingInput);
+      const turnInput = await this.buildNormalTurnInput(pendingInput);
 
       if (this.cancelled) {
         return this.buildLoopOutcome({
@@ -300,7 +288,7 @@ export class TaskRunner {
 
       try {
         const turnResult = await this.runTurnWithTimeout(turnInput, signal);
-        const processResult = await this.processTurnResult(turnResult, reviewHistory);
+        const processResult = await this.processTurnResult(turnResult);
 
         lastAgentMessage = processResult.lastAgentMessage ?? lastAgentMessage;
         if (turnResult.totalTokenUsage) {
@@ -403,7 +391,6 @@ export class TaskRunner {
       cwd: this.turnContext.getCwd(),
       approval_policy: this.turnContext.getApprovalPolicy(),
       sandbox_policy: this.turnContext.getSandboxPolicy(),
-      review_mode: Boolean(this.options.reviewMode),
       auto_compact: this.options.autoCompact !== false,
       compaction_threshold: TaskRunner.COMPACTION_THRESHOLD,
       tools: enabledTools,
@@ -517,104 +504,6 @@ export class TaskRunner {
   }
 
   /**
-   * Build initial review context for review mode
-   */
-  private async buildInitialReviewContext(): Promise<ResponseItem[]> {
-    const contextWindow = this.turnContext.getModelContextWindow();
-    const toolsConfig = this.turnContext.getToolsConfig();
-    const enabledTools = Object.entries(toolsConfig)
-      .filter(([, enabled]) => Boolean(enabled))
-      .map(([name]) => name)
-      .sort();
-
-    const sandboxPolicy = this.turnContext.getSandboxPolicy();
-    const effort = this.turnContext.getEffort();
-    const summary = this.turnContext.getSummary();
-
-    const lines = [
-      `Working directory: ${this.turnContext.getCwd()}`,
-      `Model: ${this.turnContext.getModel()}`,
-      `Context window: ${contextWindow ?? 'unknown'}`,
-      `Approval policy: ${this.turnContext.getApprovalPolicy()}`,
-      `Sandbox policy: ${JSON.stringify(sandboxPolicy)}`,
-      `Browser environment policy: ${this.turnContext.getBrowserEnvironmentPolicy()}`,
-      `Review mode: ${this.options.reviewMode ? 'enabled' : 'disabled'}`,
-      `Auto-compaction threshold: ${Math.round(TaskRunner.COMPACTION_THRESHOLD * 100)}% of window`,
-    ];
-
-    if (enabledTools.length > 0) {
-      lines.push(`Tools enabled: ${enabledTools.join(', ')}`);
-    }
-
-    if (effort) {
-      lines.push(`Reasoning effort: ${effort.effort}`);
-    }
-
-    if (summary) {
-      lines.push(`Reasoning summary: ${summary.enabled ? 'enabled' : 'disabled'}`);
-    }
-
-    if (this.options.timeoutMs) {
-      lines.push(`Turn timeout: ${this.options.timeoutMs}ms`);
-    }
-
-    return [
-      {
-        role: 'system',
-        content: [
-          {
-            type: 'text',
-            text: lines.join('\n'),
-          },
-        ],
-      },
-    ];
-  }
-
-  /**
-   * Convert input items to response format
-   */
-  private convertInputItemsToResponses(items: InputItem[]): ResponseItem[] {
-    if (items.length === 0) {
-      return [];
-    }
-
-    const content = items.map(item => {
-      switch (item.type) {
-        case 'text':
-          return { type: 'text', text: item.text };
-        case 'image':
-          return { type: 'image', image_url: item.image_url };
-        case 'clipboard':
-          return { type: 'text', text: item.content || '[clipboard content]' };
-        case 'context': {
-          const path = item.path ? this.turnContext.resolvePath(item.path) : 'unknown';
-          return { type: 'text', text: `[context: ${path}]` };
-        }
-        default:
-          return { type: 'text', text: '[unknown input]' };
-      }
-    });
-
-    return [
-      {
-        role: 'user',
-        content,
-      },
-    ];
-  }
-
-  /**
-   * Build turn input for review mode
-   */
-  private buildReviewTurnInput(reviewHistory: ResponseItem[], pendingInput: ResponseItem[]): ResponseItem[] {
-    if (pendingInput.length > 0) {
-      reviewHistory.push(...pendingInput);
-    }
-    return [...reviewHistory];
-  }
-
-  /**
    * Build turn input for normal mode
    */
   private async buildNormalTurnInput(pendingInput: ResponseItem[]): Promise<ResponseItem[]> {
@@ -629,8 +518,7 @@ export class TaskRunner {
    * Process the results of a turn execution
    */
   private async processTurnResult(
-    turnResult: TurnRunResult,
-    reviewHistory?: ResponseItem[]
+    turnResult: TurnRunResult
   ): Promise<{
     taskComplete: boolean;
     tokenLimitReached: boolean;
@@ -663,13 +551,7 @@ export class TaskRunner {
     }
 
     // Record processed items in conversation history
-    if (this.options.reviewMode) {
-      // Add to isolated review history
-      reviewHistory?.push(...itemsToRecord);
-    } else {
-      // Add to session history
-      await this.session.recordConversationItems(itemsToRecord);
-    }
+    await this.session.recordConversationItems(itemsToRecord);
 
     // Check token limits
     const contextWindow = this.turnContext.getModelContextWindow();
@@ -755,29 +637,6 @@ export class TaskRunner {
         turn_count: this.state.currentTurnIndex,
       },
     });
-  }
-
-  /**
-   * Static factory method to create and run a task
-   */
-  static async runTask(
-    session: Session,
-    turnContext: TurnContext,
-    turnManager: TurnManager,
-    submissionId: string,
-    input: InputItem[],
-    options?: TaskOptions
-  ): Promise<TaskResult> {
-    const taskRunner = new TaskRunner(
-      session,
-      turnContext,
-      turnManager,
-      submissionId,
-      input,
-      options
-    );
-
-    return taskRunner.run();
   }
 
   /**

@@ -221,15 +221,10 @@ export class TurnManager {
 
     // Add browser tools from registry based on config
     for (const toolDef of registeredTools) {
-      // Check if tool should be enabled
-      const isEnabled = enableAllTools ||
-        (toolsConfig[toolDef.name as keyof IToolsConfig] === true) ||
-        (toolsConfig.enabled?.includes(toolDef.name));
-
       // Check if tool is explicitly disabled
       const isDisabled = toolsConfig.disabled?.includes(toolDef.name);
 
-      if (isEnabled && !isDisabled) {
+      if (!isDisabled) {
         // Convert ToolRegistry definition to Session ToolDefinition format
         tools.push({
           type: 'function',
@@ -243,7 +238,7 @@ export class TurnManager {
     }
 
     // Add agent execution tools based on config
-    if (enableAllTools || toolsConfig.webSearch !== false) {
+    if (enableAllTools || toolsConfig.webSearch) {
       tools.push({
         type: 'function',
         function: {
