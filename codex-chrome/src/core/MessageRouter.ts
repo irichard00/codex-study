@@ -71,6 +71,10 @@ export enum MessageType {
   RESPONSE_REASONING_SUMMARY_PART_ADDED = 'RESPONSE_REASONING_SUMMARY_PART_ADDED',
   RESPONSE_WEB_SEARCH_CALL_BEGIN = 'RESPONSE_WEB_SEARCH_CALL_BEGIN',
   RESPONSE_RATE_LIMITS = 'RESPONSE_RATE_LIMITS',
+
+  // Session management
+  SESSION_RESET = 'SESSION_RESET',
+  SESSION_RESET_COMPLETE = 'SESSION_RESET_COMPLETE',
 }
 
 /**
@@ -563,6 +567,13 @@ export class MessageRouter {
   }
 
   /**
+   * Request session reset
+   */
+  async requestSessionReset(): Promise<void> {
+    return this.send(MessageType.SESSION_RESET);
+  }
+
+  /**
    * Clean up pending requests
    */
   cleanup(): void {
@@ -571,7 +582,7 @@ export class MessageRouter {
       request.reject(new Error('Router cleanup'));
     }
     this.pendingRequests.clear();
-    
+
     // Clear handlers
     this.handlers.clear();
   }
@@ -600,18 +611,19 @@ interface PendingRequest {
 export function createRouter(): MessageRouter {
   // Determine source based on context
   let source: ExtensionMessage['source'] = 'background';
-  
+
   if (typeof chrome !== 'undefined') {
     if (chrome.sidePanel) {
       source = 'sidepanel';
-    } else if (window.location.protocol === 'chrome-extension:') {
+    } else if (typeof window !== 'undefined' && window.location?.protocol === 'chrome-extension:') {
       // Could be popup or background
-      if (document.querySelector('body')) {
+      if (typeof document !== 'undefined' && document.querySelector('body')) {
         source = 'popup';
       }
-    } else {
+    } else if (typeof window !== 'undefined') {
       source = 'content';
     }
+    // If window is not defined, we're in a service worker, so keep 'background'
   }
 
   return new MessageRouter(source);

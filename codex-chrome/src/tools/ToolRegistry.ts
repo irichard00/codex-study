@@ -5,127 +5,22 @@
  * Provides a centralized system for tool management with validation and metadata support.
  */
 
-import { Event } from '../protocol/types';
+import type { Event } from '../protocol/types';
 import { EventCollector } from '../tests/utils/test-helpers';
-import type { AgentConfig } from '../config/AgentConfig';
-
-/**
- * Tool definition structure
- */
-export interface ToolDefinition {
-  name: string;
-  description: string;
-  parameters: ToolParameterSchema;
-  category?: string;
-  version?: string;
-  metadata?: Record<string, any>;
-}
-
-/**
- * JSON Schema for tool parameters
- */
-export interface ToolParameterSchema {
-  type: 'object';
-  properties: Record<string, ParameterProperty>;
-  required?: string[];
-  additionalProperties?: boolean;
-}
-
-/**
- * Parameter property definition
- */
-export interface ParameterProperty {
-  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
-  description?: string;
-  enum?: string[];
-  items?: ParameterProperty;
-  properties?: Record<string, ParameterProperty>;
-  default?: any;
-}
-
-/**
- * Tool execution request
- */
-export interface ToolExecutionRequest {
-  toolName: string;
-  parameters: Record<string, any>;
-  sessionId: string;
-  turnId: string;
-  timeout?: number;
-}
-
-/**
- * Tool execution response
- */
-export interface ToolExecutionResponse {
-  success: boolean;
-  data?: any;
-  error?: ToolError;
-  duration: number;
-  metadata?: Record<string, any>;
-}
-
-/**
- * Tool error details
- */
-export interface ToolError {
-  code: string;
-  message: string;
-  details?: any;
-}
-
-/**
- * Tool discovery query
- */
-export interface ToolDiscoveryQuery {
-  category?: string;
-  namePattern?: string;
-  capabilities?: string[];
-  version?: string;
-}
-
-/**
- * Tool discovery result
- */
-export interface ToolDiscoveryResult {
-  tools: ToolDefinition[];
-  total: number;
-  categories: string[];
-}
-
-/**
- * Parameter validation result
- */
-export interface ToolValidationResult {
-  valid: boolean;
-  errors: ValidationError[];
-}
-
-/**
- * Validation error details
- */
-export interface ValidationError {
-  parameter: string;
-  message: string;
-  code: string;
-}
-
-/**
- * Tool execution context
- */
-export interface ToolContext {
-  sessionId: string;
-  turnId: string;
-  toolName: string;
-  metadata?: Record<string, any>;
-}
-
-/**
- * Tool handler function signature
- */
-export interface ToolHandler {
-  (parameters: Record<string, any>, context: ToolContext): Promise<any>;
-}
+import type {
+  ToolDefinition,
+  ToolParameterSchema,
+  ParameterProperty,
+  ToolExecutionRequest,
+  ToolExecutionResponse,
+  ToolError,
+  ToolDiscoveryQuery,
+  ToolDiscoveryResult,
+  ToolValidationResult,
+  ValidationError,
+  ToolContext,
+  ToolHandler,
+} from './BaseTool';
 
 /**
  * Tool registry entry
@@ -144,20 +39,10 @@ interface ToolRegistryEntry {
  */
 export class ToolRegistry {
   private tools: Map<string, ToolRegistryEntry> = new Map();
-  private config?: AgentConfig;
   private eventCollector?: EventCollector;
 
-  constructor(configOrEventCollector?: AgentConfig | EventCollector, eventCollector?: EventCollector) {
-    // Handle both signatures for backward compatibility
-    if (configOrEventCollector && typeof configOrEventCollector === 'object' &&
-        'getConfig' in configOrEventCollector) {
-      // New signature: ToolRegistry(config?: AgentConfig, eventCollector?: EventCollector)
-      this.config = configOrEventCollector as AgentConfig;
-      this.eventCollector = eventCollector;
-    } else {
-      // Old signature: ToolRegistry(eventCollector?: EventCollector)
-      this.eventCollector = configOrEventCollector as EventCollector;
-    }
+  constructor(eventCollector?: EventCollector) {
+    this.eventCollector = eventCollector;
   }
 
   /**
@@ -240,7 +125,7 @@ export class ToolRegistry {
       tools = tools.filter(tool => {
         if (!tool.metadata?.capabilities) return false;
         return query.capabilities!.every(cap =>
-          tool.metadata.capabilities.includes(cap)
+          tool.metadata!.capabilities.includes(cap)
         );
       });
     }
@@ -383,8 +268,8 @@ export class ToolRegistry {
         metadata: entry.definition.metadata,
       };
 
-      // Execute with timeout
-      const timeout = request.timeout || 30000; // 30 second default
+      // Execute with timeout (default 120 seconds if not specified)
+      const timeout = request.timeout || 120000;
       let result: any;
 
       try {
@@ -512,47 +397,6 @@ export class ToolRegistry {
     this.tools.clear();
   }
 
-  /**
-   * Initialize with configuration
-   */
-  async initialize(config: AgentConfig): Promise<void> {
-    this.config = config;
-    // Load configured tools based on config
-    await this.loadConfiguredTools();
-  }
-
-  /**
-   * Get enabled tools from config
-   */
-  getEnabledTools(): string[] {
-    // Config integration placeholder - returns default
-    return [];
-  }
-
-  /**
-   * Get tool timeout from config
-   */
-  getToolTimeout(): number {
-    // Config integration placeholder - returns default
-    return 30000;
-  }
-
-  /**
-   * Get sandbox policy from config
-   */
-  getSandboxPolicy(): any {
-    // Config integration placeholder - returns default
-    return { mode: 'workspace-write' };
-  }
-
-  /**
-   * Load tools based on configuration
-   */
-  private async loadConfiguredTools(): Promise<void> {
-    const enabledTools = this.getEnabledTools();
-    // Implementation would load only the enabled tools
-    // For now, this is a placeholder
-  }
 
   /**
    * Validate tool definition structure

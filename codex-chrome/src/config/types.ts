@@ -1,10 +1,10 @@
 /**
- * Chrome Extension Configuration Type Definitions
- * T025-T029: Type definitions for the config system
+ * Agent Configuration Type Definitions
+ * Type definitions for the centralized config system
  */
 
-// T025: Main configuration interface
-export interface IChromeConfig {
+// Main centralized configuration interface for the agent
+export interface IAgentConfig {
   version: string;
   model: IModelConfig;
   providers: Record<string, IProviderConfig>;
@@ -13,9 +13,10 @@ export interface IChromeConfig {
   preferences: IUserPreferences;
   cache: ICacheSettings;
   extension: IExtensionSettings;
+  tools?: IToolsConfig;
 }
 
-// T026: Model configuration
+// Model configuration
 export interface IModelConfig {
   selected: string;
   provider: string;
@@ -27,7 +28,7 @@ export interface IModelConfig {
   verbosity?: 'low' | 'medium' | 'high' | null;
 }
 
-// T027: Provider configuration
+// Provider configuration
 export interface IProviderConfig {
   id: string;
   name: string;
@@ -40,7 +41,7 @@ export interface IProviderConfig {
   retryConfig?: IRetryConfig;
 }
 
-// T028: Profile configuration
+// Profile configuration
 export interface IProfileConfig {
   name: string;
   description?: string | null;
@@ -51,7 +52,7 @@ export interface IProfileConfig {
   lastUsed?: number | null;
 }
 
-// T029: Remaining interfaces
+// Remaining interfaces
 export interface IUserPreferences {
   autoSync?: boolean;
   telemetryEnabled?: boolean;
@@ -92,10 +93,52 @@ export interface IRetryConfig {
   backoffMultiplier?: number;
 }
 
+// Tool configuration helpers
+export interface IToolSandboxPolicy {
+  mode: 'read-only' | 'workspace-write' | 'danger-full-access';
+  writable_roots?: string[];
+  network_access?: boolean;
+}
+
+export interface IToolSpecificConfig {
+  enabled?: boolean;
+  timeout?: number;
+  maxRetries?: number;
+  options?: Record<string, unknown>;
+}
+
+// Tool configuration
+export interface IToolsConfig {
+  // Browser tool toggles
+  enable_all_tools?: boolean;
+  storage_tool?: boolean;
+  tab_tool?: boolean;
+  web_scraping_tool?: boolean;
+  dom_tool?: boolean;
+  form_automation_tool?: boolean;
+  navigation_tool?: boolean;
+  network_intercept_tool?: boolean;
+  data_extraction_tool?: boolean;
+
+  // Agent execution tool toggles
+  execCommand?: boolean;
+  webSearch?: boolean;
+  fileOperations?: boolean;
+  mcpTools?: boolean;
+  customTools?: Record<string, boolean>;
+
+  // Shared configuration metadata
+  enabled?: string[];
+  disabled?: string[];
+  timeout?: number;
+  sandboxPolicy?: IToolSandboxPolicy;
+  perToolConfig?: Record<string, IToolSpecificConfig>;
+}
+
 // Storage interfaces
 export interface IConfigStorage {
-  get(): Promise<IChromeConfig | null>;
-  set(config: IChromeConfig): Promise<void>;
+  get(): Promise<IAgentConfig | null>;
+  set(config: IAgentConfig): Promise<void>;
   clear(): Promise<void>;
   getStorageInfo(): Promise<IStorageInfo>;
 }
@@ -109,39 +152,39 @@ export interface IStorageInfo {
 // Service interfaces
 export interface IConfigService {
   // Core operations
-  getConfig(): Promise<IChromeConfig>;
-  updateConfig(config: Partial<IChromeConfig>): Promise<IChromeConfig>;
-  resetConfig(preserveApiKeys?: boolean): Promise<IChromeConfig>;
+  getConfig(): IAgentConfig;
+  updateConfig(config: Partial<IAgentConfig>): IAgentConfig;
+  resetConfig(preserveApiKeys?: boolean): IAgentConfig;
 
   // Model operations
-  getModelConfig(): Promise<IModelConfig>;
-  updateModelConfig(config: Partial<IModelConfig>): Promise<IModelConfig>;
+  getModelConfig(): IModelConfig;
+  updateModelConfig(config: Partial<IModelConfig>): IModelConfig;
 
   // Provider operations
-  getProviders(): Promise<Record<string, IProviderConfig>>;
-  getProvider(id: string): Promise<IProviderConfig | null>;
-  addProvider(provider: IProviderConfig): Promise<IProviderConfig>;
-  updateProvider(id: string, provider: Partial<IProviderConfig>): Promise<IProviderConfig>;
-  deleteProvider(id: string): Promise<void>;
+  getProviders(): Record<string, IProviderConfig>;
+  getProvider(id: string): IProviderConfig | null;
+  addProvider(provider: IProviderConfig): IProviderConfig;
+  updateProvider(id: string, provider: Partial<IProviderConfig>): IProviderConfig;
+  deleteProvider(id: string): void;
 
   // Profile operations
-  getProfiles(): Promise<Record<string, IProfileConfig>>;
-  getProfile(name: string): Promise<IProfileConfig | null>;
-  createProfile(profile: IProfileConfig): Promise<IProfileConfig>;
-  updateProfile(name: string, profile: Partial<IProfileConfig>): Promise<IProfileConfig>;
-  deleteProfile(name: string): Promise<void>;
-  activateProfile(name: string): Promise<void>;
+  getProfiles(): Record<string, IProfileConfig>;
+  getProfile(name: string): IProfileConfig | null;
+  createProfile(profile: IProfileConfig): IProfileConfig;
+  updateProfile(name: string, profile: Partial<IProfileConfig>): IProfileConfig;
+  deleteProfile(name: string): void;
+  activateProfile(name: string): void;
 
   // Import/Export
-  exportConfig(includeApiKeys?: boolean): Promise<IExportData>;
-  importConfig(data: IExportData): Promise<IChromeConfig>;
+  exportConfig(includeApiKeys?: boolean): IExportData;
+  importConfig(data: IExportData): IAgentConfig;
 }
 
 // Export/Import data structure
 export interface IExportData {
   version: string;
   exportDate: number;
-  config: IChromeConfig;
+  config: IAgentConfig;
 }
 
 // Event interfaces for config changes
@@ -161,9 +204,9 @@ export interface IConfigEventEmitter {
 
 // Factory interface
 export interface IConfigFactory {
-  createDefault(): IChromeConfig;
-  createFromStorage(data: any): IChromeConfig;
-  validateConfig(config: any): config is IChromeConfig;
+  createDefault(): IAgentConfig;
+  createFromStorage(data: any): IAgentConfig;
+  validateConfig(config: any): config is IAgentConfig;
 }
 
 // Error types

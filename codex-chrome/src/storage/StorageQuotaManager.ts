@@ -204,7 +204,8 @@ export class StorageQuotaManager {
     this.stopQuotaMonitoring();
 
     // Check quota periodically
-    this.quotaCheckInterval = window.setInterval(async () => {
+    // Use setInterval directly (not window.setInterval) for service worker compatibility
+    this.quotaCheckInterval = setInterval(async () => {
       const quota = await this.getQuota();
 
       if (quota.percentage >= this.criticalThreshold) {
@@ -213,8 +214,8 @@ export class StorageQuotaManager {
         const results = await this.cleanup(this.warningThreshold);
         console.log('Cleanup results:', results);
 
-        // Notify user if supported
-        if ('chrome' in window && chrome.runtime) {
+        // Notify user if supported (chrome is global in service workers)
+        if (typeof chrome !== 'undefined' && chrome.runtime) {
           chrome.runtime.sendMessage({
             type: 'storage-critical',
             quota,
@@ -225,14 +226,14 @@ export class StorageQuotaManager {
         // Warning: Notify but don't cleanup automatically
         console.warn(`Storage warning: ${quota.percentage.toFixed(2)}% used`);
 
-        if ('chrome' in window && chrome.runtime) {
+        if (typeof chrome !== 'undefined' && chrome.runtime) {
           chrome.runtime.sendMessage({
             type: 'storage-warning',
             quota
           });
         }
       }
-    }, intervalMinutes * 60 * 1000);
+    }, intervalMinutes * 60 * 1000) as unknown as number;
 
     // Also check immediately
     this.checkQuotaImmediate();

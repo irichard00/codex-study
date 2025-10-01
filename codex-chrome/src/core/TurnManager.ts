@@ -3,13 +3,18 @@
  * Manages individual conversation turns, handles model streaming, and coordinates tool calls
  */
 
-import { Session, ToolDefinition } from './Session';
+import { Session } from './Session';
+import type { ToolDefinition } from '../models/ModelClient';
 import { TurnContext } from './TurnContext';
-import { ModelClient, CompletionRequest, CompletionResponse } from '../models/ModelClient';
-import { loadPrompt } from './PromptLoader';
-import { EventMsg, TokenUsage, StreamErrorEvent } from '../protocol/events';
-import { Event, InputItem } from '../protocol/types';
+import { ModelClient } from '../models/ModelClient';
+import type { CompletionRequest, CompletionResponse } from '../models/ModelClient';
+import { loadPrompt, loadUserInstructions } from './PromptLoader';
+import type { EventMsg, TokenUsage, StreamErrorEvent } from '../protocol/events';
+import type { Event, InputItem } from '../protocol/types';
+import type { ResponseEvent } from '../models/types/ResponseEvent';
 import { v4 as uuidv4 } from 'uuid';
+import { ToolRegistry } from '../tools/ToolRegistry';
+import type { IToolsConfig } from '../config/types';
 
 /**
  * Result of processing a single response item
@@ -64,6 +69,7 @@ export class TurnManager {
   private session: Session;
   private turnContext: TurnContext;
   private modelClient: ModelClient;
+  private toolRegistry: ToolRegistry;
   private config: TurnConfig;
   private cancelled = false;
 
@@ -71,11 +77,13 @@ export class TurnManager {
     session: Session,
     turnContext: TurnContext,
     modelClient: ModelClient,
+    toolRegistry: ToolRegistry,
     config: TurnConfig = {}
   ) {
     this.session = session;
     this.turnContext = turnContext;
     this.modelClient = modelClient;
+    this.toolRegistry = toolRegistry;
     this.config = {
       maxRetries: 3,
       retryDelayMs: 1000,
@@ -133,7 +141,7 @@ export class TurnManager {
 
           // Notify about retry attempt
           await this.emitStreamError(
-            `Stream error: ${error.message}; retrying ${retries}/${this.config.maxRetries} in ${delay}ms`,
+            `Stream error: ${error instanceof Error ? error.message : String(error)}; retrying ${retries}/${this.config.maxRetries} in ${delay}ms`,
             true,
             retries
           );
@@ -169,28 +177,102 @@ export class TurnManager {
 
     try {
       // Process streaming response
+      // Loop processes ResponseEvent items from the model stream.
+      // We must inspect *both* Ok and Err cases so that transient stream failures
+      // bubble up and trigger the caller's retry logic.
       for await (const event of stream) {
         // Check for cancellation
         if (this.cancelled) {
           throw new Error('Turn cancelled');
         }
 
-        await this.handleStreamEvent(event, processedItems);
+        // Handle null/undefined event (stream closed without completion)
+        if (!event) {
+          throw new Error('stream closed before response.completed');
+        }
 
-        // Capture final token usage
-        if (event.type === 'completion' && event.data.usage) {
-          totalTokenUsage = this.convertTokenUsage(event.data.usage);
+        // Process the event based on ResponseEvent type
+        switch (event.type) {
+          case 'Created':
+            // Initial event, no action needed
+            break;
+
+          case 'OutputItemDone': {
+            // Item (message or tool call) is complete
+            const response = await this.handleResponseItem(event.item);
+            processedItems.push({
+              item: event.item,
+              response,
+            });
+            break;
+          }
+
+          case 'WebSearchCallBegin':
+            // Web search started
+            await this.emitEvent({
+              type: 'WebSearchBegin',
+              data: { call_id: event.callId },
+            });
+            break;
+
+          case 'RateLimits':
+            // Update rate limits (deferred until token usage available)
+            // In the Rust version, this is handled by sess.update_rate_limits
+            break;
+
+          case 'Completed': {
+            // Stream completed with final token usage
+            totalTokenUsage = event.tokenUsage;
+
+            return {
+              processedItems,
+              totalTokenUsage,
+            };
+          }
+
+          case 'OutputTextDelta':
+            // Streaming text delta
+            await this.emitEvent({
+              type: 'AgentMessageDelta',
+              data: { delta: event.delta },
+            });
+            break;
+
+          case 'ReasoningSummaryDelta':
+            // Reasoning summary delta (for o1/o3 models)
+            await this.emitEvent({
+              type: 'ReasoningSummaryDelta',
+              data: { delta: event.delta },
+            });
+            break;
+
+          case 'ReasoningContentDelta':
+            // Reasoning content delta (for o1/o3 models)
+            await this.emitEvent({
+              type: 'ReasoningContentDelta',
+              data: { delta: event.delta },
+            });
+            break;
+
+          case 'ReasoningSummaryPartAdded':
+            // Reasoning summary part added
+            await this.emitEvent({
+              type: 'ReasoningSummaryPartAdded',
+              data: {},
+            });
+            break;
+
+          default:
+            console.warn('Unknown ResponseEvent type:', event);
         }
       }
 
-      return {
-        processedItems,
-        totalTokenUsage,
-      };
+      // If loop exits without Completed event, stream was closed prematurely
+      throw new Error('stream closed before response.completed');
 
     } catch (error) {
       // Handle streaming errors
-      if (error.message?.includes('stream closed') || error.name === 'StreamError') {
+      if (error instanceof Error && (error.message?.includes('stream closed') || error.name === 'StreamError')) {
         throw new Error(`Stream error: ${error.message}`);
       }
       throw error;
@@ -203,30 +285,35 @@ export class TurnManager {
   private async buildToolsFromContext(): Promise<ToolDefinition[]> {
     const tools: ToolDefinition[] = [];
 
-    // Add core tools based on turn context configuration
-    const toolsConfig = this.turnContext.getToolsConfig();
+    // Get tools configuration from turn context
+    const toolsConfig = this.turnContext.getToolsConfig() as IToolsConfig;
 
-    // Add exec_command tool if enabled
-    if (toolsConfig.execCommand !== false) {
-      tools.push({
-        type: 'function',
-        function: {
-          name: 'exec_command',
-          description: 'Execute a command in the browser context',
-          parameters: {
-            type: 'object',
-            properties: {
-              command: { type: 'string', description: 'Command to execute' },
-              cwd: { type: 'string', description: 'Working directory' },
-            },
-            required: ['command'],
+    // Get all registered browser tools from ToolRegistry
+    const registeredTools = this.toolRegistry.listTools();
+
+    // Check if all tools should be enabled
+    const enableAllTools = toolsConfig.enable_all_tools ?? false;
+
+    // Add browser tools from registry based on config
+    for (const toolDef of registeredTools) {
+      // Check if tool is explicitly disabled
+      const isDisabled = toolsConfig.disabled?.includes(toolDef.name);
+
+      if (!isDisabled) {
+        // Convert ToolRegistry definition to Session ToolDefinition format
+        tools.push({
+          type: 'function',
+          function: {
+            name: toolDef.name,
+            description: toolDef.description,
+            parameters: toolDef.parameters || {},
           },
-        },
-      });
+        });
+      }
     }
 
-    // Add web_search tool if enabled
-    if (toolsConfig.webSearch !== false) {
+    // Add agent execution tools based on config
+    if (enableAllTools || toolsConfig.webSearch) {
       tools.push({
         type: 'function',
         function: {
@@ -243,7 +330,7 @@ export class TurnManager {
       });
     }
 
-    // Add update_plan tool
+    // Add update_plan tool (always enabled for task management)
     tools.push({
       type: 'function',
       function: {
@@ -270,9 +357,40 @@ export class TurnManager {
       },
     });
 
-    // Add MCP tools if available
-    const mcpTools = await this.session.getMcpTools();
-    tools.push(...mcpTools);
+    // Add MCP tools if enabled and available
+    if (enableAllTools || toolsConfig.mcpTools !== false) {
+      const mcpTools = await this.session.getMcpTools();
+      // Convert MCP tools to ModelClient format
+      const convertedMcpTools = mcpTools.map(tool => ({
+        type: 'function' as const,
+        function: {
+          name: tool.function.name,
+          description: tool.function.description,
+          parameters: tool.function.parameters || {},
+        },
+      }));
+      tools.push(...convertedMcpTools);
+    }
+
+    // Add custom tools if configured
+    if (toolsConfig.customTools) {
+      for (const [toolName, isEnabled] of Object.entries(toolsConfig.customTools)) {
+        if (isEnabled || enableAllTools) {
+          // Custom tools would be loaded from registry or another source
+          const customTool = this.toolRegistry.getTool(toolName);
+          if (customTool) {
+            tools.push({
+              type: 'function',
+              function: {
+                name: customTool.name,
+                description: customTool.description,
+                parameters: customTool.parameters || {},
+              },
+            });
+          }
+        }
+      }
+    }
 
     return tools;
   }
@@ -319,14 +437,22 @@ export class TurnManager {
    * Build completion request for model client
    */
   private async buildCompletionRequest(prompt: Prompt): Promise<CompletionRequest> {
-    return {
-      model: this.turnContext.getModel(),
+    const model = this.turnContext.getModel();
+    const request: CompletionRequest = {
+      model,
       messages: await this.convertPromptToMessages(prompt),
       tools: prompt.tools,
       stream: true,
-      temperature: 0.7,
       maxTokens: 4096,
     };
+
+    // For gpt-5, temperature must be 1 (default) or omitted
+    // For other models, use 0.7
+    if (model !== 'gpt-5') {
+      request.temperature = 0.7;
+    }
+
+    return request;
   }
 
   /**
@@ -338,6 +464,15 @@ export class TurnManager {
     // Load and add the agent prompt as system message
     const systemPrompt = await loadPrompt();
     messages.push({ role: 'system', content: systemPrompt });
+
+    // Add user instructions (development guidelines from user_instruction.md)
+    const userInstructions = this.turnContext.getUserInstructions();
+    if (userInstructions) {
+      messages.push({
+        role: 'system',
+        content: `<user_instructions>\n${userInstructions}\n</user_instructions>`,
+      });
+    }
 
     // Add base instructions if provided (as override)
     if (prompt.baseInstructionsOverride) {
@@ -363,93 +498,62 @@ export class TurnManager {
   }
 
   /**
-   * Handle individual stream events
+   * Handle a complete response item from the model
+   * Port of handle_response_item from codex-rs
    */
-  private async handleStreamEvent(
-    event: any,
-    processedItems: ProcessedResponseItem[]
-  ): Promise<void> {
-    switch (event.type) {
-      case 'content_delta':
-        await this.handleContentDelta(event.data);
-        break;
+  private async handleResponseItem(item: any): Promise<any | undefined> {
+    // Check item type and handle accordingly
+    if (item.type === 'function_call') {
+      // Function call - execute and return response
+      const { name, arguments: args, call_id } = item;
 
-      case 'tool_call':
-        await this.handleToolCall(event.data, processedItems);
-        break;
-
-      case 'message_complete':
-        await this.handleMessageComplete(event.data, processedItems);
-        break;
-
-      case 'error':
-        throw new Error(`Stream error: ${event.data.message}`);
-
-      default:
-        // Unknown event type, log but don't fail
-        console.warn('Unknown stream event type:', event.type);
-    }
-  }
-
-  /**
-   * Handle content delta events (streaming text)
-   */
-  private async handleContentDelta(data: any): Promise<void> {
-    await this.emitEvent({
-      type: 'AgentMessageDelta',
-      data: {
-        delta: data.text || data.content || '',
-      },
-    });
-  }
-
-  /**
-   * Handle tool call events
-   */
-  private async handleToolCall(data: any, processedItems: ProcessedResponseItem[]): Promise<void> {
-    const { toolName, parameters, callId } = data;
-
-    // Create the tool call item
-    const toolCallItem = {
-      type: 'function_call',
-      call_id: callId,
-      name: toolName,
-      parameters,
-    };
-
-    // Execute the tool call
-    const toolResponse = await this.executeToolCall(toolName, parameters, callId);
-
-    processedItems.push({
-      item: toolCallItem,
-      response: toolResponse,
-    });
-  }
-
-  /**
-   * Handle message completion events
-   */
-  private async handleMessageComplete(data: any, processedItems: ProcessedResponseItem[]): Promise<void> {
-    if (data.role === 'assistant' && data.content) {
-      // This is a final assistant message (no tool calls)
-      const messageItem = {
-        role: 'assistant',
-        content: data.content,
-      };
-
-      processedItems.push({
-        item: messageItem,
-        response: undefined, // No response needed for final messages
-      });
-
-      // Emit the complete message
+      try {
+        const result = await this.executeToolCall(name, args, call_id);
+        return result;
+      } catch (error) {
+        return {
+          type: 'function_call_output',
+          call_id,
+          content: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          success: false,
+        };
+      }
+    } else if (item.type === 'message' && item.role === 'assistant') {
+      // Assistant message - emit event but no response needed
       await this.emitEvent({
         type: 'AgentMessage',
         data: {
-          message: data.content,
+          message: typeof item.content === 'string' ? item.content : JSON.stringify(item.content),
         },
       });
+      return undefined;
+    } else if (item.type === 'reasoning') {
+      // Reasoning item (for o1/o3 models) - no response needed
+      return undefined;
+    } else if (item.type === 'web_search_call') {
+      // Web search call - execute and return response
+      const { call_id, query } = item;
+
+      try {
+        const result = await this.executeWebSearch(query);
+        return {
+          type: 'function_call_output',
+          call_id,
+          content: JSON.stringify(result),
+          success: true,
+        };
+      } catch (error) {
+        return {
+          type: 'function_call_output',
+          call_id,
+          content: `Error: ${error instanceof Error ? error.message : String(error)}`,
+          success: false,
+        };
+      }
     }
+
+    // Other item types don't require responses
+    return undefined;
   }
 
   /**
@@ -489,7 +593,7 @@ export class TurnManager {
       return {
         type: 'function_call_output',
         call_id: callId,
-        content: `Error: ${error.message}`,
+        content: `Error: ${error instanceof Error ? error.message : String(error)}`,
         success: false,
       };
     }
@@ -622,7 +726,7 @@ export class TurnManager {
         type: 'McpToolCallEnd',
         data: {
           tool_name: toolName,
-          error: error.message,
+          error: error instanceof Error ? error.message : String(error),
         },
       });
       throw error;

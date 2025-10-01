@@ -21,7 +21,7 @@ interface OpenAICompletionRequest {
   model: string;
   messages: OpenAIMessage[];
   temperature?: number;
-  max_tokens?: number;
+  max_completion_tokens?: number;
   tools?: OpenAITool[];
   stream?: boolean;
 }
@@ -103,7 +103,15 @@ interface OpenAIStreamChunk {
     delta: {
       role?: string;
       content?: string;
-      tool_calls?: OpenAIToolCall[];
+      tool_calls?: Array<{
+        index?: number;
+        id?: string;
+        type?: 'function';
+        function?: {
+          name?: string;
+          arguments?: string;
+        };
+      }>;
     };
     finish_reason?: 'stop' | 'length' | 'tool_calls' | 'content_filter';
   }>;
@@ -116,8 +124,6 @@ const TOKEN_MULTIPLIERS: Record<string, number> = {
   'gpt-4': 1.3,
   'gpt-4-turbo': 1.3,
   'gpt-4o': 1.2,
-  'gpt-3.5-turbo': 1.5,
-  'gpt-3.5-turbo-16k': 1.5,
 };
 
 /**
@@ -128,7 +134,7 @@ export class OpenAIClient extends ModelClient {
   private readonly baseUrl: string;
   private readonly organization?: string;
   private streamProcessor: StreamProcessor | null = null;
-  private currentModel: string = 'gpt-4o';
+  private currentModel: string = 'gpt-5';
   private reasoningEffort: any = null;
   private reasoningSummary: any = { enabled: false };
 
@@ -245,7 +251,7 @@ export class OpenAIClient extends ModelClient {
       model: request.model,
       messages: request.messages.map(this.convertMessage),
       temperature: request.temperature,
-      max_tokens: request.maxTokens,
+      max_completion_tokens: request.maxTokens,
       tools: request.tools?.map(tool => ({
         type: tool.type,
         function: tool.function,
@@ -422,7 +428,10 @@ export class OpenAIClient extends ModelClient {
   }
 
   /**
-   * Stream completion with StreamProcessor integration
+   * Stream completion with ResponseEvent format (matching codex-rs ResponseEvent)
+   * This is the main streaming method used by TurnManager
+   *
+   * Port of process_chat_sse from codex-rs/core/src/chat_completions.rs:355-633
    */
   async *streamCompletion(request: CompletionRequest): AsyncGenerator<any> {
     this.validateRequest(request);
@@ -434,13 +443,267 @@ export class OpenAIClient extends ModelClient {
       throw new ModelClientError('Stream response body is null');
     }
 
-    // Initialize StreamProcessor for this stream
-    this.streamProcessor = new StreamProcessor('model');
-    await this.streamProcessor.start(response.body);
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
 
-    // Yield chunks from the StreamProcessor
-    for await (const chunk of this.streamProcessor.getChunks()) {
-      yield chunk;
+    // State to accumulate a function call across streaming chunks (lines 370-376)
+    interface FunctionCallState {
+      name?: string;
+      arguments: string;
+      callId?: string;
+      active: boolean;
+    }
+
+    const fnCallState: FunctionCallState = {
+      arguments: '',
+      active: false,
+    };
+
+    let assistantText = '';
+    let reasoningText = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          // Stream closed gracefully – emit Completed with dummy id (lines 394-402)
+          if (assistantText) {
+            yield {
+              type: 'OutputItemDone',
+              item: {
+                type: 'message',
+                role: 'assistant',
+                content: assistantText,
+              },
+            };
+          }
+
+          if (reasoningText) {
+            yield {
+              type: 'OutputItemDone',
+              item: {
+                type: 'reasoning',
+                content: reasoningText,
+              },
+            };
+          }
+
+          yield {
+            type: 'Completed',
+            responseId: '',
+            tokenUsage: undefined,
+          };
+          return;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+
+        // Keep the last potentially incomplete line in the buffer
+        buffer = lines.pop() || '';
+
+        for (const line of lines) {
+          const trimmed = line.trim();
+
+          if (!trimmed || !trimmed.startsWith('data: ')) {
+            continue;
+          }
+
+          const data = trimmed.slice(6); // Remove 'data: ' prefix
+
+          // OpenAI Chat streaming sends "[DONE]" when finished (line 416)
+          if (data === '[DONE]') {
+            // Emit any finalized items before closing (lines 418-448)
+            if (assistantText) {
+              yield {
+                type: 'OutputItemDone',
+                item: {
+                  type: 'message',
+                  role: 'assistant',
+                  content: assistantText,
+                },
+              };
+            }
+
+            if (reasoningText) {
+              yield {
+                type: 'OutputItemDone',
+                item: {
+                  type: 'reasoning',
+                  content: reasoningText,
+                },
+              };
+            }
+
+            yield {
+              type: 'Completed',
+              responseId: '',
+              tokenUsage: undefined,
+            };
+            return;
+          }
+
+          try {
+            // Parse JSON chunk (line 452)
+            const chunk: any = JSON.parse(data);
+            const choice = chunk.choices?.[0];
+
+            if (!choice) continue;
+
+            // Handle assistant content tokens as streaming deltas (lines 461-472)
+            const content = choice.delta?.content;
+            if (content && content.length > 0) {
+              assistantText += content;
+              yield {
+                type: 'OutputTextDelta',
+                delta: content,
+              };
+            }
+
+            // Forward any reasoning/thinking deltas if present (lines 474-506)
+            // Some providers stream `reasoning` as a plain string while others
+            // nest the text under an object (e.g. `{ "reasoning": { "text": "…" } }`)
+            const reasoningVal = choice.delta?.reasoning;
+            if (reasoningVal) {
+              let maybeText: string | undefined;
+
+              if (typeof reasoningVal === 'string' && reasoningVal.length > 0) {
+                maybeText = reasoningVal;
+              } else if (typeof reasoningVal === 'object') {
+                const text = reasoningVal.text || reasoningVal.content;
+                if (typeof text === 'string' && text.length > 0) {
+                  maybeText = text;
+                }
+              }
+
+              if (maybeText) {
+                reasoningText += maybeText;
+                yield {
+                  type: 'ReasoningContentDelta',
+                  delta: maybeText,
+                };
+              }
+            }
+
+            // Some providers only include reasoning on the final message object (lines 508-531)
+            const messageReasoning = choice.message?.reasoning;
+            if (messageReasoning) {
+              let reasoningStr: string | undefined;
+
+              if (typeof messageReasoning === 'string' && messageReasoning.length > 0) {
+                reasoningStr = messageReasoning;
+              } else if (typeof messageReasoning === 'object') {
+                const text = messageReasoning.text || messageReasoning.content;
+                if (typeof text === 'string' && text.length > 0) {
+                  reasoningStr = text;
+                }
+              }
+
+              if (reasoningStr) {
+                reasoningText += reasoningStr;
+                yield {
+                  type: 'ReasoningContentDelta',
+                  delta: reasoningStr,
+                };
+              }
+            }
+
+            // Handle streaming function / tool calls (lines 533-559)
+            const toolCalls = choice.delta?.tool_calls;
+            if (toolCalls && Array.isArray(toolCalls) && toolCalls.length > 0) {
+              const toolCall = toolCalls[0];
+
+              // Mark that we have an active function call in progress
+              fnCallState.active = true;
+
+              // Extract call_id if present
+              if (toolCall.id) {
+                fnCallState.callId = toolCall.id;
+              }
+
+              // Extract function details if present
+              if (toolCall.function) {
+                if (toolCall.function.name) {
+                  fnCallState.name = toolCall.function.name;
+                }
+
+                if (toolCall.function.arguments) {
+                  fnCallState.arguments += toolCall.function.arguments;
+                }
+              }
+            }
+
+            // Emit end-of-turn when finish_reason signals completion (lines 561-630)
+            const finishReason = choice.finish_reason;
+            if (finishReason) {
+              if (finishReason === 'tool_calls' && fnCallState.active) {
+                // First, flush the terminal raw reasoning (lines 565-577)
+                if (reasoningText) {
+                  yield {
+                    type: 'OutputItemDone',
+                    item: {
+                      type: 'reasoning',
+                      content: reasoningText,
+                    },
+                  };
+                  reasoningText = '';
+                }
+
+                // Then emit the FunctionCall response item (lines 579-587)
+                yield {
+                  type: 'OutputItemDone',
+                  item: {
+                    type: 'function_call',
+                    call_id: fnCallState.callId || '',
+                    name: fnCallState.name || '',
+                    arguments: fnCallState.arguments,
+                  },
+                };
+              } else if (finishReason === 'stop') {
+                // Regular turn without tool-call (lines 589-613)
+                if (assistantText) {
+                  yield {
+                    type: 'OutputItemDone',
+                    item: {
+                      type: 'message',
+                      role: 'assistant',
+                      content: assistantText,
+                    },
+                  };
+                  assistantText = '';
+                }
+
+                if (reasoningText) {
+                  yield {
+                    type: 'OutputItemDone',
+                    item: {
+                      type: 'reasoning',
+                      content: reasoningText,
+                    },
+                  };
+                  reasoningText = '';
+                }
+              }
+
+              // Emit Completed regardless of reason (lines 618-624)
+              yield {
+                type: 'Completed',
+                responseId: '',
+                tokenUsage: undefined,
+              };
+
+              return; // End processing for this SSE stream (line 629)
+            }
+          } catch (error) {
+            // Skip malformed chunks
+            console.warn('Failed to parse stream chunk:', error);
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
     }
   }
 
@@ -482,12 +745,11 @@ export class OpenAIClient extends ModelClient {
   getContextWindow(): number | undefined {
     // Return context window sizes for known models
     const contextWindows: Record<string, number> = {
+      'gpt-5': 128000,
       'gpt-4': 8192,
       'gpt-4-32k': 32768,
       'gpt-4-turbo': 128000,
-      'gpt-4o': 128000,
-      'gpt-3.5-turbo': 4096,
-      'gpt-3.5-turbo-16k': 16384,
+      'gpt-4o': 128000
     };
     return contextWindows[this.currentModel];
   }

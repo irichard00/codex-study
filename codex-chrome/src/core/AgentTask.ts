@@ -37,7 +37,6 @@ export class AgentTask {
   private status: TaskStatus = 'initializing';
   private abortController: AbortController;
   private input: ResponseItem[];
-  private isReviewMode: boolean;
 
   constructor(
     session: Session,
@@ -45,13 +44,11 @@ export class AgentTask {
     turnManager: TurnManager,
     sessionId: string,
     submissionId: string,
-    input: ResponseItem[],
-    isReviewMode: boolean = false
+    input: ResponseItem[]
   ) {
     this.sessionId = sessionId;
     this.submissionId = submissionId;
     this.input = input;
-    this.isReviewMode = isReviewMode;
     this.abortController = new AbortController();
     
     // Create TaskRunner instance - AgentTask owns its TaskRunner
@@ -122,13 +119,6 @@ export class AgentTask {
    */
   getSessionId(): string {
     return this.sessionId;
-  }
-
-  /**
-   * Check if task is in review mode
-   */
-  isInReviewMode(): boolean {
-    return this.isReviewMode;
   }
 
   /**

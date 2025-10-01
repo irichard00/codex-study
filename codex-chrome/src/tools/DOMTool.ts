@@ -6,8 +6,7 @@
  * Integrates with the new DomService architecture while maintaining backward compatibility.
  */
 
-import { BaseTool, BaseToolRequest, BaseToolOptions, createToolDefinition } from './BaseTool';
-import { ToolDefinition } from './ToolRegistry';
+import { BaseTool, createToolDefinition, type BaseToolRequest, type BaseToolOptions, type ToolDefinition } from './BaseTool';
 import { DomService } from './dom/service';
 import {
   DOMOperationRequest,
@@ -25,7 +24,7 @@ import {
   BoundingBox as ContractBoundingBox,
   ErrorCode,
   DOMError
-} from '../../specs/001-dom-tool-integration/contracts/dom-operations';
+} from '../../../specs/001-dom-tool-integration/contracts/dom-operations';
 import {
   findElements,
   clickElement as contentClickElement,
@@ -245,6 +244,21 @@ export class DOMTool extends BaseTool {
       sequence: {
         type: 'array',
         description: 'Array of DOM operations to execute in sequence',
+        items: {
+          type: 'object',
+          properties: {
+            action: { type: 'string', description: 'DOM action to perform' },
+            selector: { type: 'string', description: 'CSS selector' },
+            text: { type: 'string', description: 'Text input' },
+            attribute: { type: 'string', description: 'Attribute name' },
+            property: { type: 'string', description: 'Property name' },
+            value: { type: 'string', description: 'Value to set' },
+            xpath: { type: 'string', description: 'XPath expression' },
+            formData: { type: 'object', description: 'Form data' },
+            formSelector: { type: 'string', description: 'Form selector' },
+            options: { type: 'object', description: 'Operation options' }
+          }
+        }
       },
       options: {
         type: 'object',

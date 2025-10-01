@@ -2,7 +2,7 @@
  * Chrome extension config messaging protocol types
  */
 
-import type { IChromeConfig, IModelConfig, IConfigChangeEvent } from '../config/types';
+import type { IAgentConfig, IModelConfig, IConfigChangeEvent } from '../config/types';
 
 /**
  * Base message structure for all config messages
@@ -26,7 +26,7 @@ export interface ConfigRequestMessage extends ConfigMessageBase {
  */
 export interface ConfigResponseMessage extends ConfigMessageBase {
   type: 'CONFIG_RESPONSE';
-  config: Partial<IChromeConfig>;
+  config: Partial<IAgentConfig>;
   requestId: string;
 }
 
@@ -35,7 +35,7 @@ export interface ConfigResponseMessage extends ConfigMessageBase {
  */
 export interface ConfigUpdateMessage extends ConfigMessageBase {
   type: 'CONFIG_UPDATE';
-  changes: Partial<IChromeConfig>;
+  changes: Partial<IAgentConfig>;
   broadcast: boolean;
 }
 
@@ -66,7 +66,7 @@ export interface ConfigChangeNotification extends ConfigMessageBase {
 export interface ConfigSyncMessage extends ConfigMessageBase {
   type: 'CONFIG_SYNC';
   action: 'push' | 'pull' | 'merge';
-  config?: IChromeConfig;
+  config?: IAgentConfig;
   force?: boolean;
 }
 
@@ -76,7 +76,7 @@ export interface ConfigSyncMessage extends ConfigMessageBase {
 export interface SyncResultMessage extends ConfigMessageBase {
   type: 'SYNC_RESULT';
   success: boolean;
-  finalConfig: IChromeConfig;
+  finalConfig: IAgentConfig;
   conflicts?: Array<{
     section: string;
     localValue: any;
@@ -133,7 +133,7 @@ export function createConfigRequest(
  */
 export function createConfigResponse(
   source: ConfigMessageBase['source'],
-  config: Partial<IChromeConfig>,
+  config: Partial<IAgentConfig>,
   requestId: string
 ): ConfigResponseMessage {
   return {
@@ -151,7 +151,7 @@ export function createConfigResponse(
  */
 export function createConfigUpdate(
   source: ConfigMessageBase['source'],
-  changes: Partial<IChromeConfig>,
+  changes: Partial<IAgentConfig>,
   broadcast: boolean = true
 ): ConfigUpdateMessage {
   return {

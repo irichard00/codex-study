@@ -6,17 +6,64 @@ import type {
   StructuredData,
   ExportFormat
 } from '../types/tools';
-import { BaseTool } from './BaseTool';
+import { BaseTool, type ToolDefinition } from './BaseTool';
 
 export class DataExtractionTool extends BaseTool {
+  protected toolDefinition: ToolDefinition;
   private patterns: Map<string, DataPattern>;
   private extractedData: Map<string, ExtractedData>;
 
   constructor() {
-    super('DataExtraction', '1.0.0');
+    super();
     this.patterns = new Map();
     this.extractedData = new Map();
     this.initializePatterns();
+
+    // Initialize tool definition
+    this.toolDefinition = {
+      name: 'data_extraction',
+      description: 'Extract structured data from web pages using patterns and semantic analysis',
+      parameters: {
+        type: 'object',
+        properties: {
+          mode: {
+            type: 'string',
+            description: 'Extraction mode: semantic, structured, pattern, table, or auto',
+            enum: ['semantic', 'structured', 'pattern', 'table', 'auto']
+          },
+          patterns: {
+            type: 'array',
+            description: 'Patterns to match for extraction',
+            items: {
+              type: 'string'
+            }
+          },
+          selectors: {
+            type: 'object',
+            description: 'CSS selectors or XPath for targeted extraction'
+          },
+          schema: {
+            type: 'object',
+            description: 'Expected data schema'
+          },
+          format: {
+            type: 'string',
+            description: 'Export format: json, csv, xml, or markdown',
+            enum: ['json', 'csv', 'xml', 'markdown']
+          },
+          tableSelector: {
+            type: 'string',
+            description: 'CSS selector for table extraction'
+          },
+          context: {
+            type: 'string',
+            description: 'Additional context for extraction'
+          }
+        },
+        required: [],
+        additionalProperties: false
+      }
+    };
   }
 
   private initializePatterns(): void {

@@ -18,6 +18,7 @@ import { ToolRegistry } from '../tools/ToolRegistry';
 import { ModelClientFactory } from '../models/ModelClientFactory';
 import { UserNotifier } from './UserNotifier';
 import { v4 as uuidv4 } from 'uuid';
+import { loadUserInstructions } from './PromptLoader';
 
 /**
  * Main agent class managing the submission and event queues
@@ -44,7 +45,7 @@ export class CodexAgent {
     // Initialize components with config
     this.session = new Session(this.config);
     this.modelClientFactory = ModelClientFactory.getInstance();
-    this.toolRegistry = new ToolRegistry(this.config);
+    this.toolRegistry = new ToolRegistry();
     this.approvalManager = new ApprovalManager(this.config);
     this.diffTracker = new DiffTracker();
     this.userNotifier = new UserNotifier();
@@ -65,11 +66,12 @@ export class CodexAgent {
     // Initialize model client factory with config
     await this.modelClientFactory.initialize(this.config);
 
-    // Initialize tool registry with config
-    await this.toolRegistry.initialize(this.config);
-
     // Initialize session
     await this.session.initialize();
+
+    // Load user instructions and set in session's turn context
+    const userInstructions = await loadUserInstructions();
+    this.session.updateTurnContext({ userInstructions });
   }
 
   /**
@@ -89,9 +91,9 @@ export class CodexAgent {
   /**
    * Handle model configuration changes
    */
-  private async handleModelConfigChange(event: IConfigChangeEvent): Promise<void> {
+  private handleModelConfigChange(event: IConfigChangeEvent): void {
     // Update model client factory with new config
-    const modelConfig = await this.config.getModelConfig();
+    const modelConfig = this.config.getModelConfig();
     console.log('Model configuration changed:', modelConfig.selected);
 
     // Emit event for UI update
@@ -107,8 +109,8 @@ export class CodexAgent {
   /**
    * Handle security configuration changes
    */
-  private async handleSecurityConfigChange(event: IConfigChangeEvent): Promise<void> {
-    const config = await this.config.getConfig();
+  private handleSecurityConfigChange(event: IConfigChangeEvent): void {
+    const config = this.config.getConfig();
     console.log('Security configuration changed:', config.security?.approvalPolicy);
 
     // Update approval manager policies
@@ -234,10 +236,11 @@ export class CodexAgent {
       }
 
       // Emit TaskComplete event with turn metadata if available
-      const history = this.session.getHistory();
-      const lastAgentMessage = history
-        .filter(h => h.type === 'agent')
-        .pop()?.text;
+      const conversationHistory = this.session.getConversationHistory();
+      const lastAgentMessage = conversationHistory.items
+        .filter(item => item.role === 'assistant')
+        .map(item => typeof item.content === 'string' ? item.content : JSON.stringify(item.content))
+        .pop();
 
       this.emitEvent({
         type: 'TaskComplete',
@@ -353,7 +356,8 @@ export class CodexAgent {
         const turnManager = new TurnManager(
           this.session,
           taskContext,
-          modelClient
+          modelClient,
+          this.toolRegistry
         );
 
         // Create and run AgentTask - AgentTask will create its own TaskRunner
@@ -374,10 +378,11 @@ export class CodexAgent {
           const result = await agentTask.run();
 
           // Extract last assistant message from session history
-          const history = this.session.getHistory();
-          const lastAgentMessage = history
-            .filter(h => h.type === 'agent')
-            .pop()?.text;
+          const conversationHistory = this.session.getConversationHistory();
+          const lastAgentMessage = conversationHistory.items
+            .filter(item => item.role === 'assistant')
+            .map(item => typeof item.content === 'string' ? item.content : JSON.stringify(item.content))
+            .pop();
 
           // Extract input messages from this turn
           const inputMessages = responseItems
@@ -423,7 +428,8 @@ export class CodexAgent {
    * Uses the current persistent TurnContext
    */
   private async handleUserInput(op: Extract<Op, { type: 'UserInput' }>): Promise<void> {
-    await this.processUserInputWithTask(op.items);
+    this.session.addPendingInput(op.items);
+    await this.processUserInputWithTask(op.items, undefined, true);
   }
 
   /**
@@ -519,12 +525,12 @@ export class CodexAgent {
    * Handle get path request
    */
   private async handleGetPath(): Promise<void> {
-    const history = this.session.getHistory();
+    const conversationHistory = this.session.getConversationHistory();
     this.emitEvent({
       type: 'ConversationPath',
       data: {
         path: this.session.conversationId,
-        messages_count: history.length,
+        messages_count: conversationHistory.items.length,
       },
     });
   }

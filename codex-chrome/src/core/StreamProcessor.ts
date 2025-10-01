@@ -333,7 +333,8 @@ export class StreamProcessor {
   private scheduleUIUpdate(): void {
     if (this.updateTimer) return;
 
-    this.updateTimer = window.setTimeout(() => {
+    // Use global setTimeout (works in both window and service worker contexts)
+    this.updateTimer = setTimeout(() => {
       this.flushPendingUpdates();
       this.updateTimer = null;
     }, this.config.updateInterval);

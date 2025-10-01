@@ -3,7 +3,14 @@
  * Preserving exact event names and structures
  */
 
-import type { ReviewRequest, ResponseItem } from './types';
+import type {
+  ReviewRequest,
+  ResponseItem,
+  AskForApproval,
+  SandboxPolicy,
+  ReasoningEffortConfig,
+  ReasoningSummaryConfig,
+} from './types';
 
 /**
  * Complete EventMsg enumeration
@@ -56,11 +63,36 @@ export interface ErrorEvent {
 }
 
 export interface TaskStartedEvent {
+  submission_id?: string;
   model_context_window?: number;
+  model?: string;
+  cwd?: string;
+  approval_policy?: AskForApproval;
+  sandbox_policy?: SandboxPolicy;
+  review_mode?: boolean;
+  auto_compact?: boolean;
+  compaction_threshold?: number;
+  tools?: string[];
+  tools_config?: Record<string, unknown>;
+  timeout_ms?: number;
+  browser_environment_policy?: string;
+  reasoning_effort?: ReasoningEffortConfig;
+  reasoning_summary?: ReasoningSummaryConfig;
+}
+
+export interface TaskTokenUsageSummary {
+  total?: TokenUsage;
+  last_turn?: TokenUsage;
 }
 
 export interface TaskCompleteEvent {
+  submission_id?: string;
   last_agent_message?: string;
+  turn_count?: number;
+  token_usage?: TaskTokenUsageSummary;
+  compaction_performed?: boolean;
+  aborted?: boolean;
+  abort_reason?: TurnAbortReason;
   // Added for compatibility with Rust's AgentTurnComplete notification
   turn_id?: string;
   input_messages?: string[];
@@ -250,6 +282,8 @@ export interface PlanTask {
 export interface TurnAbortedEvent {
   reason: TurnAbortReason;
   submission_id?: string;
+  turn_count?: number;
+  message?: string;
 }
 
 export type TurnAbortReason = 'user_interrupt' | 'automatic_abort' | 'error';

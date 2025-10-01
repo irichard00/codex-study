@@ -10,11 +10,12 @@
     "scripting",
     "webNavigation",
     "sidePanel",
-    "contextMenus"
+    "contextMenus",
+    "alarms"
   ],
   "host_permissions": ["<all_urls>"],
   "web_accessible_resources": [{
-    "resources": ["prompts/agent_prompt.md"],
+    "resources": ["prompts/agent_prompt.md", "prompts/user_instruction.md"],
     "matches": ["<all_urls>"]
   }],
   "background": {

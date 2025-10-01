@@ -6,6 +6,7 @@
 import { ModelClient, ModelClientError, type RetryConfig } from './ModelClient';
 import { OpenAIClient } from './OpenAIClient';
 import { AnthropicClient } from './AnthropicClient';
+import { chromeAuthManager } from './ChromeAuthManager';
 import type { AgentConfig } from '../config/AgentConfig';
 
 /**
@@ -48,11 +49,10 @@ const STORAGE_KEYS = {
  */
 const MODEL_PROVIDER_MAP: Record<string, ModelProvider> = {
   // OpenAI models
+  'gpt-5': 'openai',
   'gpt-4': 'openai',
   'gpt-4-turbo': 'openai',
   'gpt-4o': 'openai',
-  'gpt-3.5-turbo': 'openai',
-  'gpt-3.5-turbo-16k': 'openai',
 
   // Anthropic models
   'claude-3-opus-20240229': 'anthropic',
@@ -184,6 +184,10 @@ export class ModelClientFactory {
    * @param apiKey The API key to save
    */
   async saveApiKey(provider: ModelProvider, apiKey: string): Promise<void> {
+    // Save to ChromeAuthManager
+    await chromeAuthManager.storeApiKey(apiKey);
+
+    // Also save to original storage for backward compatibility
     const key = provider === 'openai' ? STORAGE_KEYS.OPENAI_API_KEY : STORAGE_KEYS.ANTHROPIC_API_KEY;
 
     await new Promise<void>((resolve, reject) => {
@@ -206,6 +210,24 @@ export class ModelClientFactory {
    * @returns Promise resolving to the API key or null if not found
    */
   async loadApiKey(provider: ModelProvider): Promise<string | null> {
+    // First try to get API key from ChromeAuthManager
+    const apiKey = await chromeAuthManager.retrieveApiKey();
+
+    if (apiKey) {
+      // Validate if this key is for the requested provider
+      // OpenAI keys start with 'sk-' (but not 'sk-ant-')
+      // Anthropic keys start with 'sk-ant-'
+      const isAnthropicKey = apiKey.startsWith('sk-ant-');
+      const isOpenAIKey = apiKey.startsWith('sk-') && !isAnthropicKey;
+
+      if (provider === 'openai' && isOpenAIKey) {
+        return apiKey;
+      } else if (provider === 'anthropic' && isAnthropicKey) {
+        return apiKey;
+      }
+    }
+
+    // Fallback to original storage method for backward compatibility
     const key = provider === 'openai' ? STORAGE_KEYS.OPENAI_API_KEY : STORAGE_KEYS.ANTHROPIC_API_KEY;
 
     return new Promise((resolve, reject) => {
@@ -270,7 +292,13 @@ export class ModelClientFactory {
    */
   async hasValidApiKey(provider: ModelProvider): Promise<boolean> {
     const apiKey = await this.loadApiKey(provider);
-    return apiKey !== null && apiKey.trim().length > 0;
+
+    if (apiKey && apiKey.trim().length > 0) {
+      // Additional validation using ChromeAuthManager
+      return chromeAuthManager.validateApiKey(apiKey);
+    }
+
+    return false;
   }
 
   /**

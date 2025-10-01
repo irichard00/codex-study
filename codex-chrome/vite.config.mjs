@@ -23,8 +23,8 @@ export default defineConfig({
     },
     outDir: 'dist',
     emptyOutDir: true,
-    sourcemap: process.env.NODE_ENV === 'development',
-    minify: process.env.NODE_ENV === 'production'
+    sourcemap: true,  // Always enable source maps for debugging
+    minify: true  // Always minify for consistency
   },
   resolve: {
     alias: {

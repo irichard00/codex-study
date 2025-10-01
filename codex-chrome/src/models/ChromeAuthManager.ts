@@ -237,7 +237,7 @@ export class ChromeAuthManager implements AuthManager {
         max_tokens: 1,
         messages: [{ role: 'user', content: 'test' }]
       } : {
-        model: 'gpt-3.5-turbo',
+        model: 'gpt-5',
         max_tokens: 1,
         messages: [{ role: 'user', content: 'test' }]
       };

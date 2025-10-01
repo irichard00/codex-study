@@ -2,21 +2,21 @@
  * T030-T032: Chrome storage wrapper for configuration
  */
 
-import type { IChromeConfig, IConfigStorage, IStorageInfo } from '../config/types';
+import type { IAgentConfig, IConfigStorage, IStorageInfo } from '../config/types';
 import { ConfigStorageError } from '../config/types';
 import { STORAGE_KEYS, CONFIG_LIMITS } from '../config/defaults';
 
 export class ConfigStorage implements IConfigStorage {
   private readonly syncKey = STORAGE_KEYS.CONFIG;
   private readonly versionKey = STORAGE_KEYS.CONFIG_VERSION;
-  private cache: IChromeConfig | null = null;
+  private cache: IAgentConfig | null = null;
   private cacheTimestamp: number = 0;
   private readonly cacheTTL = 5000; // 5 seconds cache
 
   /**
    * T030: Get configuration from storage
    */
-  async get(): Promise<IChromeConfig | null> {
+  async get(): Promise<IAgentConfig | null> {
     // Check cache first
     if (this.cache && Date.now() - this.cacheTimestamp < this.cacheTTL) {
       return this.cache;
@@ -49,7 +49,7 @@ export class ConfigStorage implements IConfigStorage {
   /**
    * T030: Set configuration in storage
    */
-  async set(config: IChromeConfig): Promise<void> {
+  async set(config: IAgentConfig): Promise<void> {
     try {
       const size = this.calculateSize(config);
 
@@ -119,7 +119,7 @@ export class ConfigStorage implements IConfigStorage {
   /**
    * T031: Get from sync storage with quota management
    */
-  private async getFromSyncStorage(): Promise<IChromeConfig | null> {
+  private async getFromSyncStorage(): Promise<IAgentConfig | null> {
     return new Promise((resolve, reject) => {
       chrome.storage.sync.get([this.syncKey], (result) => {
         if (chrome.runtime.lastError) {
@@ -134,7 +134,7 @@ export class ConfigStorage implements IConfigStorage {
   /**
    * T032: Get from local storage (fallback)
    */
-  private async getFromLocalStorage(): Promise<IChromeConfig | null> {
+  private async getFromLocalStorage(): Promise<IAgentConfig | null> {
     return new Promise((resolve, reject) => {
       chrome.storage.local.get([this.syncKey], (result) => {
         if (chrome.runtime.lastError) {
@@ -149,7 +149,7 @@ export class ConfigStorage implements IConfigStorage {
   /**
    * T031: Set in sync storage with quota check
    */
-  private async setInSyncStorage(config: IChromeConfig): Promise<void> {
+  private async setInSyncStorage(config: IAgentConfig): Promise<void> {
     // Check quota before writing
     const currentUsage = await chrome.storage.sync.getBytesInUse();
     const configSize = this.calculateSize(config);
@@ -172,7 +172,7 @@ export class ConfigStorage implements IConfigStorage {
   /**
    * T032: Set in local storage for large data
    */
-  private async setInLocalStorage(config: IChromeConfig): Promise<void> {
+  private async setInLocalStorage(config: IAgentConfig): Promise<void> {
     return new Promise((resolve, reject) => {
       chrome.storage.local.set({ [this.syncKey]: config }, () => {
         if (chrome.runtime.lastError) {
@@ -250,7 +250,7 @@ export class ConfigStorage implements IConfigStorage {
   /**
    * T032: Split large config into chunks if needed
    */
-  async setChunked(config: IChromeConfig): Promise<void> {
+  async setChunked(config: IAgentConfig): Promise<void> {
     const size = this.calculateSize(config);
 
     if (size <= CONFIG_LIMITS.SYNC_ITEM_BYTES) {

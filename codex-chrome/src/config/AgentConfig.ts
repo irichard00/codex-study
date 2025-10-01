@@ -1,20 +1,22 @@
 /**
- * T033-T036, T043: Main Chrome extension configuration class
+ * T033-T036, T043: Main centralized agent configuration class
  */
 
 import type {
-  IChromeConfig,
+  IAgentConfig,
   IModelConfig,
   IProviderConfig,
   IProfileConfig,
   IConfigService,
   IConfigChangeEvent,
-  IExportData
+  IExportData,
+  IToolsConfig,
+  IToolSpecificConfig
 } from './types';
 import { ConfigValidationError } from './types';
 import { ConfigStorage } from '../storage/ConfigStorage';
 import {
-  DEFAULT_CHROME_CONFIG,
+  DEFAULT_AGENT_CONFIG,
   mergeWithDefaults,
   getDefaultProviders
 } from './defaults';
@@ -23,13 +25,13 @@ import { validateConfig, validateModelConfig, validateProviderConfig } from './v
 export class AgentConfig implements IConfigService {
   private static instance: AgentConfig | null = null;
   private storage: ConfigStorage;
-  private currentConfig: IChromeConfig;
+  private currentConfig: IAgentConfig;
   private eventHandlers: Map<string, Set<(e: IConfigChangeEvent) => void>>;
   private initialized: boolean = false;
 
   private constructor() {
     this.storage = new ConfigStorage();
-    this.currentConfig = DEFAULT_CHROME_CONFIG;
+    this.currentConfig = DEFAULT_AGENT_CONFIG;
     this.eventHandlers = new Map();
   }
 
@@ -57,25 +59,25 @@ export class AgentConfig implements IConfigService {
         this.currentConfig = mergeWithDefaults(storedConfig);
       } else {
         // First time setup
-        this.currentConfig = DEFAULT_CHROME_CONFIG;
+        this.currentConfig = DEFAULT_AGENT_CONFIG;
         await this.storage.set(this.currentConfig);
       }
       this.initialized = true;
     } catch (error) {
       console.error('Failed to initialize config:', error);
-      this.currentConfig = DEFAULT_CHROME_CONFIG;
+      this.currentConfig = DEFAULT_AGENT_CONFIG;
       this.initialized = true;
     }
   }
 
-  // T034: Core CRUD operations
-  async getConfig(): Promise<IChromeConfig> {
-    await this.initialize();
+  // Core CRUD operations
+  getConfig(): IAgentConfig {
+    this.ensureInitialized();
     return { ...this.currentConfig };
   }
 
-  async updateConfig(config: Partial<IChromeConfig>): Promise<IChromeConfig> {
-    await this.initialize();
+  updateConfig(config: Partial<IAgentConfig>): IAgentConfig {
+    this.ensureInitialized();
 
     const oldConfig = { ...this.currentConfig };
     const newConfig = mergeWithDefaults({ ...this.currentConfig, ...config });
@@ -91,7 +93,9 @@ export class AgentConfig implements IConfigService {
     }
 
     this.currentConfig = newConfig;
-    await this.storage.set(this.currentConfig);
+    this.storage.set(this.currentConfig).catch(err => {
+      console.error('Failed to persist config:', err);
+    });
 
     // Emit change events
     this.emitChangeEvent('model', oldConfig.model, newConfig.model);
@@ -99,10 +103,10 @@ export class AgentConfig implements IConfigService {
     return { ...this.currentConfig };
   }
 
-  async resetConfig(preserveApiKeys?: boolean): Promise<IChromeConfig> {
-    await this.initialize();
+  resetConfig(preserveApiKeys?: boolean): IAgentConfig {
+    this.ensureInitialized();
 
-    let newConfig = DEFAULT_CHROME_CONFIG;
+    let newConfig = DEFAULT_AGENT_CONFIG;
 
     if (preserveApiKeys && this.currentConfig.providers) {
       // Preserve API keys from existing providers
@@ -120,14 +124,22 @@ export class AgentConfig implements IConfigService {
     }
 
     this.currentConfig = newConfig;
-    await this.storage.set(this.currentConfig);
+    this.storage.set(this.currentConfig).catch(err => {
+      console.error('Failed to persist config:', err);
+    });
 
     return { ...this.currentConfig };
   }
 
+  private ensureInitialized(): void {
+    if (!this.initialized) {
+      throw new Error('AgentConfig not initialized. Call initialize() first.');
+    }
+  }
+
   // Model operations
-  async getModelConfig(): Promise<IModelConfig> {
-    await this.initialize();
+  getModelConfig(): IModelConfig {
+    this.ensureInitialized();
 
     let modelConfig = { ...this.currentConfig.model };
 
@@ -147,10 +159,10 @@ export class AgentConfig implements IConfigService {
     return modelConfig;
   }
 
-  async updateModelConfig(config: Partial<IModelConfig>): Promise<IModelConfig> {
-    await this.initialize();
+  updateModelConfig(config: Partial<IModelConfig>): IModelConfig {
+    this.ensureInitialized();
 
-    const oldModel = await this.getModelConfig();
+    const oldModel = this.getModelConfig();
     const newModel = { ...oldModel, ...config };
 
     // Validate model configuration
@@ -175,7 +187,9 @@ export class AgentConfig implements IConfigService {
     }
 
     this.currentConfig.model = newModel;
-    await this.storage.set(this.currentConfig);
+    this.storage.set(this.currentConfig).catch(err => {
+      console.error('Failed to persist config:', err);
+    });
 
     this.emitChangeEvent('model', oldModel, newModel);
 
@@ -183,18 +197,18 @@ export class AgentConfig implements IConfigService {
   }
 
   // T035: Provider management
-  async getProviders(): Promise<Record<string, IProviderConfig>> {
-    await this.initialize();
+  getProviders(): Record<string, IProviderConfig> {
+    this.ensureInitialized();
     return { ...this.currentConfig.providers };
   }
 
-  async getProvider(id: string): Promise<IProviderConfig | null> {
-    await this.initialize();
+  getProvider(id: string): IProviderConfig | null {
+    this.ensureInitialized();
     return this.currentConfig.providers[id] || null;
   }
 
-  async addProvider(provider: IProviderConfig): Promise<IProviderConfig> {
-    await this.initialize();
+  addProvider(provider: IProviderConfig): IProviderConfig {
+    this.ensureInitialized();
 
     const validation = validateProviderConfig(provider);
     if (!validation.valid) {
@@ -206,15 +220,17 @@ export class AgentConfig implements IConfigService {
     }
 
     this.currentConfig.providers[provider.id] = provider;
-    await this.storage.set(this.currentConfig);
+    this.storage.set(this.currentConfig).catch(err => {
+      console.error('Failed to persist config:', err);
+    });
 
     this.emitChangeEvent('provider', null, provider);
 
     return provider;
   }
 
-  async updateProvider(id: string, provider: Partial<IProviderConfig>): Promise<IProviderConfig> {
-    await this.initialize();
+  updateProvider(id: string, provider: Partial<IProviderConfig>): IProviderConfig {
+    this.ensureInitialized();
 
     const existing = this.currentConfig.providers[id];
     if (!existing) {
@@ -233,15 +249,17 @@ export class AgentConfig implements IConfigService {
     }
 
     this.currentConfig.providers[id] = updated;
-    await this.storage.set(this.currentConfig);
+    this.storage.set(this.currentConfig).catch(err => {
+      console.error('Failed to persist config:', err);
+    });
 
     this.emitChangeEvent('provider', existing, updated);
 
     return updated;
   }
 
-  async deleteProvider(id: string): Promise<void> {
-    await this.initialize();
+  deleteProvider(id: string): void {
+    this.ensureInitialized();
 
     // Check if provider is currently active
     if (this.currentConfig.model.provider === id) {
@@ -250,24 +268,26 @@ export class AgentConfig implements IConfigService {
 
     const deleted = this.currentConfig.providers[id];
     delete this.currentConfig.providers[id];
-    await this.storage.set(this.currentConfig);
+    this.storage.set(this.currentConfig).catch(err => {
+      console.error('Failed to persist config:', err);
+    });
 
     this.emitChangeEvent('provider', deleted, null);
   }
 
   // T036: Profile management
-  async getProfiles(): Promise<Record<string, IProfileConfig>> {
-    await this.initialize();
+  getProfiles(): Record<string, IProfileConfig> {
+    this.ensureInitialized();
     return { ...(this.currentConfig.profiles || {}) };
   }
 
-  async getProfile(name: string): Promise<IProfileConfig | null> {
-    await this.initialize();
+  getProfile(name: string): IProfileConfig | null {
+    this.ensureInitialized();
     return this.currentConfig.profiles?.[name] || null;
   }
 
-  async createProfile(profile: IProfileConfig): Promise<IProfileConfig> {
-    await this.initialize();
+  createProfile(profile: IProfileConfig): IProfileConfig {
+    this.ensureInitialized();
 
     if (!this.currentConfig.profiles) {
       this.currentConfig.profiles = {};
@@ -278,15 +298,17 @@ export class AgentConfig implements IConfigService {
     }
 
     this.currentConfig.profiles[profile.name] = profile;
-    await this.storage.set(this.currentConfig);
+    this.storage.set(this.currentConfig).catch(err => {
+      console.error('Failed to persist config:', err);
+    });
 
     this.emitChangeEvent('profile', null, profile);
 
     return profile;
   }
 
-  async updateProfile(name: string, profile: Partial<IProfileConfig>): Promise<IProfileConfig> {
-    await this.initialize();
+  updateProfile(name: string, profile: Partial<IProfileConfig>): IProfileConfig {
+    this.ensureInitialized();
 
     if (!this.currentConfig.profiles?.[name]) {
       throw new Error(`Profile not found: ${name}`);
@@ -294,15 +316,17 @@ export class AgentConfig implements IConfigService {
 
     const updated = { ...this.currentConfig.profiles[name], ...profile };
     this.currentConfig.profiles[name] = updated;
-    await this.storage.set(this.currentConfig);
+    this.storage.set(this.currentConfig).catch(err => {
+      console.error('Failed to persist config:', err);
+    });
 
     this.emitChangeEvent('profile', this.currentConfig.profiles[name], updated);
 
     return updated;
   }
 
-  async deleteProfile(name: string): Promise<void> {
-    await this.initialize();
+  deleteProfile(name: string): void {
+    this.ensureInitialized();
 
     if (this.currentConfig.activeProfile === name) {
       throw new Error('Cannot delete active profile');
@@ -312,13 +336,15 @@ export class AgentConfig implements IConfigService {
     if (this.currentConfig.profiles) {
       delete this.currentConfig.profiles[name];
     }
-    await this.storage.set(this.currentConfig);
+    this.storage.set(this.currentConfig).catch(err => {
+      console.error('Failed to persist config:', err);
+    });
 
     this.emitChangeEvent('profile', deleted, null);
   }
 
-  async activateProfile(name: string): Promise<void> {
-    await this.initialize();
+  activateProfile(name: string): void {
+    this.ensureInitialized();
 
     if (!this.currentConfig.profiles?.[name]) {
       throw new Error(`Profile not found: ${name}`);
@@ -328,14 +354,16 @@ export class AgentConfig implements IConfigService {
     const profile = this.currentConfig.profiles[name];
     profile.lastUsed = Date.now();
 
-    await this.storage.set(this.currentConfig);
+    this.storage.set(this.currentConfig).catch(err => {
+      console.error('Failed to persist config:', err);
+    });
 
     this.emitChangeEvent('profile', null, profile);
   }
 
   // Import/Export
-  async exportConfig(includeApiKeys?: boolean): Promise<IExportData> {
-    await this.initialize();
+  exportConfig(includeApiKeys?: boolean): IExportData {
+    this.ensureInitialized();
 
     const configToExport = { ...this.currentConfig };
 
@@ -353,7 +381,7 @@ export class AgentConfig implements IConfigService {
     };
   }
 
-  async importConfig(data: IExportData): Promise<IChromeConfig> {
+  importConfig(data: IExportData): IAgentConfig {
     const validation = validateConfig(data.config);
     if (!validation.valid) {
       throw new ConfigValidationError(
@@ -364,9 +392,121 @@ export class AgentConfig implements IConfigService {
     }
 
     this.currentConfig = data.config;
-    await this.storage.set(this.currentConfig);
+    this.storage.set(this.currentConfig).catch(err => {
+      console.error('Failed to persist config:', err);
+    });
 
     return { ...this.currentConfig };
+  }
+
+  // Tool configuration operations
+  getToolsConfig(): IToolsConfig {
+    this.ensureInitialized();
+    return { ...(this.currentConfig.tools || {}) } as IToolsConfig;
+  }
+
+  updateToolsConfig(config: Partial<IToolsConfig>): IToolsConfig {
+    this.ensureInitialized();
+
+    const oldConfig = this.currentConfig.tools;
+    const newConfig = {
+      ...(this.currentConfig.tools || {}),
+      ...config,
+      sandboxPolicy: {
+        ...(this.currentConfig.tools?.sandboxPolicy || {}),
+        ...(config.sandboxPolicy || {})
+      },
+      perToolConfig: {
+        ...(this.currentConfig.tools?.perToolConfig || {}),
+        ...(config.perToolConfig || {})
+      }
+    };
+
+    this.currentConfig.tools = newConfig as IToolsConfig;
+    this.storage.set(this.currentConfig).catch(err => {
+      console.error('Failed to persist config:', err);
+    });
+    this.emitChangeEvent('tools' as any, oldConfig, newConfig);
+
+    return newConfig as IToolsConfig;
+  }
+
+  getEnabledTools(): string[] {
+    this.ensureInitialized();
+    return this.currentConfig.tools?.enabled || [];
+  }
+
+  enableTool(toolName: string): void {
+    this.ensureInitialized();
+
+    const tools = this.currentConfig.tools || { enabled: [], disabled: [] };
+    if (!tools.enabled.includes(toolName)) {
+      tools.enabled.push(toolName);
+    }
+    tools.disabled = (tools.disabled || []).filter(name => name !== toolName);
+
+    this.currentConfig.tools = tools as IToolsConfig;
+    this.storage.set(this.currentConfig).catch(err => {
+      console.error('Failed to persist config:', err);
+    });
+    this.emitChangeEvent('tools' as any, null, tools);
+  }
+
+  disableTool(toolName: string): void {
+    this.ensureInitialized();
+
+    const tools = this.currentConfig.tools || { enabled: [], disabled: [] };
+    tools.enabled = tools.enabled.filter(name => name !== toolName);
+    if (!tools.disabled) tools.disabled = [];
+    if (!tools.disabled.includes(toolName)) {
+      tools.disabled.push(toolName);
+    }
+
+    this.currentConfig.tools = tools as IToolsConfig;
+    this.storage.set(this.currentConfig).catch(err => {
+      console.error('Failed to persist config:', err);
+    });
+    this.emitChangeEvent('tools' as any, null, tools);
+  }
+
+  getToolTimeout(): number {
+    this.ensureInitialized();
+    return this.currentConfig.tools?.timeout || 30000;
+  }
+
+  getToolSandboxPolicy(): any {
+    this.ensureInitialized();
+    return this.currentConfig.tools?.sandboxPolicy || { mode: 'workspace-write' };
+  }
+
+  getToolSpecificConfig(toolName: string): IToolSpecificConfig | null {
+    this.ensureInitialized();
+    return this.currentConfig.tools?.perToolConfig?.[toolName] || null;
+  }
+
+  updateToolSpecificConfig(
+    toolName: string,
+    config: Partial<IToolSpecificConfig>
+  ): void {
+    this.ensureInitialized();
+
+    if (!this.currentConfig.tools) {
+      this.currentConfig.tools = { enabled: [], disabled: [] } as IToolsConfig;
+    }
+    if (!this.currentConfig.tools.perToolConfig) {
+      this.currentConfig.tools.perToolConfig = {};
+    }
+
+    const oldConfig = this.currentConfig.tools.perToolConfig[toolName];
+    this.currentConfig.tools.perToolConfig[toolName] = {
+      ...(oldConfig || {}),
+      ...config
+    };
+
+    this.storage.set(this.currentConfig).catch(err => {
+      console.error('Failed to persist config:', err);
+    });
+    this.emitChangeEvent('tools' as any, oldConfig, this.currentConfig.tools.perToolConfig[toolName]);
   }
 
   // T043: Event emitter functionality
