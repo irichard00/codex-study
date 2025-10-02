@@ -4,7 +4,7 @@
  */
 
 import type { ApprovalResolver } from './types';
-import type { InputItem } from '../../protocol/types';
+import type { InputItem } from '../../../protocol/types';
 
 /**
  * Manages pending approvals and input during an active turn

@@ -362,8 +362,7 @@ export class CodexAgent {
           turnManager,
           this.session.getId(),
           submissionId,
-          responseItems,
-          false // not review mode
+          responseItems
         );
 
         this.activeTask = agentTask;
