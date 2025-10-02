@@ -17,6 +17,7 @@ import type { AgentConfig } from '../config/AgentConfig';
 import { SessionState, type SessionStateExport } from './session/state/SessionState';
 import { type SessionServices, createSessionServices } from './session/state/SessionServices';
 import { ActiveTurn } from './session/state/ActiveTurn';
+import { TurnState } from './session/state/TurnState';
 import { TaskKind } from './session/state/types';
 import type { TokenUsageInfo, RunningTask, RateLimitSnapshot, TurnAbortReason, InitialHistory } from './session/state/types';
 
@@ -30,18 +31,6 @@ export type ExecutionState =
   | 'waiting'        // Waiting for approval
   | 'interrupted'    // Interrupted by user
   | 'error';         // Error state
-
-/**
- * Turn state information
- */
-export interface TurnState {
-  turnNumber: number;
-  startTime: number;
-  endTime?: number;
-  tokenCount: number;
-  toolCallCount: number;
-  interrupted: boolean;
-}
 
 /**
  * Tool definition interface (to avoid circular dependency with TurnManager)
@@ -73,8 +62,6 @@ export class Session {
   private isPersistent: boolean = true;
 
   // Runtime state (not persisted, lives in Session only)
-  private currentTurnState: TurnState | null = null;
-  private turnHistory: TurnState[] = [];
   private toolUsageStats: Map<string, number> = new Map();
   private errorHistory: Array<{timestamp: number, error: string, context?: any}> = [];
   private interruptRequested: boolean = false;
@@ -679,9 +666,6 @@ export class Session {
    */
   addTokenUsage(tokens: number): void {
     this.sessionState.addTokenUsage(tokens);
-    if (this.currentTurnState) {
-      this.currentTurnState.tokenCount += tokens;
-    }
   }
 
   /**
@@ -712,16 +696,6 @@ export class Session {
    * Start a turn (creates ActiveTurn)
    */
   async startTurn(): Promise<void> {
-    if (this.currentTurnState) {
-      throw new Error('Cannot start turn: turn already active');
-    }
-    this.currentTurnState = {
-      turnNumber: this.turnHistory.length + 1,
-      startTime: Date.now(),
-      tokenCount: 0,
-      toolCallCount: 0,
-      interrupted: false,
-    };
     // Also create ActiveTurn for active turn management
     if (this.activeTurn) {
       throw new Error('Cannot start turn: turn already active');
@@ -733,12 +707,6 @@ export class Session {
    * End a turn (clears ActiveTurn)
    */
   async endTurn(): Promise<void> {
-    if (this.currentTurnState) {
-      this.currentTurnState.endTime = Date.now();
-      this.turnHistory.push({...this.currentTurnState});
-      this.currentTurnState = null;
-    }
-
     if (!this.activeTurn) {
       console.warn('No active turn to end');
       return;
@@ -759,9 +727,6 @@ export class Session {
   trackToolUsage(toolName: string): void {
     const current = this.toolUsageStats.get(toolName) || 0;
     this.toolUsageStats.set(toolName, current + 1);
-    if (this.currentTurnState) {
-      this.currentTurnState.toolCallCount++;
-    }
   }
 
   /**
@@ -780,9 +745,6 @@ export class Session {
    */
   requestInterrupt(): void {
     this.interruptRequested = true;
-    if (this.currentTurnState) {
-      this.currentTurnState.interrupted = true;
-    }
   }
 
   /**
