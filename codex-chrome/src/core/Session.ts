@@ -549,24 +549,6 @@ export class Session {
   }
 
   /**
-   * Get MCP tools available to the session
-   */
-  async getMcpTools(): Promise<ToolDefinition[]> {
-    // Placeholder for MCP tools integration
-    // In a full implementation, this would connect to MCP servers
-    return [];
-  }
-
-  /**
-   * Execute an MCP tool
-   */
-  async executeMcpTool(toolName: string, parameters: any): Promise<any> {
-    // Placeholder for MCP tool execution
-    // In a full implementation, this would call the appropriate MCP server
-    throw new Error(`MCP tool '${toolName}' not implemented`);
-  }
-
-  /**
    * Record turn context for rollout/history
    */
   async recordTurnContext(contextItem: any): Promise<void> {
