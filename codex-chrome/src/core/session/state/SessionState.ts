@@ -68,6 +68,15 @@ export class SessionState {
     };
   }
 
+  /**
+   * T011: Replace entire conversation history
+   * Used for compaction - replaces all history with new items
+   * @param items New history items to replace existing history
+   */
+  replaceHistory(items: ResponseItem[]): void {
+    this.history = [...items];
+  }
+
   // ===== Token Tracking =====
 
   /**
