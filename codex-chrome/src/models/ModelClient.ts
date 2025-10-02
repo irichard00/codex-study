@@ -3,6 +3,8 @@
  * Based on contract tests and codex-rs model client implementation
  */
 
+import type { ToolDefinition } from '../tools/BaseTool';
+
 /**
  * Request configuration for completion API calls
  */
@@ -71,23 +73,6 @@ export interface Usage {
   completionTokens: number;
   /** Total number of tokens used */
   totalTokens: number;
-}
-
-/**
- * Tool definition for function calling
- */
-export interface ToolDefinition {
-  /** Type of tool (currently only function supported) */
-  type: 'function';
-  /** Function definition */
-  function: {
-    /** Name of the function */
-    name: string;
-    /** Description of what the function does */
-    description: string;
-    /** JSON schema for the function parameters */
-    parameters: any;
-  };
 }
 
 /**

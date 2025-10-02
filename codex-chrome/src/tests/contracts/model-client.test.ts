@@ -5,6 +5,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { createMockFetch, createMockStream, collectStream } from '../utils/test-helpers';
+import type { ToolDefinition } from '../../tools/BaseTool';
 
 // Define contract interfaces (will be implemented later)
 interface CompletionRequest {
@@ -40,15 +41,6 @@ interface Usage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
-}
-
-interface ToolDefinition {
-  type: 'function';
-  function: {
-    name: string;
-    description: string;
-    parameters: any;
-  };
 }
 
 interface ToolCall {

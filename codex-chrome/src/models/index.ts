@@ -13,10 +13,12 @@ export {
   type Message,
   type Choice,
   type Usage,
-  type ToolDefinition,
   type ToolCall,
   type RetryConfig,
 } from './ModelClient';
+
+// Re-export ToolDefinition from tools/BaseTool.ts
+export type { ToolDefinition } from '../tools/BaseTool';
 
 // Provider implementations
 export { OpenAIClient } from './OpenAIClient';

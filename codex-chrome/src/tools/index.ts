@@ -15,7 +15,8 @@ import type { IToolsConfig } from '../config/types';
 
 // Re-export all tools
 export { ToolRegistry } from './ToolRegistry';
-export { BaseTool } from './BaseTool';
+export { BaseTool, createFunctionTool, createObjectSchema, createToolDefinition } from './BaseTool';
+export type { ToolDefinition, JsonSchema, ResponsesApiTool, FreeformTool, FreeformToolFormat } from './BaseTool';
 export { WebScrapingTool } from './WebScrapingTool';
 export { FormAutomationTool } from './FormAutomationTool';
 export { NetworkInterceptTool } from './NetworkInterceptTool';

@@ -33,18 +33,6 @@ export type ExecutionState =
   | 'error';         // Error state
 
 /**
- * Tool definition interface (to avoid circular dependency with TurnManager)
- */
-export interface ToolDefinition {
-  type: 'function';
-  function: {
-    name: string;
-    description: string;
-    parameters?: any;
-  };
-}
-
-/**
  * Session class managing conversation state
  * REFACTORED: Now internally uses SessionState for pure data management
  */

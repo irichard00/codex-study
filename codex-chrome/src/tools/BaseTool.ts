@@ -6,29 +6,63 @@
  */
 
 /**
- * Tool definition structure
+ * JSON Schema definition for tool parameters
+ * Port of JsonSchema enum from codex-rs/core/src/openai_tools.rs
  */
-export interface ToolDefinition {
+export type JsonSchema =
+  | { type: 'boolean'; description?: string }
+  | { type: 'string'; description?: string }
+  | { type: 'number'; description?: string }
+  | { type: 'integer'; description?: string }
+  | { type: 'array'; items: JsonSchema; description?: string }
+  | { type: 'object'; properties: Record<string, JsonSchema>; required?: string[]; additionalProperties?: boolean };
+
+/**
+ * Response API tool definition
+ * Port of ResponsesApiTool from codex-rs/core/src/openai_tools.rs
+ */
+export interface ResponsesApiTool {
   name: string;
   description: string;
-  parameters: ToolParameterSchema;
-  category?: string;
-  version?: string;
-  metadata?: Record<string, any>;
+  strict: boolean;
+  parameters: JsonSchema;
 }
 
 /**
- * JSON Schema for tool parameters
+ * Freeform tool format
+ * Port of FreeformToolFormat from codex-rs/core/src/openai_tools.rs
  */
-export interface ToolParameterSchema {
-  type: 'object';
-  properties: Record<string, ParameterProperty>;
-  required?: string[];
-  additionalProperties?: boolean;
+export interface FreeformToolFormat {
+  type: string;
+  syntax: string;
+  definition: string;
 }
 
 /**
- * Parameter property definition
+ * Freeform tool definition
+ * Port of FreeformTool from codex-rs/core/src/openai_tools.rs
+ */
+export interface FreeformTool {
+  name: string;
+  description: string;
+  format: FreeformToolFormat;
+}
+
+/**
+ * Tool definition - union type matching OpenAiTool enum from Rust
+ * Port of OpenAiTool enum from codex-rs/core/src/openai_tools.rs
+ *
+ * When serialized as JSON, this produces a valid "Tool" in the OpenAI Responses API.
+ */
+export type ToolDefinition =
+  | { type: 'function'; function: ResponsesApiTool }
+  | { type: 'local_shell' }
+  | { type: 'web_search' }
+  | { type: 'custom'; custom: FreeformTool };
+
+/**
+ * Legacy parameter property definition (deprecated - use JsonSchema instead)
+ * @deprecated Use JsonSchema type instead
  */
 export interface ParameterProperty {
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
@@ -37,6 +71,17 @@ export interface ParameterProperty {
   items?: ParameterProperty;
   properties?: Record<string, ParameterProperty>;
   default?: any;
+}
+
+/**
+ * Legacy tool parameter schema (deprecated - use JsonSchema instead)
+ * @deprecated Use JsonSchema type instead
+ */
+export interface ToolParameterSchema {
+  type: 'object';
+  properties: Record<string, ParameterProperty>;
+  required?: string[];
+  additionalProperties?: boolean;
 }
 
 /**
@@ -188,23 +233,31 @@ export abstract class BaseTool {
       // Execute the tool-specific logic
       const result = await this.executeImpl(processedRequest, options);
 
+      const toolName = this.toolDefinition.type === 'function'
+        ? this.toolDefinition.function.name
+        : this.toolDefinition.type;
+
       return {
         success: true,
         data: result,
         metadata: {
           duration: Date.now() - startTime,
-          toolName: this.toolDefinition.name,
+          toolName,
           ...options?.metadata,
         },
       };
 
     } catch (error: any) {
+      const toolName = this.toolDefinition.type === 'function'
+        ? this.toolDefinition.function.name
+        : this.toolDefinition.type;
+
       return {
         success: false,
         error: this.formatError(error),
         metadata: {
           duration: Date.now() - startTime,
-          toolName: this.toolDefinition.name,
+          toolName,
           errorType: error.constructor.name,
           ...options?.metadata,
         },
@@ -225,7 +278,18 @@ export abstract class BaseTool {
    */
   protected validateParameters(parameters: Record<string, any>): { valid: boolean; errors: ValidationError[] } {
     const errors: ValidationError[] = [];
-    const schema = this.toolDefinition.parameters;
+
+    // Get the parameters schema from the tool definition
+    if (this.toolDefinition.type !== 'function') {
+      // Non-function tools don't have parameters to validate
+      return { valid: true, errors: [] };
+    }
+
+    const schema = this.toolDefinition.function.parameters;
+    if (schema.type !== 'object') {
+      // Only object schemas have properties to validate
+      return { valid: true, errors: [] };
+    }
 
     // Check required parameters
     if (schema.required) {
@@ -255,7 +319,7 @@ export abstract class BaseTool {
         continue;
       }
 
-      const paramErrors = this.validateParameter(paramName, paramValue, propSchema);
+      const paramErrors = this.validateJsonSchemaValue(paramName, paramValue, propSchema);
       errors.push(...paramErrors);
     }
 
@@ -266,57 +330,46 @@ export abstract class BaseTool {
   }
 
   /**
-   * Validate a single parameter against its schema
+   * Validate a single value against JsonSchema
    */
-  protected validateParameter(
+  protected validateJsonSchemaValue(
     paramName: string,
     value: any,
-    schema: ParameterProperty
+    schema: JsonSchema
   ): ValidationError[] {
     const errors: ValidationError[] = [];
 
     // Handle null/undefined values
     if (value == null) {
-      if (schema.default === undefined) {
-        errors.push({
-          parameter: paramName,
-          message: `Parameter '${paramName}' cannot be null or undefined`,
-          code: 'NULL_VALUE',
-        });
-      }
+      errors.push({
+        parameter: paramName,
+        message: `Parameter '${paramName}' cannot be null or undefined`,
+        code: 'NULL_VALUE',
+      });
       return errors;
     }
 
     // Type validation
-    const typeError = this.validateType(paramName, value, schema.type);
+    const typeError = this.validateJsonSchemaType(paramName, value, schema.type);
     if (typeError) {
       errors.push(typeError);
       return errors; // Don't continue if type is wrong
     }
 
-    // Enum validation
-    if (schema.enum && !schema.enum.includes(value)) {
-      errors.push({
-        parameter: paramName,
-        message: `Parameter '${paramName}' must be one of: ${schema.enum.join(', ')}`,
-        code: 'ENUM_VIOLATION',
-      });
-    }
-
     // Array item validation
-    if (schema.type === 'array' && schema.items && Array.isArray(value)) {
+    if (schema.type === 'array' && 'items' in schema && Array.isArray(value)) {
       for (let i = 0; i < value.length; i++) {
-        const itemErrors = this.validateParameter(`${paramName}[${i}]`, value[i], schema.items);
+        const itemErrors = this.validateJsonSchemaValue(`${paramName}[${i}]`, value[i], schema.items);
         errors.push(...itemErrors);
       }
     }
 
     // Object property validation
-    if (schema.type === 'object' && schema.properties && typeof value === 'object' && !Array.isArray(value)) {
+    if (schema.type === 'object' && 'properties' in schema && typeof value === 'object' && !Array.isArray(value)) {
       for (const [propName, propValue] of Object.entries(value)) {
         const propSchema = schema.properties[propName];
         if (propSchema) {
-          const propErrors = this.validateParameter(`${paramName}.${propName}`, propValue, propSchema);
+          const propErrors = this.validateJsonSchemaValue(`${paramName}.${propName}`, propValue, propSchema);
           errors.push(...propErrors);
         }
       }
@@ -326,9 +379,9 @@ export abstract class BaseTool {
   }
 
   /**
-   * Validate parameter type
+   * Validate value type against JsonSchema type
    */
-  protected validateType(paramName: string, value: any, expectedType: string): ValidationError | null {
+  protected validateJsonSchemaType(paramName: string, value: any, expectedType: string): ValidationError | null {
     const actualType = Array.isArray(value) ? 'array' : typeof value;
 
     switch (expectedType) {
@@ -343,10 +396,18 @@ export abstract class BaseTool {
         break;
 
       case 'number':
+      case 'integer':
         if (typeof value !== 'number' || isNaN(value)) {
           return {
             parameter: paramName,
-            message: `Parameter '${paramName}' must be a valid number, got ${actualType}`,
+            message: `Parameter '${paramName}' must be a valid ${expectedType}, got ${actualType}`,
+            code: 'TYPE_MISMATCH',
+          };
+        }
+        if (expectedType === 'integer' && !Number.isInteger(value)) {
+          return {
+            parameter: paramName,
+            message: `Parameter '${paramName}' must be an integer, got ${value}`,
             code: 'TYPE_MISMATCH',
           };
         }
@@ -395,18 +456,12 @@ export abstract class BaseTool {
 
   /**
    * Apply default values to parameters
+   * Note: JsonSchema doesn't include defaults, so this is a no-op for now
    */
   protected applyDefaults(parameters: Record<string, any>): Record<string, any> {
-    const result = { ...parameters };
-    const schema = this.toolDefinition.parameters;
-
-    for (const [propName, propSchema] of Object.entries(schema.properties)) {
-      if (propSchema.default !== undefined && !(propName in result)) {
-        result[propName] = propSchema.default;
-      }
-    }
-
-    return result;
+    // JsonSchema doesn't have a default field like ParameterProperty did
+    // Return parameters as-is
+    return { ...parameters };
   }
 
   /**
@@ -523,18 +578,24 @@ export abstract class BaseTool {
    */
   protected log(level: 'debug' | 'info' | 'warn' | 'error', message: string, data?: any): void {
     const logData = data ? { data } : {};
-    console[level](`[${this.toolDefinition.name}] ${message}`, logData);
+    const toolName = this.toolDefinition.type === 'function'
+      ? this.toolDefinition.function.name
+      : this.toolDefinition.type;
+    console[level](`[${toolName}] ${message}`, logData);
   }
 
   /**
    * Create execution context for the tool
    */
   protected createContext(sessionId: string, turnId: string): ToolContext {
+    const toolName = this.toolDefinition.type === 'function'
+      ? this.toolDefinition.function.name
+      : this.toolDefinition.type;
     return {
       sessionId,
       turnId,
-      toolName: this.toolDefinition.name,
-      metadata: this.toolDefinition.metadata,
+      toolName,
+      metadata: undefined,
     };
   }
 
@@ -574,7 +635,49 @@ export abstract class BaseTool {
 }
 
 /**
- * Utility function to create tool definition
+ * Utility function to create a function tool definition
+ * Matches the structure of OpenAiTool::Function from Rust
+ */
+export function createFunctionTool(
+  name: string,
+  description: string,
+  parameters: JsonSchema,
+  options: {
+    strict?: boolean;
+  } = {}
+): ToolDefinition {
+  return {
+    type: 'function',
+    function: {
+      name,
+      description,
+      strict: options.strict ?? false,
+      parameters,
+    },
+  };
+}
+
+/**
+ * Utility function to create object schema
+ */
+export function createObjectSchema(
+  properties: Record<string, JsonSchema>,
+  options: {
+    required?: string[];
+    additionalProperties?: boolean;
+  } = {}
+): JsonSchema {
+  return {
+    type: 'object',
+    properties,
+    required: options.required,
+    additionalProperties: options.additionalProperties,
+  };
+}
+
+/**
+ * Legacy utility function (deprecated - use createFunctionTool instead)
+ * @deprecated Use createFunctionTool instead
  */
 export function createToolDefinition(
   name: string,
@@ -587,17 +690,39 @@ export function createToolDefinition(
     metadata?: Record<string, any>;
   } = {}
 ): ToolDefinition {
-  return {
-    name,
-    description,
-    parameters: {
-      type: 'object',
-      properties,
-      required: options.required || [],
-      additionalProperties: false,
-    },
-    category: options.category,
-    version: options.version || '1.0.0',
-    metadata: options.metadata,
+  // Convert legacy ParameterProperty to JsonSchema
+  const convertToJsonSchema = (prop: ParameterProperty): JsonSchema => {
+    if (prop.type === 'array' && prop.items) {
+      return {
+        type: 'array',
+        items: convertToJsonSchema(prop.items),
+        description: prop.description,
+      };
+    }
+    if (prop.type === 'object' && prop.properties) {
+      const convertedProps: Record<string, JsonSchema> = {};
+      for (const [key, value] of Object.entries(prop.properties)) {
+        convertedProps[key] = convertToJsonSchema(value);
+      }
+      return {
+        type: 'object',
+        properties: convertedProps,
+        description: prop.description,
+      };
+    }
+    return {
+      type: prop.type as 'string' | 'number' | 'boolean',
+      description: prop.description,
+    };
   };
+
+  const convertedProperties: Record<string, JsonSchema> = {};
+  for (const [key, value] of Object.entries(properties)) {
+    convertedProperties[key] = convertToJsonSchema(value);
+  }
+
+  return createFunctionTool(name, description, createObjectSchema(convertedProperties, {
+    required: options.required,
+    additionalProperties: false,
+  }));
 }

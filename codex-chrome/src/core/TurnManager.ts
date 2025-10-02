@@ -4,7 +4,7 @@
  */
 
 import { Session } from './Session';
-import type { ToolDefinition } from '../models/ModelClient';
+import type { ToolDefinition } from '../tools/BaseTool';
 import { TurnContext } from './TurnContext';
 import { ModelClient } from '../models/ModelClient';
 import type { CompletionRequest, CompletionResponse } from '../models/ModelClient';
