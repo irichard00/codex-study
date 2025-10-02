@@ -1,28 +1,22 @@
 import type { StorageQuota, StorageStats } from '../types/storage';
-import { ConversationStore } from './ConversationStore';
 import { CacheManager } from './CacheManager';
 import { RolloutRecorder } from './rollout';
 
 export class StorageQuotaManager {
-  private conversationStore: ConversationStore | null = null;
   private cacheManager: CacheManager | null = null;
   private quotaCheckInterval: number | null = null;
   private warningThreshold = 80; // Warn at 80% usage
   private criticalThreshold = 95; // Critical at 95% usage
 
   constructor(
-    conversationStore?: ConversationStore,
     cacheManager?: CacheManager
   ) {
-    this.conversationStore = conversationStore || null;
     this.cacheManager = cacheManager || null;
   }
 
   async initialize(
-    conversationStore?: ConversationStore,
     cacheManager?: CacheManager
   ): Promise<void> {
-    if (conversationStore) this.conversationStore = conversationStore;
     if (cacheManager) this.cacheManager = cacheManager;
 
     // Check if persistent storage is available and request if needed
@@ -92,19 +86,17 @@ export class StorageQuotaManager {
       percentageUsed: quota.percentage
     };
 
-    // Get conversation store stats
-    if (this.conversationStore) {
-      try {
-        const convStats = await this.conversationStore.getStatistics();
-        stats.conversations.count = convStats.totalConversations;
-        stats.messages.count = convStats.totalMessages;
+    // Get rollout recorder stats
+    try {
+      const rolloutStats = await RolloutRecorder.getStorageStats();
+      stats.conversations.count = rolloutStats.rolloutCount;
+      stats.messages.count = rolloutStats.itemCount;
 
-        // Estimate sizes (rough approximations)
-        stats.conversations.sizeEstimate = convStats.totalConversations * 2048; // ~2KB per conversation
-        stats.messages.sizeEstimate = convStats.totalMessages * 512; // ~512B per message
-      } catch (error) {
-        console.error('Failed to get conversation stats:', error);
-      }
+      // Estimate sizes from actual byte counts
+      stats.conversations.sizeEstimate = rolloutStats.rolloutBytes;
+      stats.messages.sizeEstimate = rolloutStats.itemBytes;
+    } catch (error) {
+      console.error('Failed to get rollout stats:', error);
     }
 
     // Get cache stats
@@ -163,29 +155,10 @@ export class StorageQuotaManager {
       return results;
     }
 
-    // Step 3: Clear old conversations (older than 30 days, inactive)
-    if (this.conversationStore) {
-      results.conversationsDeleted = await this.conversationStore.cleanup(30);
-    }
-
-    // Check space freed again
-    quotaAfter = await this.getQuota();
-    if (quotaAfter.percentage <= targetPercentage) {
-      results.spaceFreed = quotaBefore.usage - quotaAfter.usage;
-      return results;
-    }
-
-    // Step 4: More aggressive cleanup - clear all cache
+    // Step 3: More aggressive cleanup - clear all cache
     if (this.cacheManager && quotaAfter.percentage > targetPercentage) {
       await this.cacheManager.clear();
       results.cacheEntriesRemoved = -1; // Indicates full clear
-    }
-
-    // Step 5: If still above target, delete older conversations more aggressively
-    if (this.conversationStore && quotaAfter.percentage > targetPercentage) {
-      // Delete conversations older than 7 days
-      const additionalDeleted = await this.conversationStore.cleanup(7);
-      results.conversationsDeleted += additionalDeleted;
     }
 
     quotaAfter = await this.getQuota();
@@ -283,10 +256,17 @@ export class StorageQuotaManager {
       storage: await this.getDetailedStats()
     };
 
-    if (options?.includeConversations && this.conversationStore) {
-      // Export conversations (implementation would depend on ConversationStore methods)
-      const conversations = await this.conversationStore.listConversations();
-      data.conversations = conversations;
+    if (options?.includeConversations) {
+      // Export rollout data (full history would be retrieved from RolloutRecorder)
+      try {
+        const stats = await RolloutRecorder.getStorageStats();
+        data.rollouts = {
+          count: stats.rolloutCount,
+          totalBytes: stats.rolloutBytes + stats.itemBytes
+        };
+      } catch (error) {
+        console.error('Failed to export rollout data:', error);
+      }
     }
 
     if (options?.includeCache && this.cacheManager) {
@@ -319,12 +299,10 @@ export class StorageQuotaManager {
         actions.push('Persistent storage enabled');
       }
 
-      // 3. Compact IndexedDB if possible
-      if (this.conversationStore) {
-        // IndexedDB doesn't have a direct compact method, but we can
-        // trigger cleanup of deleted records by reopening the database
-        // This is handled internally by the browser
-        actions.push('Database optimization requested');
+      // 3. Cleanup expired rollouts
+      const rolloutsDeleted = await RolloutRecorder.cleanupExpired();
+      if (rolloutsDeleted > 0) {
+        actions.push(`Removed ${rolloutsDeleted} expired rollouts`);
       }
 
       // 4. Check and log current usage
@@ -408,7 +386,6 @@ export class StorageQuotaManager {
 
   destroy(): void {
     this.stopQuotaMonitoring();
-    this.conversationStore = null;
     this.cacheManager = null;
   }
 }

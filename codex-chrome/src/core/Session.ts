@@ -9,7 +9,7 @@
 import type { InputItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig, Event, ResponseItem, ConversationHistory } from '../protocol/types';
 import type { EventMsg } from '../protocol/events';
 import type { MessageRecord, ConversationData } from '../types/storage';
-import { ConversationStore } from '../storage/ConversationStore';
+import { RolloutRecorder, type RolloutItem } from '../storage/rollout';
 import { State } from './State';
 import { v4 as uuidv4 } from 'uuid';
 import { TurnContext } from './TurnContext';
@@ -49,7 +49,6 @@ export class Session {
   private currentTurnItems: InputItem[] = [];
   private pendingInput: InputItem[] = []; // Will delegate to ActiveTurn when active
   private eventEmitter: ((event: Event) => Promise<void>) | null = null;
-  private conversationStore: ConversationStore | null = null;
   private conversation: ConversationData | null = null;
   private isPersistent: boolean = true;
 
@@ -91,19 +90,8 @@ export class Session {
       this.services = await createSessionServices({}, false);
     }
 
-    if (!this.isPersistent) return;
-
-    this.conversationStore = new ConversationStore();
-    await this.conversationStore.initialize();
-
-    // Update services with conversation store
-    if (this.services) {
-      this.services.conversationStore = this.conversationStore;
-    }
-
-    // Load or create conversation
-    const conversationId = await this.getOrCreateConversation();
-    this.conversation = await this.conversationStore.getConversation(conversationId);
+    // Persistence is now handled by RolloutRecorder via initializeSession()
+    // No need to initialize ConversationStore
   }
 
   /**
@@ -893,5 +881,108 @@ export class Session {
     // AgentConfig.getConfig() might return synchronously or via property
     // For now, return default until config structure is clarified
     return true;
+  }
+
+  /**
+   * Initialize session with RolloutRecorder (replaces ConversationStore)
+   * T023: Follows codex-rs pattern from research.md
+   */
+  async initializeSession(
+    mode: 'create' | 'resume',
+    conversationId: string,
+    config?: AgentConfig
+  ): Promise<void> {
+    try {
+      if (mode === 'create') {
+        // Create new rollout
+        const rollout = await RolloutRecorder.create(
+          {
+            type: 'create',
+            conversationId,
+            instructions: config?.instructions,
+          },
+          config
+        );
+
+        if (this.services) {
+          this.services.rollout = rollout;
+        }
+      } else {
+        // Resume from existing rollout
+        const rollout = await RolloutRecorder.create(
+          {
+            type: 'resume',
+            conversationId,
+          },
+          config
+        );
+
+        if (this.services) {
+          this.services.rollout = rollout;
+        }
+
+        // Reconstruct history from rollout
+        const items = await rollout.getRolloutHistory();
+        this.reconstructHistoryFromRollout(items);
+      }
+    } catch (e) {
+      console.error('Failed to initialize rollout recorder:', e);
+      // Graceful degradation: set rollout to null, session continues without persistence
+      if (this.services) {
+        this.services.rollout = null;
+      }
+    }
+  }
+
+  /**
+   * Persist rollout items (replaces ConversationStore.addMessage)
+   * T024: Record items to RolloutRecorder
+   */
+  async persistRolloutItems(items: RolloutItem[]): Promise<void> {
+    if (this.services?.rollout) {
+      try {
+        await this.services.rollout.recordItems(items);
+      } catch (e) {
+        console.error('Failed to record rollout items:', e);
+        // Don't throw - persistence failure should not stop execution
+      }
+    }
+  }
+
+  /**
+   * Reconstruct conversation history from rollout items
+   * T025: Used when resuming a session
+   */
+  private reconstructHistoryFromRollout(items: RolloutItem[]): void {
+    for (const item of items) {
+      if (item.type === 'response_item') {
+        // Add response items to conversation history
+        this.state.addResponseItem(item.payload as ResponseItem);
+      } else if (item.type === 'compacted') {
+        // Add compacted summaries to history
+        // Note: Compacted items contain a message field
+        const compacted = item.payload as { message: string };
+        // Add as a system message or summary marker
+        this.state.addResponseItem({
+          type: 'Message',
+          content: `[Summary: ${compacted.message}]`,
+        } as ResponseItem);
+      }
+      // Skip event_msg, session_meta, turn_context (metadata only, not part of conversation history)
+    }
+  }
+
+  /**
+   * Flush rollout recorder before session ends
+   * T025: Graceful shutdown
+   */
+  async shutdown(): Promise<void> {
+    if (this.services?.rollout) {
+      try {
+        await this.services.rollout.flush();
+      } catch (e) {
+        console.error('Failed to flush rollout recorder:', e);
+      }
+    }
   }
 }
