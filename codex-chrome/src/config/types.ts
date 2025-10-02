@@ -14,6 +14,7 @@ export interface IAgentConfig {
   cache: ICacheSettings;
   extension: IExtensionSettings;
   tools?: IToolsConfig;
+  storage?: IStorageConfig;
 }
 
 // Model configuration
@@ -67,6 +68,16 @@ export interface ICacheSettings {
   maxSize?: number;
   compressionEnabled?: boolean;
   persistToStorage?: boolean;
+}
+
+export interface IStorageConfig {
+  /**
+   * Time-to-live for rollouts in days.
+   * - number: Rollouts expire after this many days (e.g., 60)
+   * - 'permanent': Rollouts never expire
+   * - undefined: Use default (60 days)
+   */
+  rolloutTTL?: number | 'permanent';
 }
 
 export interface IExtensionSettings {

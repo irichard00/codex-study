@@ -13,7 +13,13 @@
     "types": ["chrome", "vite/client", "svelte"],
     "sourceMap": true,
     "outDir": "dist",
-    "rootDir": "src"
+    "rootDir": "src",
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["src/*"],
+      "@/storage/rollout": ["src/storage/rollout/index.ts"],
+      "@/storage/rollout/*": ["src/storage/rollout/*"]
+    }
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]

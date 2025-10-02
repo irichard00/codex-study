@@ -1,6 +1,7 @@
 import type { StorageQuota, StorageStats } from '../types/storage';
 import { ConversationStore } from './ConversationStore';
 import { CacheManager } from './CacheManager';
+import { RolloutRecorder } from './rollout';
 
 export class StorageQuotaManager {
   private conversationStore: ConversationStore | null = null;
@@ -119,12 +120,14 @@ export class StorageQuotaManager {
   async cleanup(targetPercentage = 50): Promise<{
     conversationsDeleted: number;
     cacheEntriesRemoved: number;
+    rolloutsDeleted: number;
     spaceFreed: number;
   }> {
     const quotaBefore = await this.getQuota();
     const results = {
       conversationsDeleted: 0,
       cacheEntriesRemoved: 0,
+      rolloutsDeleted: 0,
       spaceFreed: 0
     };
 
@@ -133,44 +136,59 @@ export class StorageQuotaManager {
       return results;
     }
 
-    // Step 1: Clear expired cache entries
+    // Step 1: Clean up expired rollouts first (highest priority)
+    try {
+      results.rolloutsDeleted = await RolloutRecorder.cleanupExpired();
+      console.log(`[StorageQuotaManager] Cleaned up ${results.rolloutsDeleted} expired rollouts`);
+    } catch (error) {
+      console.error('[StorageQuotaManager] Failed to cleanup expired rollouts:', error);
+    }
+
+    // Check if we've freed enough space
+    let quotaAfter = await this.getQuota();
+    if (quotaAfter.percentage <= targetPercentage) {
+      results.spaceFreed = quotaBefore.usage - quotaAfter.usage;
+      return results;
+    }
+
+    // Step 2: Clear expired cache entries
     if (this.cacheManager) {
       results.cacheEntriesRemoved = await this.cacheManager.cleanup();
     }
 
     // Check if we've freed enough space
-    let quotaAfterCache = await this.getQuota();
-    if (quotaAfterCache.percentage <= targetPercentage) {
-      results.spaceFreed = quotaBefore.usage - quotaAfterCache.usage;
+    quotaAfter = await this.getQuota();
+    if (quotaAfter.percentage <= targetPercentage) {
+      results.spaceFreed = quotaBefore.usage - quotaAfter.usage;
       return results;
     }
 
-    // Step 2: Clear old conversations (older than 30 days, inactive)
+    // Step 3: Clear old conversations (older than 30 days, inactive)
     if (this.conversationStore) {
       results.conversationsDeleted = await this.conversationStore.cleanup(30);
     }
 
     // Check space freed again
-    quotaAfterCache = await this.getQuota();
-    if (quotaAfterCache.percentage <= targetPercentage) {
-      results.spaceFreed = quotaBefore.usage - quotaAfterCache.usage;
+    quotaAfter = await this.getQuota();
+    if (quotaAfter.percentage <= targetPercentage) {
+      results.spaceFreed = quotaBefore.usage - quotaAfter.usage;
       return results;
     }
 
-    // Step 3: More aggressive cleanup - clear all cache
-    if (this.cacheManager && quotaAfterCache.percentage > targetPercentage) {
+    // Step 4: More aggressive cleanup - clear all cache
+    if (this.cacheManager && quotaAfter.percentage > targetPercentage) {
       await this.cacheManager.clear();
       results.cacheEntriesRemoved = -1; // Indicates full clear
     }
 
-    // Step 4: If still above target, delete older conversations more aggressively
-    if (this.conversationStore && quotaAfterCache.percentage > targetPercentage) {
+    // Step 5: If still above target, delete older conversations more aggressively
+    if (this.conversationStore && quotaAfter.percentage > targetPercentage) {
       // Delete conversations older than 7 days
       const additionalDeleted = await this.conversationStore.cleanup(7);
       results.conversationsDeleted += additionalDeleted;
     }
 
-    const quotaAfter = await this.getQuota();
+    quotaAfter = await this.getQuota();
     results.spaceFreed = quotaBefore.usage - quotaAfter.usage;
 
     return results;

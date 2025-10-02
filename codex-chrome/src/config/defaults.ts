@@ -2,7 +2,7 @@
  * T037: Default centralized agent configuration values
  */
 
-import type { IAgentConfig, IModelConfig, IUserPreferences, ICacheSettings, IExtensionSettings, IPermissionSettings, IToolsConfig } from './types';
+import type { IAgentConfig, IModelConfig, IUserPreferences, ICacheSettings, IExtensionSettings, IPermissionSettings, IToolsConfig, IStorageConfig } from './types';
 
 export const DEFAULT_MODEL_CONFIG: IModelConfig = {
   selected: 'gpt-5',
@@ -29,6 +29,10 @@ export const DEFAULT_CACHE_SETTINGS: ICacheSettings = {
   maxSize: 5242880, // 5MB
   compressionEnabled: false,
   persistToStorage: false
+};
+
+export const DEFAULT_STORAGE_CONFIG: IStorageConfig = {
+  rolloutTTL: 60 // 60 days default
 };
 
 export const DEFAULT_PERMISSION_SETTINGS: IPermissionSettings = {
@@ -129,7 +133,8 @@ export const DEFAULT_AGENT_CONFIG: IAgentConfig = {
   preferences: DEFAULT_USER_PREFERENCES,
   cache: DEFAULT_CACHE_SETTINGS,
   extension: DEFAULT_EXTENSION_SETTINGS,
-  tools: DEFAULT_TOOLS_CONFIG
+  tools: DEFAULT_TOOLS_CONFIG,
+  storage: DEFAULT_STORAGE_CONFIG
 };
 
 // Storage keys
@@ -209,6 +214,10 @@ export function mergeWithDefaults(partial: Partial<IAgentConfig>): IAgentConfig 
         ...DEFAULT_TOOLS_CONFIG.perToolConfig,
         ...(partial.tools?.perToolConfig || {})
       }
+    },
+    storage: {
+      ...DEFAULT_STORAGE_CONFIG,
+      ...(partial.storage || {})
     }
   };
 }
