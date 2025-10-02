@@ -92,3 +92,62 @@ export interface SessionExport {
     messageCount: number;
   };
 }
+
+/**
+ * Reason for aborting a turn
+ * Maps to protocol TurnAbortReason type
+ */
+export type TurnAbortReason = 'user_interrupt' | 'automatic_abort' | 'error';
+
+/**
+ * Configuration for initializing a new Session
+ * Browser-compatible subset (excludes shell discovery)
+ * Maps to Rust ConfigureSession struct
+ */
+export interface ConfigureSession {
+  /** Conversation ID for this session */
+  conversationId: string;
+
+  /** Initial instructions for the agent */
+  instructions?: string;
+
+  /** Working directory for command execution (browser: simulated) */
+  cwd?: string;
+
+  /** Default model to use */
+  model?: string;
+
+  /** Approval policy for commands */
+  approvalPolicy?: any; // AskForApproval from protocol
+
+  /** Sandbox policy for tool execution */
+  sandboxPolicy?: any; // SandboxPolicy from protocol
+
+  /** Optional reasoning configuration */
+  reasoningEffort?: any; // ReasoningEffortConfig from protocol
+  reasoningSummary?: any; // ReasoningSummaryConfig from protocol
+}
+
+/**
+ * Initial history mode for session creation
+ * Maps to Rust InitialHistory enum
+ */
+export type InitialHistory =
+  | { mode: 'new' }
+  | { mode: 'resumed'; rolloutItems: any[] } // RolloutItem[] from rollout
+  | { mode: 'forked'; rolloutItems: any[]; sourceConversationId: string };
+
+/**
+ * Type guards for InitialHistory modes
+ */
+export function isNewHistory(history: InitialHistory): history is { mode: 'new' } {
+  return history.mode === 'new';
+}
+
+export function isResumedHistory(history: InitialHistory): history is { mode: 'resumed'; rolloutItems: any[] } {
+  return history.mode === 'resumed';
+}
+
+export function isForkedHistory(history: InitialHistory): history is { mode: 'forked'; rolloutItems: any[]; sourceConversationId: string } {
+  return history.mode === 'forked';
+}

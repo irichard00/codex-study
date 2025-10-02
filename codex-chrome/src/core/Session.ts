@@ -6,7 +6,7 @@
  * while maintaining full backward compatibility
  */
 
-import type { InputItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig, Event, ResponseItem, ConversationHistory } from '../protocol/types';
+import type { InputItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig, Event, ResponseItem, ConversationHistory, ReviewDecision } from '../protocol/types';
 import type { EventMsg } from '../protocol/events';
 import type { MessageRecord, ConversationData } from '../types/storage';
 import { RolloutRecorder, type RolloutItem } from '../storage/rollout';
@@ -18,7 +18,8 @@ import type { AgentConfig } from '../config/AgentConfig';
 import { SessionState, type SessionStateExport } from './session/state/SessionState';
 import { type SessionServices, createSessionServices } from './session/state/SessionServices';
 import { ActiveTurn } from './session/state/ActiveTurn';
-import type { TokenUsageInfo } from './session/state/types';
+import { TaskKind } from './session/state/types';
+import type { TokenUsageInfo, RunningTask, RateLimitSnapshot, InitialHistory, TurnAbortReason } from './session/state/types';
 
 /**
  * Execution state of the session
@@ -954,6 +955,641 @@ export class Session {
       } catch (e) {
         console.error('Failed to flush rollout recorder:', e);
       }
+    }
+  }
+
+  // ========================================================================
+  // NEW METHODS: Browser-Compatible Session Methods from codex-rs
+  // ========================================================================
+
+  /**
+   * T010: Generate internal submission ID
+   *
+   * Generates unique internal submission IDs for auto-generated operations
+   * (e.g., auto-compact). Uses simple counter since JavaScript is single-threaded.
+   *
+   * @returns Unique submission ID in format "auto-compact-{id}"
+   */
+  private internalSubIdCounter: number = 0;
+
+  nextInternalSubId(): string {
+    const id = this.internalSubIdCounter++;
+    return `auto-compact-${id}`;
+  }
+
+  /**
+   * T012: Utility getters
+   */
+
+  /**
+   * Check if raw agent reasoning should be shown
+   * @returns Boolean from SessionServices or config
+   */
+  showRawAgentReasoning(): boolean {
+    return this.services?.showRawAgentReasoning ?? false;
+  }
+
+  /**
+   * Get user notifier service
+   * @returns User notifier (can integrate with Chrome notifications or UI)
+   */
+  notifier(): any {
+    return this.services?.notifier ?? null;
+  }
+
+  /**
+   * T013: Enhanced send_event with rollout persistence
+   *
+   * Persists event to rollout and emits via event emitter.
+   * Replaces/enhances existing emitEvent() method.
+   *
+   * @param event Event to send
+   */
+  async sendEvent(event: Event): Promise<void> {
+    // Persist event to rollout as EventMsg
+    if (this.services?.rollout) {
+      const rolloutItems: RolloutItem[] = [{
+        type: 'event_msg',
+        payload: event.msg,
+      }];
+
+      try {
+        await this.services.rollout.recordItems(rolloutItems);
+      } catch (e) {
+        // Graceful degradation - log and continue
+        console.error('Failed to persist event to rollout:', e);
+      }
+    }
+
+    // Emit event via existing event emitter
+    if (this.eventEmitter) {
+      await this.eventEmitter(event);
+    }
+  }
+
+  /**
+   * T014: Notify background event
+   *
+   * Helper to create and send BackgroundEvent.
+   *
+   * @param subId Submission ID
+   * @param message Background event message
+   */
+  async notifyBackgroundEvent(subId: string, message: string): Promise<void> {
+    const event: Event = {
+      id: subId,
+      msg: {
+        type: 'BackgroundEvent',
+        data: {
+          message,
+        },
+      } as EventMsg,
+    };
+    await this.sendEvent(event);
+  }
+
+  /**
+   * T015: Notify stream error
+   *
+   * Helper to create and send StreamErrorEvent.
+   *
+   * @param subId Submission ID
+   * @param message Error message
+   */
+  async notifyStreamError(subId: string, message: string): Promise<void> {
+    const event: Event = {
+      id: subId,
+      msg: {
+        type: 'StreamError',
+        data: {
+          message,
+        },
+      } as EventMsg,
+    };
+    await this.sendEvent(event);
+  }
+
+  /**
+   * T016: Send token count event
+   *
+   * Retrieves token info and rate limits from SessionState and emits TokenCountEvent.
+   *
+   * @param subId Submission ID
+   */
+  async sendTokenCountEvent(subId: string): Promise<void> {
+    // Get token info from SessionState
+    const tokenInfo = undefined; // Would need getTokenInfo method from SessionState
+    const rateLimits = undefined; // Would need getRateLimits method from SessionState
+
+    const event: Event = {
+      id: subId,
+      msg: {
+        type: 'TokenCount',
+        data: {
+          info: tokenInfo,
+          rate_limits: rateLimits,
+        },
+      } as EventMsg,
+    };
+    await this.sendEvent(event);
+  }
+
+  /**
+   * T018: Notify approval
+   *
+   * Resolves a pending approval request with the user's decision.
+   * Locates the pending approval in ActiveTurn, removes it, and calls the resolver.
+   *
+   * @param executionId Unique identifier for the approval request
+   * @param decision User's review decision (approve/reject/request_change)
+   */
+  notifyApproval(executionId: string, decision: ReviewDecision): void {
+    if (!this.activeTurn) {
+      console.warn(`No active turn to notify approval for executionId: ${executionId}`);
+      return;
+    }
+
+    const resolver = this.activeTurn.removePendingApproval(executionId);
+    if (resolver) {
+      resolver(decision);
+    } else {
+      console.warn(`No pending approval found for executionId: ${executionId}`);
+    }
+  }
+
+  // ========================================================================
+  // Task Lifecycle Management
+  // ========================================================================
+
+  /**
+   * T020: Register new active task
+   *
+   * Creates ActiveTurn if needed and registers a running task.
+   * This is called when a new task is spawned.
+   *
+   * @param subId Submission ID for the task
+   * @param task RunningTask information
+   * @private
+   */
+  private registerNewActiveTask(subId: string, task: RunningTask): void {
+    if (!this.activeTurn) {
+      this.activeTurn = new ActiveTurn();
+    }
+    this.activeTurn.addTask(subId, task);
+  }
+
+  /**
+   * T021: Take all running tasks
+   *
+   * Extracts all running tasks from ActiveTurn, drains pending approvals/input,
+   * and clears the ActiveTurn.
+   *
+   * @returns Map of all running tasks (submission ID -> RunningTask)
+   * @private
+   */
+  private takeAllRunningTasks(): Map<string, RunningTask> {
+    if (!this.activeTurn) {
+      return new Map();
+    }
+
+    // Drain all tasks from the turn
+    const tasks = this.activeTurn.drain();
+
+    // Clear the active turn since all tasks are removed
+    this.activeTurn = null;
+
+    return tasks;
+  }
+
+  /**
+   * T022: Handle task abort
+   *
+   * Aborts an individual task with the specified reason, triggers AbortController,
+   * and emits TurnAbortedEvent.
+   *
+   * @param subId Submission ID of the task to abort
+   * @param task RunningTask to abort
+   * @param reason Reason for aborting the task
+   * @private
+   */
+  private async handleTaskAbort(
+    subId: string,
+    task: RunningTask,
+    reason: TurnAbortReason
+  ): Promise<void> {
+    // Abort the task via AbortController
+    task.handle.abort();
+
+    // Emit TurnAbortedEvent
+    const event: Event = {
+      id: subId,
+      msg: {
+        type: 'TurnAborted',
+        data: {
+          reason,
+          submission_id: subId,
+          turn_count: undefined, // Could track turn count if needed
+        },
+      } as EventMsg,
+    };
+    await this.sendEvent(event);
+  }
+
+  /**
+   * T023: Abort all tasks
+   *
+   * Aborts all running tasks with the specified reason.
+   * Extracts all tasks, aborts each one, and clears ActiveTurn.
+   *
+   * @param reason Reason for aborting all tasks
+   */
+  async abortAllTasks(reason: TurnAbortReason): Promise<void> {
+    const tasks = this.takeAllRunningTasks();
+
+    // Abort each task
+    const abortPromises: Promise<void>[] = [];
+    for (const [subId, task] of tasks) {
+      abortPromises.push(this.handleTaskAbort(subId, task, reason));
+    }
+
+    // Wait for all aborts to complete
+    await Promise.all(abortPromises);
+  }
+
+  /**
+   * T024: On task finished
+   *
+   * Called when a task completes successfully.
+   * Removes the task from ActiveTurn, clears ActiveTurn if empty,
+   * and emits TaskCompleteEvent.
+   *
+   * @param subId Submission ID of the completed task
+   */
+  async onTaskFinished(subId: string): Promise<void> {
+    if (!this.activeTurn) {
+      return;
+    }
+
+    // Remove task from ActiveTurn
+    const isEmpty = this.activeTurn.removeTask(subId);
+
+    // Clear ActiveTurn if no more tasks
+    if (isEmpty) {
+      this.activeTurn = null;
+    }
+
+    // Emit TaskCompleteEvent
+    const event: Event = {
+      id: subId,
+      msg: {
+        type: 'TaskComplete',
+        data: {
+          submission_id: subId,
+          last_agent_message: undefined,
+          turn_count: undefined,
+        },
+      } as EventMsg,
+    };
+    await this.sendEvent(event);
+  }
+
+  /**
+   * T025: Spawn task
+   *
+   * Aborts any existing tasks, creates a new task with AbortController,
+   * registers it in ActiveTurn, and executes the task function.
+   *
+   * @param subId Submission ID for this task
+   * @param taskFn Task function to execute (receives AbortSignal)
+   */
+  async spawnTask<T>(
+    subId: string,
+    taskFn: (signal: AbortSignal) => Promise<T>
+  ): Promise<void> {
+    // Abort all existing tasks (new task replaces them)
+    await this.abortAllTasks('automatic_abort');
+
+    // Create AbortController for this task
+    const abortController = new AbortController();
+
+    // Create RunningTask entry
+    const runningTask: RunningTask = {
+      handle: abortController,
+      kind: TaskKind.Regular,
+      startTime: Date.now(),
+      subId: subId,
+    };
+
+    // Register in ActiveTurn
+    this.registerNewActiveTask(subId, runningTask);
+
+    // Execute task asynchronously (don't await here - let it run in background)
+    taskFn(abortController.signal)
+      .then(() => {
+        // Task completed successfully
+        this.onTaskFinished(subId);
+      })
+      .catch((error) => {
+        // Task failed or was aborted
+        if (abortController.signal.aborted) {
+          // Already aborted, no need to emit error
+          console.debug(`Task ${subId} was aborted`);
+        } else {
+          // Task failed with error
+          console.error(`Task ${subId} failed:`, error);
+          this.notifyStreamError(subId, error.message || 'Unknown error');
+        }
+      });
+  }
+
+  /**
+   * T026: Interrupt task
+   *
+   * Wrapper around abortAllTasks with Interrupted reason.
+   * Used when user explicitly interrupts execution.
+   */
+  async interruptTask(): Promise<void> {
+    await this.abortAllTasks('user_interrupt');
+  }
+
+  // ========================================================================
+  // Rollout Recording & History Management
+  // ========================================================================
+
+  /**
+   * T027: Persist rollout response items
+   *
+   * Converts ResponseItems to RolloutItems and persists them via RolloutRecorder.
+   * This is used to save conversation history to persistent storage.
+   *
+   * @param items Response items to persist
+   * @private
+   */
+  private async persistRolloutResponseItems(items: ResponseItem[]): Promise<void> {
+    if (!this.services?.rollout) {
+      return;
+    }
+
+    // Convert ResponseItems to RolloutItems
+    const rolloutItems: RolloutItem[] = items.map((item) => ({
+      type: 'response_item',
+      payload: item,
+    }));
+
+    try {
+      await this.services.rollout.recordItems(rolloutItems);
+    } catch (error) {
+      console.error('Failed to persist response items to rollout:', error);
+      // Non-fatal: rollout persistence failures should not break session
+    }
+  }
+
+  /**
+   * T028: Record conversation items with dual persistence
+   *
+   * Records ResponseItems to both SessionState (in-memory history) and
+   * RolloutRecorder (persistent storage).
+   *
+   * @param items Response items to record
+   */
+  async recordConversationItemsDual(items: ResponseItem[]): Promise<void> {
+    // Record to SessionState (in-memory history)
+    this.sessionState.recordItems(items);
+
+    // Persist to rollout storage
+    await this.persistRolloutResponseItems(items);
+  }
+
+  /**
+   * T029: Record input and rollout user message
+   *
+   * Converts InputItems to ResponseItem, records to history, derives UserMessage event,
+   * and persists only the UserMessage to rollout (not the full ResponseItem).
+   *
+   * This is used when recording user input to the conversation.
+   *
+   * @param subId Submission ID
+   * @param input Input items from user
+   * @private
+   */
+  private async recordInputAndRolloutUsermsg(
+    subId: string,
+    input: InputItem[]
+  ): Promise<void> {
+    // Convert input to ResponseItem (simplified - would need full protocol mapping)
+    const responseItems: ResponseItem[] = input.map((item) => ({
+      role: 'user',
+      content: item,
+    })) as ResponseItem[];
+
+    // Record to SessionState history
+    this.sessionState.recordItems(responseItems);
+
+    // Derive UserMessage text from input
+    const messageText = input
+      .map((item) => {
+        if (typeof item === 'string') {
+          return item;
+        } else if (typeof item === 'object' && 'text' in item) {
+          return (item as any).text;
+        }
+        return '';
+      })
+      .join(' ');
+
+    // Create and persist UserMessage event to rollout (NOT full ResponseItem)
+    if (this.services?.rollout && messageText) {
+      const userMsgEvent: EventMsg = {
+        type: 'UserMessage',
+        data: {
+          message: messageText,
+        },
+      };
+
+      const rolloutItems: RolloutItem[] = [{
+        type: 'event_msg',
+        payload: userMsgEvent,
+      }];
+
+      try {
+        await this.services.rollout.recordItems(rolloutItems);
+      } catch (error) {
+        console.error('Failed to persist user message to rollout:', error);
+      }
+    }
+  }
+
+  /**
+   * T030: Enhance reconstruct history from rollout
+   *
+   * Reconstructs conversation history from rollout storage, handling both
+   * regular ResponseItems and compacted history with summaries.
+   *
+   * This is called when resuming a session from persistent storage.
+   *
+   * @param rolloutItems Items from rollout storage
+   * @private
+   */
+  private reconstructHistoryFromRollout(rolloutItems: RolloutItem[]): void {
+    const responseItems: ResponseItem[] = [];
+
+    for (const rolloutItem of rolloutItems) {
+      if (rolloutItem.type === 'response_item') {
+        // Regular response item
+        responseItems.push(rolloutItem.payload as ResponseItem);
+      } else if (rolloutItem.type === 'compacted') {
+        // Compacted history with summary
+        // The compacted item should contain a summary that replaces multiple items
+        const compactedData = rolloutItem.payload as any;
+        if (compactedData.summary) {
+          // Add summary as a system message
+          responseItems.push({
+            role: 'system',
+            content: compactedData.summary,
+          } as ResponseItem);
+        }
+      }
+      // Other rollout item types (event_msg, etc.) are not added to history
+    }
+
+    // Replace entire history with reconstructed items
+    this.sessionState.replaceHistory(responseItems);
+  }
+
+  // ========================================================================
+  // Token & Rate Limit Tracking
+  // ========================================================================
+
+  /**
+   * T031: Update token usage info
+   *
+   * Updates SessionState with token usage information and sends token count event.
+   *
+   * @param subId Submission ID
+   * @param tokenUsage Token usage data (or null if not available)
+   * @private
+   */
+  private async updateTokenUsageInfo(
+    subId: string,
+    tokenUsage: any | null
+  ): Promise<void> {
+    if (!tokenUsage) {
+      return;
+    }
+
+    // Convert TokenUsage to TokenUsageInfo for SessionState
+    const tokenInfo: TokenUsageInfo = {
+      input_tokens: tokenUsage.input_tokens,
+      output_tokens: tokenUsage.output_tokens,
+      total_tokens: tokenUsage.total_tokens,
+      cache_creation_input_tokens: tokenUsage.cached_input_tokens,
+      cache_read_input_tokens: 0, // Not provided in TokenUsage
+    };
+
+    // Update SessionState
+    this.sessionState.updateTokenInfo(tokenInfo);
+
+    // Send token count event
+    await this.sendTokenCountEvent(subId);
+  }
+
+  /**
+   * T032: Update rate limits
+   *
+   * Updates SessionState with rate limit information and sends token count event.
+   *
+   * @param subId Submission ID
+   * @param rateLimits Rate limit snapshot
+   * @private
+   */
+  private async updateRateLimits(
+    subId: string,
+    rateLimits: RateLimitSnapshot
+  ): Promise<void> {
+    // Update SessionState
+    this.sessionState.updateRateLimits(rateLimits);
+
+    // Send token count event
+    await this.sendTokenCountEvent(subId);
+  }
+
+  // ========================================================================
+  // Initialization & Utilities
+  // ========================================================================
+
+  /**
+   * T033: Inject input
+   *
+   * Attempts to inject input into the active turn. If there's an active turn,
+   * the input is queued for processing. If there's no active turn, the input
+   * is returned back to the caller.
+   *
+   * @param input Input items to inject
+   * @returns Result object with success status and optionally returned input
+   */
+  async injectInput(input: InputItem[]): Promise<{ success: boolean; returned?: InputItem[] }> {
+    if (!this.activeTurn) {
+      // No active turn - return input back to caller
+      return {
+        success: false,
+        returned: input,
+      };
+    }
+
+    // Inject input into active turn
+    for (const item of input) {
+      this.activeTurn.pushPendingInput(item);
+    }
+
+    return {
+      success: true,
+    };
+  }
+
+  /**
+   * T034: Turn input with history
+   *
+   * Combines session history with extra turn items to create full turn input.
+   * This is used when preparing input for a new turn.
+   *
+   * @param extra Additional response items for this turn
+   * @returns Combined array of history + extra items
+   */
+  async turnInputWithHistory(extra: ResponseItem[]): Promise<ResponseItem[]> {
+    // Get history snapshot from SessionState
+    const history = this.sessionState.historySnapshot();
+
+    // Combine history with extra items
+    return [...history, ...extra];
+  }
+
+  /**
+   * T036: Record initial history
+   *
+   * Records initial conversation history based on session mode.
+   * - New sessions: Records initial context
+   * - Resumed sessions: Reconstructs history from rollout
+   * - Forked sessions: Reconstructs and persists history
+   *
+   * @param initialHistory Initial history configuration
+   * @private
+   */
+  private async recordInitialHistory(
+    initialHistory: InitialHistory
+  ): Promise<void> {
+    if (initialHistory.mode === 'new') {
+      // New session - no history to record yet
+      return;
+    } else if (initialHistory.mode === 'resumed') {
+      // Resumed session - reconstruct from rollout
+      this.reconstructHistoryFromRollout(initialHistory.rolloutItems);
+    } else if (initialHistory.mode === 'forked') {
+      // Forked session - reconstruct and persist
+      this.reconstructHistoryFromRollout(initialHistory.rolloutItems);
+
+      // Persist forked history to new rollout
+      const history = this.sessionState.historySnapshot();
+      await this.persistRolloutResponseItems(history);
     }
   }
 }
