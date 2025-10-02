@@ -329,10 +329,7 @@ export class CodexAgent {
       }));
 
       if (currentTask) {
-        // Inject into existing task
-        if (currentTask) {
-          await currentTask.injectUserInput(responseItems);
-        }
+        await currentTask.injectUserInput(responseItems);
       } else {
         // No running task, spawn a new one
         let taskContext: TurnContext;
@@ -351,12 +348,9 @@ export class CodexAgent {
         }
 
         // Create TurnManager for this task
-        const modelToUse = contextOverrides?.model || taskContext.getModel();
-        const modelClient = await this.modelClientFactory.createClientForModel(modelToUse);
         const turnManager = new TurnManager(
           this.session,
           taskContext,
-          modelClient,
           this.toolRegistry
         );
 

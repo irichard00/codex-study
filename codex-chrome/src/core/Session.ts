@@ -34,7 +34,6 @@ export type ExecutionState =
 
 /**
  * Session class managing conversation state
- * REFACTORED: Now internally uses SessionState for pure data management
  */
 export class Session {
   readonly conversationId: string;
@@ -45,7 +44,6 @@ export class Session {
   private turnContext: TurnContext;
   private messageCount: number = 0;
   private currentTurnItems: InputItem[] = [];
-  private pendingInput: InputItem[] = []; // Will delegate to ActiveTurn when active
   private eventEmitter: ((event: Event) => Promise<void>) | null = null;
   private isPersistent: boolean = true;
 
@@ -417,7 +415,7 @@ export class Session {
 
   /**
    * Get pending user input during turn execution
-   * NEW: Delegates to ActiveTurn if turn is active
+   * Delegates to ActiveTurn if turn is active, otherwise returns empty array
    */
   async getPendingInput(): Promise<any[]> {
     if (this.activeTurn) {
@@ -425,25 +423,21 @@ export class Session {
       const pending = this.activeTurn.takePendingInput();
       return pending.map(item => this.convertInputToResponse(item));
     } else {
-      // Fall back to legacy behavior
-      const pending = [...this.pendingInput];
-      this.pendingInput = []; // Clear pending input
-      return pending.map(item => this.convertInputToResponse(item));
+      // No active turn, return empty array
+      return [];
     }
   }
 
   /**
    * Add pending input (for interrupting turns)
-   * NEW: Delegates to ActiveTurn if turn is active
+   * Delegates to ActiveTurn if turn is active, otherwise ignores input
    */
   addPendingInput(items: InputItem[]): void {
     if (this.activeTurn) {
       // Delegate to ActiveTurn
       items.forEach(item => this.activeTurn!.pushPendingInput(item));
-    } else {
-      // Fall back to legacy behavior
-      this.pendingInput.push(...items);
     }
+    // If no active turn, input is ignored (no legacy storage)
   }
 
   /**
@@ -581,9 +575,8 @@ export class Session {
     // Clear conversation history
     this.clearHistory();
 
-    // Clear current turn items and pending input
+    // Clear current turn items
     this.currentTurnItems = [];
-    this.pendingInput = [];
 
     // Create new conversation ID
     Object.assign(this, { conversationId: `conv_${uuidv4()}` });
