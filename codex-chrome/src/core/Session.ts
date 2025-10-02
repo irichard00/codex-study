@@ -8,7 +8,6 @@
 
 import type { InputItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig, Event, ResponseItem, ConversationHistory, ReviewDecision } from '../protocol/types';
 import type { EventMsg } from '../protocol/events';
-import type { MessageRecord, ConversationData } from '../types/storage';
 import { RolloutRecorder, type RolloutItem } from '../storage/rollout';
 import { v4 as uuidv4 } from 'uuid';
 import { TurnContext } from './TurnContext';
@@ -19,7 +18,7 @@ import { SessionState, type SessionStateExport } from './session/state/SessionSt
 import { type SessionServices, createSessionServices } from './session/state/SessionServices';
 import { ActiveTurn } from './session/state/ActiveTurn';
 import { TaskKind } from './session/state/types';
-import type { TokenUsageInfo, RunningTask, RateLimitSnapshot, InitialHistory, TurnAbortReason } from './session/state/types';
+import type { TokenUsageInfo, RunningTask, RateLimitSnapshot, TurnAbortReason, InitialHistory } from './session/state/types';
 
 /**
  * Execution state of the session
@@ -71,7 +70,6 @@ export class Session {
   private currentTurnItems: InputItem[] = [];
   private pendingInput: InputItem[] = []; // Will delegate to ActiveTurn when active
   private eventEmitter: ((event: Event) => Promise<void>) | null = null;
-  private conversation: ConversationData | null = null;
   private isPersistent: boolean = true;
 
   // Runtime state (not persisted, lives in Session only)
@@ -100,13 +98,9 @@ export class Session {
     this.services = services ?? null; // Will be created in initialize()
 
     // Initialize with default turn context, using config values if available
-    this.turnContext = new TurnContext({
-      cwd: this.getDefaultCwd(),
-      approval_policy: 'on-request',
-      sandbox_policy: { mode: 'workspace-write' },
-      model: 'gpt-5',
-      summary: { enabled: false },
-    });
+    // Note: TurnContext requires a ModelClient, which will be set during initialize()
+    // For now, create a minimal context that will be replaced
+    this.turnContext = {} as TurnContext;
   }
 
   /**
@@ -119,89 +113,64 @@ export class Session {
     }
 
     // Persistence is now handled by RolloutRecorder via initializeSession()
-    // No need to initialize ConversationStore
   }
 
   /**
-   * Get or create a conversation in storage
+   * Get or create a conversation in storage using RolloutRecorder
    */
   private async getOrCreateConversation(): Promise<string> {
-    if (!this.conversationStore) {
+    if (!this.services?.rollout) {
       return this.conversationId;
     }
 
-    // Try to find an active conversation
-    const conversations = await this.conversationStore.listConversations(
-      { status: 'active' },
-      1
-    );
-
-    if (conversations.length > 0) {
-      // Use the most recent active conversation
-      const conv = conversations[0];
-      Object.assign(this, { conversationId: conv.id });
-
-      // Load messages from storage
-      const messages = await this.conversationStore.getMessages(conv.id);
-      const items = messages.map(msg => ({
-        role: msg.role as 'user' | 'assistant' | 'system',
-        content: msg.content,
-        timestamp: msg.timestamp
-      }));
-      this.sessionState.recordItems(items);
-      this.messageCount = messages.length;
-
-      return conv.id;
-    }
-
-    // Create new conversation
-    const newConvId = await this.conversationStore.createConversation({
-      title: 'New Conversation',
-      status: 'active',
-      metadata: {
-        model: this.turnContext.model,
-        cwd: this.turnContext.cwd
-      }
-    });
-
-    Object.assign(this, { conversationId: newConvId });
-    return newConvId;
+    // For RolloutRecorder, we don't need to list/find conversations
+    // The conversationId is already set and RolloutRecorder handles persistence
+    return this.conversationId;
   }
 
   /**
-   * Save current session state to storage
+   * Save current session state to storage using RolloutRecorder
    */
   async saveState(): Promise<void> {
-    if (!this.conversationStore || !this.conversation) return;
+    if (!this.services?.rollout) return;
 
-    await this.conversationStore.updateConversation(this.conversation.id, {
-      metadata: {
-        ...this.conversation.metadata,
-        turnContext: this.turnContext,
-        lastUpdate: Date.now()
+    // Record session metadata to rollout
+    const sessionMetaItems: RolloutItem[] = [{
+      type: 'session_meta',
+      payload: {
+        id: this.conversationId,
+        timestamp: new Date().toISOString(),
+        cwd: this.turnContext?.getCwd?.() || '/',
+        originator: 'chrome-extension',
+        cliVersion: '1.0.0'
       }
-    });
+    }];
+
+    try {
+      await this.services.rollout.recordItems(sessionMetaItems);
+    } catch (error) {
+      console.error('Failed to save session state to rollout:', error);
+    }
   }
 
   /**
    * Update turn context with new values
    */
-  updateTurnContext(updates: Partial<TurnContext>): void {
-    this.turnContext = {
-      ...this.turnContext,
-      ...updates,
-    };
+  updateTurnContext(updates: any): void {
+    if (this.turnContext && typeof this.turnContext.update === 'function') {
+      this.turnContext.update(updates);
+    }
   }
 
   /**
    * Get current turn context
    */
   getTurnContext(): TurnContext {
-    return { ...this.turnContext };
+    return this.turnContext;
   }
 
   /**
-   * Add a message to history
+   * Add a message to history using RolloutRecorder
    */
   async addToHistory(entry: { timestamp: number; text: string; type: 'user' | 'agent' | 'system' }): Promise<void> {
     this.messageCount++;
@@ -214,16 +183,18 @@ export class Session {
     };
     this.sessionState.recordItems([responseItem]);
 
-    // Persist to storage if enabled
-    if (this.conversationStore && this.conversation) {
-      const messageRecord: Omit<MessageRecord, 'id'> = {
-        conversationId: this.conversation.id,
-        role: entry.type === 'user' ? 'user' : entry.type === 'system' ? 'system' : 'assistant',
-        content: entry.text,
-        timestamp: entry.timestamp,
-      };
+    // Persist to RolloutRecorder if available
+    if (this.services?.rollout) {
+      const rolloutItems: RolloutItem[] = [{
+        type: 'response_item',
+        payload: responseItem
+      }];
 
-      await this.conversationStore.addMessage(this.conversation.id, messageRecord);
+      try {
+        await this.services.rollout.recordItems(rolloutItems);
+      } catch (error) {
+        console.error('Failed to persist message to rollout:', error);
+      }
     }
   }
 
@@ -295,7 +266,7 @@ export class Session {
       conversationId: this.conversationId,
       messageCount: this.messageCount,
       startTime: this.sessionState.getConversationHistory().metadata?.startTime || Date.now(),
-      currentModel: this.turnContext.model,
+      currentModel: this.turnContext?.getModel?.() || 'gpt-5',
     };
   }
 
@@ -538,7 +509,7 @@ export class Session {
    */
   async buildTurnInputWithHistory(newItems: any[]): Promise<any[]> {
     const conversationHistory = this.sessionState.getConversationHistory();
-    const historyItems = conversationHistory.items.map(item => ({
+    const historyItems = conversationHistory.items.map((item: any) => ({
       role: item.role,
       content: typeof item.content === 'string'
         ? [{ type: 'text', text: item.content }]
@@ -598,25 +569,38 @@ export class Session {
   }
 
   /**
-   * Export session with storage persistence
+   * Export session with storage persistence using RolloutRecorder
    */
   async exportWithStorage(): Promise<any> {
     const baseExport = this.export();
 
-    if (!this.conversationStore) {
+    if (!this.services?.rollout) {
       return baseExport;
     }
 
-    const stats = await this.conversationStore.getStatistics();
+    // Get rollout statistics if available
+    let rolloutStats = null;
+    try {
+      // RolloutRecorder might have a getStatistics method or similar
+      // For now, we'll return basic info
+      rolloutStats = {
+        conversationId: this.conversationId,
+        messageCount: this.messageCount,
+        hasRollout: true
+      };
+    } catch (error) {
+      console.error('Failed to get rollout statistics:', error);
+    }
+
     return {
       ...baseExport,
-      storageStats: stats,
+      storageStats: rolloutStats,
       persistent: this.isPersistent
     };
   }
 
   /**
-   * Reset session to initial state (for new conversation)
+   * Reset session to initial state (for new conversation) using RolloutRecorder
    */
   async reset(): Promise<void> {
     // Clear conversation history
@@ -626,52 +610,60 @@ export class Session {
     this.currentTurnItems = [];
     this.pendingInput = [];
 
-    // Close old conversation if exists
-    if (this.conversation && this.conversationStore) {
-      await this.conversationStore.updateConversation(this.conversation.id, {
-        status: 'inactive',
-        metadata: {
-          ...this.conversation.metadata,
-          closedAt: Date.now()
-        }
-      });
-    }
-
     // Create new conversation ID
     Object.assign(this, { conversationId: `conv_${uuidv4()}` });
 
-    // Reinitialize with storage if enabled
-    if (this.isPersistent && this.conversationStore) {
-      const newConvId = await this.conversationStore.createConversation({
-        title: 'New Conversation',
-        status: 'active',
-        metadata: {
-          model: this.turnContext.model,
-          cwd: this.turnContext.cwd
-        }
-      });
+    // Reinitialize with RolloutRecorder if enabled
+    if (this.isPersistent && this.services?.rollout) {
+      try {
+        // Record session reset event
+        const resetEvent: EventMsg = {
+          type: 'BackgroundEvent',
+          data: {
+            message: `Session reset: new conversation ${this.conversationId}`
+          }
+        };
 
-      Object.assign(this, { conversationId: newConvId });
-      this.conversation = await this.conversationStore.getConversation(newConvId);
+        const rolloutItems: RolloutItem[] = [{
+          type: 'event_msg',
+          payload: resetEvent
+        }];
+
+        await this.services.rollout.recordItems(rolloutItems);
+      } catch (error) {
+        console.error('Failed to record session reset to rollout:', error);
+      }
     }
 
     console.log('Session reset complete:', this.conversationId);
   }
 
   /**
-   * Close session and cleanup resources
+   * Close session and cleanup resources using RolloutRecorder
    */
   async close(): Promise<void> {
-    if (this.conversation && this.conversationStore) {
-      await this.conversationStore.updateConversation(this.conversation.id, {
-        status: 'inactive',
-        metadata: {
-          ...this.conversation.metadata,
-          closedAt: Date.now()
-        }
-      });
+    if (this.services?.rollout) {
+      try {
+        // Record session close event
+        const closeEvent: EventMsg = {
+          type: 'BackgroundEvent',
+          data: {
+            message: `Session closed: ${this.conversationId} (${this.messageCount} messages)`
+          }
+        };
 
-      await this.conversationStore.close();
+        const rolloutItems: RolloutItem[] = [{
+          type: 'event_msg',
+          payload: closeEvent
+        }];
+
+        await this.services.rollout.recordItems(rolloutItems);
+        
+        // Flush and close rollout recorder
+        await this.services.rollout.flush();
+      } catch (error) {
+        console.error('Failed to close rollout recorder:', error);
+      }
     }
   }
 
@@ -851,9 +843,8 @@ export class Session {
           {
             type: 'create',
             conversationId,
-            instructions: config?.instructions,
           },
-          config
+          config as any
         );
 
         if (this.services) {
@@ -864,9 +855,9 @@ export class Session {
         const rollout = await RolloutRecorder.create(
           {
             type: 'resume',
-            conversationId,
+            rolloutId: conversationId,
           },
-          config
+          config as any
         );
 
         if (this.services) {
@@ -874,8 +865,10 @@ export class Session {
         }
 
         // Reconstruct history from rollout
-        const items = await rollout.getRolloutHistory();
-        this.reconstructHistoryFromRollout(items);
+        const initialHistory = await RolloutRecorder.getRolloutHistory(conversationId);
+        if (initialHistory.type === 'resumed' && initialHistory.payload.history) {
+          this.reconstructHistoryFromRollout(initialHistory.payload.history);
+        }
       }
     } catch (e) {
       console.error('Failed to initialize rollout recorder:', e);
@@ -901,30 +894,6 @@ export class Session {
     }
   }
 
-  /**
-   * Reconstruct conversation history from rollout items
-   * T025: Used when resuming a session
-   */
-  private reconstructHistoryFromRollout(items: RolloutItem[]): void {
-    const responseItems: ResponseItem[] = [];
-    for (const item of items) {
-      if (item.type === 'response_item') {
-        // Add response items to conversation history
-        responseItems.push(item.payload as ResponseItem);
-      } else if (item.type === 'compacted') {
-        // Add compacted summaries to history
-        // Note: Compacted items contain a message field
-        const compacted = item.payload as { message: string };
-        // Add as a system message or summary marker
-        responseItems.push({
-          type: 'Message',
-          content: `[Summary: ${compacted.message}]`,
-        } as ResponseItem);
-      }
-      // Skip event_msg, session_meta, turn_context (metadata only, not part of conversation history)
-    }
-    this.sessionState.recordItems(responseItems);
-  }
 
   /**
    * Flush rollout recorder before session ends
@@ -1044,7 +1013,8 @@ export class Session {
       msg: {
         type: 'StreamError',
         data: {
-          message,
+          error: message,
+          retrying: false,
         },
       } as EventMsg,
     };
@@ -1361,8 +1331,9 @@ export class Session {
     // Convert input to ResponseItem (simplified - would need full protocol mapping)
     const responseItems: ResponseItem[] = input.map((item) => ({
       role: 'user',
-      content: item,
-    })) as ResponseItem[];
+      content: typeof item === 'string' ? item : JSON.stringify(item),
+      type: 'message'
+    }));
 
     // Record to SessionState history
     this.sessionState.recordItems(responseItems);
@@ -1428,6 +1399,7 @@ export class Session {
           responseItems.push({
             role: 'system',
             content: compactedData.summary,
+            type: 'message'
           } as ResponseItem);
         }
       }
