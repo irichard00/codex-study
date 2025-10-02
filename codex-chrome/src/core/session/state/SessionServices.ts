@@ -5,7 +5,7 @@
  * Note: No MCP support in browser-based agent
  */
 
-import { ConversationStore } from '../../../storage/ConversationStore';
+import type { RolloutRecorder as StorageRolloutRecorder } from '../../../storage/rollout';
 
 /**
  * User notification service interface
@@ -18,9 +18,9 @@ export interface UserNotifier {
 }
 
 /**
- * Rollout feature recorder interface
+ * Feature flag recorder interface (renamed to avoid conflict with storage RolloutRecorder)
  */
-export interface RolloutRecorder {
+export interface FeatureFlagRecorder {
   record(feature: string, enabled: boolean): void;
   isEnabled(feature: string): boolean;
 }
@@ -52,14 +52,14 @@ export interface TabManager {
  * Browser-focused (no MCP, no file system, no shell)
  */
 export interface SessionServices {
-  /** Optional conversation storage */
-  conversationStore?: ConversationStore;
+  /** Rollout storage for conversation history */
+  rollout: StorageRolloutRecorder | null;
 
   /** Required user notification service */
   notifier: UserNotifier;
 
-  /** Optional rollout feature recorder */
-  rolloutRecorder?: RolloutRecorder;
+  /** Optional feature flag recorder */
+  featureFlagRecorder?: FeatureFlagRecorder;
 
   /** Optional DOM manipulation service */
   domService?: DOMService;
@@ -94,9 +94,9 @@ class ConsoleNotifier implements UserNotifier {
 }
 
 /**
- * Default in-memory rollout recorder for testing
+ * Default in-memory feature flag recorder for testing
  */
-class InMemoryRolloutRecorder implements RolloutRecorder {
+class InMemoryFeatureFlagRecorder implements FeatureFlagRecorder {
   private features: Map<string, boolean> = new Map();
 
   record(feature: string, enabled: boolean): void {
@@ -122,20 +122,13 @@ export async function createSessionServices(
   // Create default notifier if not provided
   const notifier = config.notifier ?? new ConsoleNotifier();
 
-  // Create conversation store if needed and not in test mode
-  let conversationStore = config.conversationStore;
-  if (!conversationStore && !isTest) {
-    conversationStore = new ConversationStore();
-    await conversationStore.initialize();
-  }
-
-  // Create default rollout recorder if not provided
-  const rolloutRecorder = config.rolloutRecorder ?? (isTest ? new InMemoryRolloutRecorder() : undefined);
+  // Create default feature flag recorder if not provided
+  const featureFlagRecorder = config.featureFlagRecorder ?? (isTest ? new InMemoryFeatureFlagRecorder() : undefined);
 
   return {
-    conversationStore,
+    rollout: config.rollout ?? null, // RolloutRecorder will be initialized by Session
     notifier,
-    rolloutRecorder,
+    featureFlagRecorder,
     domService: config.domService,
     tabManager: config.tabManager,
     showRawAgentReasoning: config.showRawAgentReasoning ?? false,

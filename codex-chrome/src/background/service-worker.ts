@@ -8,16 +8,15 @@ import { MessageRouter, MessageType } from '../core/MessageRouter';
 import type { Submission, Event } from '../protocol/types';
 import { validateSubmission } from '../protocol/schemas';
 import { ModelClientFactory } from '../models/ModelClientFactory';
-import { ConversationStore } from '../storage/ConversationStore';
 import { CacheManager } from '../storage/CacheManager';
 import { StorageQuotaManager } from '../storage/StorageQuotaManager';
+import { RolloutRecorder } from '../storage/rollout';
 import { registerTools } from '../tools';
 import { AgentConfig } from '../config/AgentConfig';
 
 // Global instances
 let agent: CodexAgent | null = null;
 let router: MessageRouter | null = null;
-let conversationStore: ConversationStore | null = null;
 let cacheManager: CacheManager | null = null;
 let storageQuotaManager: StorageQuotaManager | null = null;
 let agentConfig: AgentConfig | null = null;
@@ -478,10 +477,6 @@ async function initializeBrowserTools(): Promise<void> {
 async function initializeStorage(): Promise<void> {
   console.log('Initializing storage layer...');
 
-  // Initialize conversation store
-  conversationStore = new ConversationStore();
-  await conversationStore.initialize();
-
   // Initialize cache manager
   cacheManager = new CacheManager({
     maxSize: 50 * 1024 * 1024, // 50MB
@@ -490,7 +485,7 @@ async function initializeStorage(): Promise<void> {
   });
 
   // Initialize storage quota manager
-  storageQuotaManager = new StorageQuotaManager(conversationStore, cacheManager);
+  storageQuotaManager = new StorageQuotaManager(cacheManager);
   await storageQuotaManager.initialize();
 
   // Check storage quota
@@ -565,15 +560,15 @@ function setupPeriodicTasks(): void {
   try {
     // Check if chrome.alarms API is available
     if (typeof chrome !== 'undefined' && chrome?.alarms?.create) {
-    chrome.alarms.create('storage-cleanup', { periodInMinutes: 60 });
+    chrome.alarms.create('rollout-cleanup', { periodInMinutes: 60 });
     chrome.alarms.create('cache-cleanup', { periodInMinutes: 30 });
     chrome.alarms.create('quota-check', { periodInMinutes: 10 });
 
     // Handle alarms
     chrome.alarms.onAlarm?.addListener(async (alarm) => {
       switch (alarm.name) {
-        case 'storage-cleanup':
-          await performStorageCleanup();
+        case 'rollout-cleanup':
+          await performRolloutCleanup();
           break;
         case 'cache-cleanup':
           if (cacheManager) {
@@ -596,7 +591,7 @@ function setupPeriodicTasks(): void {
     console.warn('chrome.alarms API not available, periodic cleanup disabled');
     // Fallback: Use setInterval for cleanup tasks if alarms API is not available
     setInterval(async () => {
-      await performStorageCleanup();
+      await performRolloutCleanup();
     }, 60 * 60 * 1000); // Every hour
 
     setInterval(async () => {
@@ -622,7 +617,7 @@ function setupPeriodicTasks(): void {
 
     // Fallback: Use setInterval for cleanup tasks if alarms API fails
     setInterval(async () => {
-      await performStorageCleanup();
+      await performRolloutCleanup();
     }, 60 * 60 * 1000); // Every hour
 
     setInterval(async () => {
@@ -645,9 +640,19 @@ function setupPeriodicTasks(): void {
 }
 
 /**
- * Perform storage cleanup
+ * Perform rollout cleanup
  */
-async function performStorageCleanup(): Promise<void> {
+async function performRolloutCleanup(): Promise<void> {
+  try {
+    const deleted = await RolloutRecorder.cleanupExpired();
+    if (deleted > 0) {
+      console.log(`[RolloutCleanup] Cleaned up ${deleted} expired rollouts`);
+    }
+  } catch (error) {
+    console.error('[RolloutCleanup] Failed to cleanup expired rollouts:', error);
+  }
+
+  // Also clean up temporary chrome.storage items
   const storage = await chrome.storage.local.get(null);
   const now = Date.now();
   const keysToRemove: string[] = [];
@@ -664,15 +669,7 @@ async function performStorageCleanup(): Promise<void> {
 
   if (keysToRemove.length > 0) {
     await chrome.storage.local.remove(keysToRemove);
-    console.log(`Storage cleanup: ${keysToRemove.length} temporary items removed`);
-  }
-
-  // Clean old conversations if storage is available
-  if (conversationStore) {
-    const deleted = await conversationStore.cleanup(30);
-    if (deleted > 0) {
-      console.log(`Conversation cleanup: ${deleted} old conversations removed`);
-    }
+    console.log(`[StorageCleanup] ${keysToRemove.length} temporary items removed`);
   }
 }
 
@@ -705,10 +702,6 @@ chrome.runtime.onSuspend.addListener(async () => {
 
   if (router) {
     router.cleanup();
-  }
-
-  if (conversationStore) {
-    await conversationStore.close();
   }
 
   if (cacheManager) {
