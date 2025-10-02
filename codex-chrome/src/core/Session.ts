@@ -1,6 +1,9 @@
 /**
  * Session management class - port of Session struct from codex.rs
  * Manages conversation state, turn context, and history
+ *
+ * REFACTORED: Now uses SessionState, SessionServices, and ActiveTurn for better organization
+ * while maintaining full backward compatibility
  */
 
 import type { InputItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig, Event, ResponseItem, ConversationHistory } from '../protocol/types';
@@ -11,6 +14,12 @@ import { State } from './State';
 import { v4 as uuidv4 } from 'uuid';
 import { TurnContext } from './TurnContext';
 import type { AgentConfig } from '../config/AgentConfig';
+
+// New state management imports
+import { SessionState, type SessionStateExport } from './session/state/SessionState';
+import { type SessionServices, createSessionServices } from './session/state/SessionServices';
+import { ActiveTurn } from './session/state/ActiveTurn';
+import type { TokenUsageInfo } from './session/state/types';
 
 /**
  * Tool definition interface (to avoid circular dependency with TurnManager)
@@ -26,21 +35,25 @@ export interface ToolDefinition {
 
 /**
  * Session class managing conversation state
+ * REFACTORED: Now internally uses SessionState for pure data management
  */
 export class Session {
   readonly conversationId: string;
   private config?: AgentConfig;
-  private state: State;
+  private state: State; // Legacy state - kept for compatibility
+  private sessionState: SessionState; // NEW: Pure data state
+  private services: SessionServices | null = null; // NEW: Service collection
+  private activeTurn: ActiveTurn | null = null; // NEW: Active turn management
   private turnContext: TurnContext;
   private messageCount: number = 0;
   private currentTurnItems: InputItem[] = [];
-  private pendingInput: InputItem[] = [];
+  private pendingInput: InputItem[] = []; // Will delegate to ActiveTurn when active
   private eventEmitter: ((event: Event) => Promise<void>) | null = null;
   private conversationStore: ConversationStore | null = null;
   private conversation: ConversationData | null = null;
   private isPersistent: boolean = true;
 
-  constructor(configOrIsPersistent?: AgentConfig | boolean, isPersistent?: boolean) {
+  constructor(configOrIsPersistent?: AgentConfig | boolean, isPersistent?: boolean, services?: SessionServices) {
     this.conversationId = `conv_${uuidv4()}`;
 
     // Handle both new and old signatures for backward compatibility
@@ -49,12 +62,15 @@ export class Session {
       this.isPersistent = configOrIsPersistent;
       this.config = undefined;
     } else {
-      // New signature: Session(config?: AgentConfig, isPersistent?: boolean)
+      // New signature: Session(config?: AgentConfig, isPersistent?: boolean, services?: SessionServices)
       this.config = configOrIsPersistent;
       this.isPersistent = isPersistent ?? true;
     }
 
-    this.state = new State(this.conversationId);
+    // Initialize both state systems (legacy and new)
+    this.state = new State(this.conversationId); // Legacy - kept for compatibility
+    this.sessionState = new SessionState(); // NEW: Pure data state
+    this.services = services ?? null; // NEW: Will be created in initialize()
 
     // Initialize with default turn context, using config values if available
     this.turnContext = new TurnContext({
@@ -67,13 +83,23 @@ export class Session {
   }
 
   /**
-   * Initialize session with storage
+   * Initialize session with storage and services
    */
   async initialize(): Promise<void> {
+    // Create services if not provided
+    if (!this.services) {
+      this.services = await createSessionServices({}, false);
+    }
+
     if (!this.isPersistent) return;
 
     this.conversationStore = new ConversationStore();
     await this.conversationStore.initialize();
+
+    // Update services with conversation store
+    if (this.services) {
+      this.services.conversationStore = this.conversationStore;
+    }
 
     // Load or create conversation
     const conversationId = await this.getOrCreateConversation();
@@ -160,11 +186,20 @@ export class Session {
 
   /**
    * Add a message to history
+   * Delegates to BOTH legacy State and new SessionState
    */
   async addToHistory(entry: { timestamp: number; text: string; type: 'user' | 'agent' | 'system' }): Promise<void> {
-    // Delegate to State
+    // Delegate to legacy State
     this.state.addToHistory(entry);
     this.messageCount++;
+
+    // NEW: Also record in SessionState
+    const responseItem: ResponseItem = {
+      role: entry.type === 'user' ? 'user' : entry.type === 'system' ? 'system' : 'assistant',
+      content: entry.text,
+      timestamp: entry.timestamp,
+    };
+    this.sessionState.recordItems([responseItem]);
 
     // Persist to storage if enabled
     if (this.conversationStore && this.conversation) {
@@ -249,51 +284,87 @@ export class Session {
 
   /**
    * Export session for persistence
+   * NEW FORMAT: Uses SessionState export structure
    */
   export(): {
-    conversationId: string;
-    conversationHistory: ConversationHistory;
-    turnContext: TurnContext;
-    messageCount: number;
+    id: string;
+    state: SessionStateExport;
+    metadata: {
+      created: number;
+      lastAccessed: number;
+      messageCount: number;
+    };
+    // Legacy fields for backward compatibility
+    conversationId?: string;
+    conversationHistory?: ConversationHistory;
+    turnContext?: TurnContext;
   } {
     return {
+      // NEW format
+      id: this.conversationId,
+      state: this.sessionState.export(),
+      metadata: {
+        created: this.state.getConversationHistory().metadata?.startTime || Date.now(),
+        lastAccessed: Date.now(),
+        messageCount: this.messageCount,
+      },
+      // Legacy fields for backward compatibility
       conversationId: this.conversationId,
       conversationHistory: this.state.getConversationHistory(),
       turnContext: { ...this.turnContext },
-      messageCount: this.messageCount,
     };
   }
 
   /**
    * Import session from persistence
+   * Supports both NEW format (with state and metadata) and LEGACY format
    */
-  static import(data: {
-    conversationId: string;
-    conversationHistory?: ConversationHistory;
-    history?: Array<{ timestamp: number; text: string; type: 'user' | 'agent' | 'system' }>; // For backward compatibility
-    turnContext: TurnContext;
-    messageCount: number;
-  }): Session {
-    const session = new Session();
+  static import(data: any, services?: SessionServices): Session {
+    const session = new Session(false, undefined, services);
 
-    // Handle both new and old format
-    if (data.conversationHistory) {
-      session.state.setConversationHistory(data.conversationHistory);
-    } else if (data.history) {
-      // Convert old format to new
-      const items = data.history.map(h => ({
-        role: h.type === 'user' ? 'user' as const : h.type === 'system' ? 'system' as const : 'assistant' as const,
-        content: h.text,
-        timestamp: h.timestamp
-      }));
-      session.state.setConversationHistoryItems(items);
+    // Determine format and import accordingly
+    if (data.state && data.metadata) {
+      // NEW format: Use SessionState
+      session.sessionState = SessionState.import(data.state);
+
+      // Also update legacy state for compatibility
+      if (data.state.history?.items) {
+        session.state.setConversationHistoryItems(data.state.history.items);
+      }
+
+      Object.assign(session, {
+        conversationId: data.id || data.conversationId,
+        messageCount: data.metadata.messageCount || 0,
+      });
+
+      // Restore turn context if available
+      if (data.turnContext) {
+        session.turnContext = { ...data.turnContext };
+      }
+    } else {
+      // LEGACY format: Handle old export structure
+      const conversationId = data.conversationId || data.id;
+
+      // Handle conversation history
+      if (data.conversationHistory) {
+        session.state.setConversationHistory(data.conversationHistory);
+      } else if (data.history) {
+        // Convert very old format to new
+        const items = data.history.map((h: any) => ({
+          role: h.type === 'user' ? 'user' as const : h.type === 'system' ? 'system' as const : 'assistant' as const,
+          content: h.text,
+          timestamp: h.timestamp
+        }));
+        session.state.setConversationHistoryItems(items);
+      }
+
+      Object.assign(session, {
+        conversationId,
+        turnContext: data.turnContext ? { ...data.turnContext } : session.turnContext,
+        messageCount: data.messageCount || 0,
+      });
     }
 
-    Object.assign(session, {
-      conversationId: data.conversationId,
-      turnContext: { ...data.turnContext },
-      messageCount: data.messageCount,
-    });
     return session;
   }
 
@@ -417,18 +488,33 @@ export class Session {
 
   /**
    * Get pending user input during turn execution
+   * NEW: Delegates to ActiveTurn if turn is active
    */
   async getPendingInput(): Promise<any[]> {
-    const pending = [...this.pendingInput];
-    this.pendingInput = []; // Clear pending input
-    return pending.map(item => this.convertInputToResponse(item));
+    if (this.activeTurn) {
+      // Delegate to ActiveTurn
+      const pending = this.activeTurn.takePendingInput();
+      return pending.map(item => this.convertInputToResponse(item));
+    } else {
+      // Fall back to legacy behavior
+      const pending = [...this.pendingInput];
+      this.pendingInput = []; // Clear pending input
+      return pending.map(item => this.convertInputToResponse(item));
+    }
   }
 
   /**
    * Add pending input (for interrupting turns)
+   * NEW: Delegates to ActiveTurn if turn is active
    */
   addPendingInput(items: InputItem[]): void {
-    this.pendingInput.push(...items);
+    if (this.activeTurn) {
+      // Delegate to ActiveTurn
+      items.forEach(item => this.activeTurn!.pushPendingInput(item));
+    } else {
+      // Fall back to legacy behavior
+      this.pendingInput.push(...items);
+    }
   }
 
   /**
@@ -662,9 +748,67 @@ export class Session {
 
   /**
    * Track token usage
+   * Delegates to BOTH legacy State and new SessionState
    */
   addTokenUsage(tokens: number): void {
-    this.state.addTokenUsage(tokens);
+    this.state.addTokenUsage(tokens); // Legacy
+    this.sessionState.addTokenUsage(tokens); // NEW
+  }
+
+  /**
+   * Add approved command to session
+   * NEW: Delegates to SessionState
+   */
+  addApprovedCommand(command: string): void {
+    this.sessionState.addApprovedCommand(command);
+  }
+
+  /**
+   * Check if command is approved
+   * NEW: Delegates to SessionState
+   */
+  isCommandApproved(command: string): boolean {
+    return this.sessionState.isCommandApproved(command);
+  }
+
+  /**
+   * Check if there's an active turn
+   * NEW: Uses ActiveTurn
+   */
+  isActiveTurn(): boolean {
+    return this.activeTurn !== null;
+  }
+
+  /**
+   * Start a turn (creates ActiveTurn)
+   * NEW: Creates ActiveTurn instance
+   */
+  async startTurn(): Promise<void> {
+    if (this.activeTurn) {
+      throw new Error('Cannot start turn: turn already active');
+    }
+    this.activeTurn = new ActiveTurn();
+    this.state.startTurn(); // Legacy
+  }
+
+  /**
+   * End a turn (clears ActiveTurn)
+   * NEW: Drains and clears ActiveTurn
+   */
+  async endTurn(): Promise<void> {
+    if (!this.activeTurn) {
+      console.warn('No active turn to end');
+      return;
+    }
+
+    // Drain any remaining tasks
+    const remaining = this.activeTurn.drain();
+    if (remaining.size > 0) {
+      console.warn(`Ending turn with ${remaining.size} remaining tasks`);
+    }
+
+    this.activeTurn = null;
+    this.state.endTurn(); // Legacy
   }
 
   /**
