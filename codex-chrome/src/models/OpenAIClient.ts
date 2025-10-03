@@ -13,6 +13,10 @@ import {
   type ToolCall,
 } from './ModelClient';
 import { StreamProcessor } from '../core/StreamProcessor';
+import { ResponseStream } from './ResponseStream';
+import type { Prompt, ModelProviderInfo } from './types/ResponsesAPI';
+import type { ResponseEvent } from './types/ResponseEvent';
+import type { RateLimitSnapshot } from './types/RateLimits';
 
 /**
  * OpenAI-specific request format
@@ -156,7 +160,7 @@ export class OpenAIClient extends ModelClient {
     this.organization = options.organization;
   }
 
-  getProvider(): import('./types/ResponsesAPI').ModelProviderInfo {
+  getProvider(): ModelProviderInfo {
     // Return minimal provider info for OpenAI Chat Completions API
     return {
       name: 'openai',
@@ -227,13 +231,13 @@ export class OpenAIClient extends ModelClient {
     this.reasoningSummary = summary;
   }
 
-  protected async *streamResponses(request: import('./ModelClient').CompletionRequest): AsyncGenerator<import('./types/ResponsesAPI').ResponseEvent> {
+  protected async *streamResponses(request: CompletionRequest): AsyncGenerator<ResponseEvent> {
     throw new ModelClientError('streamResponses not supported by Chat Completions API - use streamChat instead');
   }
 
-  protected async *streamChat(request: import('./ModelClient').CompletionRequest): AsyncGenerator<import('./types/ResponsesAPI').ResponseEvent> {
+  protected async *streamChat(request: CompletionRequest): AsyncGenerator<ResponseEvent> {
     // Convert streaming chunks to ResponseEvents
-    for await (const chunk of this.stream(request)) {
+    for await (const chunk of this.streamLegacy(request)) {
       if (chunk.delta?.content) {
         yield { type: 'OutputTextDelta', delta: chunk.delta.content };
       }
@@ -241,17 +245,17 @@ export class OpenAIClient extends ModelClient {
   }
 
   protected async *attemptStreamResponses(
-    request: import('./ModelClient').CompletionRequest,
+    request: CompletionRequest,
     attempt: number
-  ): AsyncGenerator<import('./types/ResponsesAPI').ResponseEvent, void, unknown> {
+  ): AsyncGenerator<ResponseEvent, void, unknown> {
     throw new ModelClientError('attemptStreamResponses not supported by Chat Completions API');
   }
 
-  protected async *processSSE(stream: ReadableStream<Uint8Array>): AsyncGenerator<import('./types/ResponsesAPI').ResponseEvent> {
+  protected async *processSSE(stream: ReadableStream<Uint8Array>): AsyncGenerator<ResponseEvent> {
     throw new ModelClientError('processSSE not supported by Chat Completions API');
   }
 
-  protected parseRateLimitSnapshot(headers: Headers): import('./types/RateLimits').RateLimitSnapshot | undefined {
+  protected parseRateLimitSnapshot(headers: Headers): RateLimitSnapshot | undefined {
     // Chat Completions API doesn't provide detailed rate limit headers like Responses API
     return undefined;
   }
@@ -269,7 +273,113 @@ export class OpenAIClient extends ModelClient {
     return this.convertFromOpenAIResponse(response);
   }
 
-  async *stream(request: CompletionRequest): AsyncGenerator<StreamChunk> {
+  /**
+   * Stream a model response using the new Prompt-based API
+   *
+   * This is a compatibility adapter that converts Prompt to CompletionRequest
+   */
+  async stream(prompt: Prompt): Promise<ResponseStream> {
+
+    // Convert Prompt to CompletionRequest
+    const messages = prompt.input.map(item => {
+      if (item.type === 'message') {
+        return {
+          role: item.role,
+          content: item.content || '',
+        };
+      }
+      return {
+        role: 'user' as const,
+        content: JSON.stringify(item),
+      };
+    });
+
+    const request = {
+      model: this.currentModel,
+      messages,
+      tools: prompt.tools,
+    };
+
+    this.validateRequest(request);
+
+    // Create ResponseStream to return immediately
+    const stream = new ResponseStream();
+
+    // Start async processing
+    (async () => {
+      try {
+        const openaiRequest = this.convertToOpenAIRequest({ ...request, stream: true });
+
+        const response = await this.withRetry(
+          () => this.makeStreamRequest(openaiRequest),
+          (error) => this.isRetryableError(error)
+        );
+
+        if (!response.body) {
+          throw new ModelClientError('Stream response body is null');
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+
+            if (done) {
+              break;
+            }
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+
+            // Keep the last potentially incomplete line in the buffer
+            buffer = lines.pop() || '';
+
+            for (const line of lines) {
+              const trimmed = line.trim();
+
+              if (!trimmed || !trimmed.startsWith('data: ')) {
+                continue;
+              }
+
+              const data = trimmed.slice(6); // Remove 'data: ' prefix
+
+              if (data === '[DONE]') {
+                break;
+              }
+
+              try {
+                const chunk: OpenAIStreamChunk = JSON.parse(data);
+                const streamChunk = this.convertStreamChunk(chunk);
+
+                if (streamChunk && streamChunk.delta?.content) {
+                  stream.addEvent({
+                    type: 'OutputTextDelta',
+                    delta: streamChunk.delta.content,
+                  });
+                }
+              } catch (error) {
+                // Skip malformed chunks
+                console.warn('Failed to parse stream chunk:', error);
+              }
+            }
+          }
+
+          stream.complete();
+        } finally {
+          reader.releaseLock();
+        }
+      } catch (error) {
+        stream.error(error as Error);
+      }
+    })();
+
+    return stream;
+  }
+
+  private async *streamLegacy(request: CompletionRequest): AsyncGenerator<StreamChunk> {
     this.validateRequest(request);
 
     const openaiRequest = this.convertToOpenAIRequest({ ...request, stream: true });
