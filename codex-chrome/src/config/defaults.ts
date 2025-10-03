@@ -10,8 +10,8 @@ export const DEFAULT_MODEL_CONFIG: IModelConfig = {
   contextWindow: 128000,
   maxOutputTokens: 16384,
   autoCompactTokenLimit: null,
-  reasoningEffort: null,
-  reasoningSummary: 'none',
+  reasoningEffort: 'medium',
+  reasoningSummary: 'auto',
   verbosity: 'medium'
 };
 
@@ -158,8 +158,8 @@ export const CONFIG_LIMITS = {
 // Validation constants
 export const VALID_THEMES = ['light', 'dark', 'system'] as const;
 export const VALID_UPDATE_CHANNELS = ['stable', 'beta'] as const;
-export const VALID_REASONING_EFFORTS = ['low', 'medium', 'high'] as const;
-export const VALID_REASONING_SUMMARIES = ['none', 'brief', 'detailed'] as const;
+export const VALID_REASONING_EFFORTS = ['minimal', 'low', 'medium', 'high'] as const;
+export const VALID_REASONING_SUMMARIES = ['auto', 'concise', 'detailed', 'none'] as const;
 export const VALID_VERBOSITIES = ['low', 'medium', 'high'] as const;
 
 // Default retry configuration

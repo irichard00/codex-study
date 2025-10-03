@@ -4,9 +4,8 @@
  */
 
 import { Session } from './Session';
-import type { ToolDefinition } from '../models/ModelClient';
+import type { ToolDefinition } from '../tools/BaseTool';
 import { TurnContext } from './TurnContext';
-import { ModelClient } from '../models/ModelClient';
 import type { CompletionRequest, CompletionResponse } from '../models/ModelClient';
 import { loadPrompt, loadUserInstructions } from './PromptLoader';
 import type { EventMsg, TokenUsage, StreamErrorEvent } from '../protocol/events';
@@ -68,7 +67,6 @@ export interface Prompt {
 export class TurnManager {
   private session: Session;
   private turnContext: TurnContext;
-  private modelClient: ModelClient;
   private toolRegistry: ToolRegistry;
   private config: TurnConfig;
   private cancelled = false;
@@ -76,13 +74,11 @@ export class TurnManager {
   constructor(
     session: Session,
     turnContext: TurnContext,
-    modelClient: ModelClient,
     toolRegistry: ToolRegistry,
     config: TurnConfig = {}
   ) {
     this.session = session;
     this.turnContext = turnContext;
-    this.modelClient = modelClient;
     this.toolRegistry = toolRegistry;
     this.config = {
       maxRetries: 3,
@@ -170,7 +166,7 @@ export class TurnManager {
     const request = await this.buildCompletionRequest(processedPrompt);
 
     // Start model streaming
-    const stream = await this.modelClient.streamCompletion(request);
+    const stream = await this.turnContext.getModelClient().stream(request);
 
     const processedItems: ProcessedResponseItem[] = [];
     let totalTokenUsage: TokenUsage | undefined;

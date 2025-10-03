@@ -3,6 +3,11 @@
  * Based on contract tests and codex-rs model client implementation
  */
 
+import type { ToolDefinition } from '../tools/BaseTool';
+import type { ModelProviderInfo } from './types/ResponsesAPI';
+import type { ResponseEvent } from './types/ResponsesAPI';
+import type { StreamAttemptError } from './types/StreamAttemptError';
+
 /**
  * Request configuration for completion API calls
  */
@@ -71,23 +76,6 @@ export interface Usage {
   completionTokens: number;
   /** Total number of tokens used */
   totalTokens: number;
-}
-
-/**
- * Tool definition for function calling
- */
-export interface ToolDefinition {
-  /** Type of tool (currently only function supported) */
-  type: 'function';
-  /** Function definition */
-  function: {
-    /** Name of the function */
-    name: string;
-    /** Description of what the function does */
-    description: string;
-    /** JSON schema for the function parameters */
-    parameters: any;
-  };
 }
 
 /**
@@ -194,9 +182,10 @@ export abstract class ModelClient {
   abstract countTokens(text: string, model: string): number;
 
   /**
-   * Get the provider name for this client
+   * Get the provider information for this client
+   * Rust Reference: codex-rs/core/src/client.rs Lines 435-437
    */
-  abstract getProvider(): string;
+  abstract getProvider(): ModelProviderInfo;
 
   /**
    * Stream completion with events
@@ -217,8 +206,35 @@ export abstract class ModelClient {
 
   /**
    * Get context window size for current model
+   * Rust Reference: codex-rs/core/src/client.rs Lines 109-113
+   *
+   * Note: Should be renamed to getModelContextWindow() for Rust alignment
    */
   abstract getContextWindow(): number | undefined;
+
+  /**
+   * Get model context window size (Rust-aligned name)
+   * Rust Reference: codex-rs/core/src/client.rs Lines 109-113
+   */
+  abstract getModelContextWindow(): number | undefined;
+
+  /**
+   * Get auto-compact token limit for this model
+   * Rust Reference: codex-rs/core/src/client.rs Lines 115-119
+   */
+  abstract getAutoCompactTokenLimit(): number | undefined;
+
+  /**
+   * Get model family configuration
+   * Rust Reference: codex-rs/core/src/client.rs Lines 428-430
+   */
+  abstract getModelFamily(): any;
+
+  /**
+   * Get auth manager instance
+   * Rust Reference: codex-rs/core/src/client.rs Lines 443-445
+   */
+  abstract getAuthManager(): any;
 
   /**
    * Get reasoning effort configuration
@@ -239,6 +255,45 @@ export abstract class ModelClient {
    * Set reasoning summary configuration
    */
   abstract setReasoningSummary(summary: any): void;
+
+  /**
+   * Stream responses from the model using appropriate wire API
+   * Rust Reference: codex-rs/core/src/client.rs Lines 121-134
+   * Dispatches to either Responses API or Chat Completions based on provider
+   */
+  protected abstract streamResponses(request: CompletionRequest): AsyncGenerator<ResponseEvent>;
+
+  /**
+   * Stream chat completions (Chat API variant)
+   * Rust Reference: codex-rs/core/src/client.rs Lines 177-195
+   */
+  protected abstract streamChat(request: CompletionRequest): AsyncGenerator<ResponseEvent>;
+
+  /**
+   * Attempt a single streaming request with retry logic
+   * Rust Reference: codex-rs/core/src/client.rs Lines 447-486
+   * @returns AsyncGenerator yielding ResponseEvents or throwing StreamAttemptError
+   */
+  protected abstract attemptStreamResponses(
+    request: CompletionRequest,
+    attempt: number
+  ): AsyncGenerator<ResponseEvent, void, unknown>;
+
+  /**
+   * Process Server-Sent Events (SSE) stream into ResponseEvents
+   * Rust Reference: codex-rs/core/src/client.rs Lines 488-550
+   * @param stream ReadableStream from fetch response
+   * @returns AsyncGenerator yielding parsed ResponseEvents
+   */
+  protected abstract processSSE(stream: ReadableStream<Uint8Array>): AsyncGenerator<ResponseEvent>;
+
+  /**
+   * Parse rate limit snapshot from HTTP headers
+   * Rust Reference: codex-rs/core/src/client.rs Lines 552-590
+   * @param headers HTTP response headers
+   * @returns RateLimitSnapshot if headers present, undefined otherwise
+   */
+  protected abstract parseRateLimitSnapshot(headers: Headers): import('./types/RateLimits').RateLimitSnapshot | undefined;
 
   /**
    * Validate a request before sending

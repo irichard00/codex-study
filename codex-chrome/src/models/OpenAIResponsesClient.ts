@@ -12,7 +12,7 @@ import {
   type StreamChunk,
   type RetryConfig,
 } from './ModelClient';
-import {
+import type {
   ResponseEvent,
   ResponsesApiRequest,
   Prompt,
@@ -26,8 +26,8 @@ import {
   TextFormat,
   TextFormatType,
 } from './types/ResponsesAPI';
-import { RateLimitSnapshot } from './types/RateLimits';
-import { TokenUsage } from './types/TokenUsage';
+import type { RateLimitSnapshot } from './types/RateLimits';
+import type { TokenUsage } from './types/TokenUsage';
 import { SSEEventParser } from './SSEEventParser';
 import { RequestQueue, RequestPriority, type QueuedRequest } from './RequestQueue';
 
@@ -130,18 +130,21 @@ export class OpenAIResponsesClient extends ModelClient {
     this.sseParser = new SSEEventParser();
 
     // Initialize request queue if rate limiting is needed
-    if (this.provider.requestsPerMinute || this.provider.requestsPerHour) {
+    // Note: requestsPerMinute/requestsPerHour not in base ModelProviderInfo type yet
+    // TODO: Add to ModelProviderInfo interface
+    const providerAny = this.provider as any;
+    if (providerAny.requestsPerMinute || providerAny.requestsPerHour) {
       this.requestQueue = new RequestQueue({
-        requestsPerMinute: this.provider.requestsPerMinute || 60,
-        requestsPerHour: this.provider.requestsPerHour || 1000,
-        burstLimit: Math.min(this.provider.requestsPerMinute || 10, 10),
+        requestsPerMinute: providerAny.requestsPerMinute || 60,
+        requestsPerHour: providerAny.requestsPerHour || 1000,
+        burstLimit: Math.min(providerAny.requestsPerMinute || 10, 10),
       });
       this.queueEnabled = true;
     }
   }
 
-  getProvider(): string {
-    return this.provider.name;
+  getProvider(): ModelProviderInfo {
+    return this.provider;
   }
 
   getModel(): string {
@@ -153,6 +156,10 @@ export class OpenAIResponsesClient extends ModelClient {
   }
 
   getContextWindow(): number | undefined {
+    return this.getModelContextWindow();
+  }
+
+  getModelContextWindow(): number | undefined {
     // Return context window sizes for known OpenAI models
     const contextWindows: Record<string, number> = {
       'gpt-4': 8192,
@@ -164,6 +171,20 @@ export class OpenAIResponsesClient extends ModelClient {
       'gpt-3.5-turbo-16k': 16384,
     };
     return contextWindows[this.currentModel];
+  }
+
+  getAutoCompactTokenLimit(): number | undefined {
+    const contextWindow = this.getModelContextWindow();
+    return contextWindow ? Math.floor(contextWindow * 0.8) : undefined;
+  }
+
+  getModelFamily(): ModelFamily {
+    return this.modelFamily;
+  }
+
+  getAuthManager(): any {
+    // Chrome extension doesn't use auth manager - returns undefined
+    return undefined;
   }
 
   getReasoningEffort(): ReasoningEffortConfig | undefined {
@@ -192,17 +213,7 @@ export class OpenAIResponsesClient extends ModelClient {
   }
 
   async *streamCompletion(request: CompletionRequest): AsyncGenerator<ResponseEvent> {
-    // Convert CompletionRequest to Prompt for Responses API
-    const prompt: Prompt = {
-      input: request.messages.map(msg => ({
-        type: 'message' as const,
-        role: msg.role,
-        content: msg.content || '',
-      })),
-      tools: request.tools || [],
-    };
-
-    yield* this.streamResponses(prompt);
+    yield* this.streamResponses(request);
   }
 
   countTokens(text: string, model: string): number {
@@ -214,10 +225,86 @@ export class OpenAIResponsesClient extends ModelClient {
   }
 
   /**
-   * Stream responses using OpenAI Responses API
+   * Stream responses from the model using appropriate wire API
+   * Rust Reference: codex-rs/core/src/client.rs Lines 121-134
+   */
+  protected async *streamResponses(request: CompletionRequest): AsyncGenerator<ResponseEvent> {
+    // Convert CompletionRequest to Prompt
+    const prompt: Prompt = {
+      input: request.messages.map(msg => ({
+        type: 'message' as const,
+        role: msg.role,
+        content: msg.content || '',
+      })),
+      tools: request.tools || [],
+    };
+
+    yield* this.streamResponsesInternal(prompt);
+  }
+
+  /**
+   * Chat completions streaming (not supported by Responses API)
+   * Rust Reference: codex-rs/core/src/client.rs Lines 177-195
+   */
+  protected async *streamChat(request: CompletionRequest): AsyncGenerator<ResponseEvent> {
+    throw new ModelClientError('Chat completions not supported by Responses API - use OpenAIClient instead');
+  }
+
+  /**
+   * Attempt a single streaming request with retry logic
+   * Rust Reference: codex-rs/core/src/client.rs Lines 447-486
+   */
+  protected async *attemptStreamResponses(
+    request: CompletionRequest,
+    attempt: number
+  ): AsyncGenerator<ResponseEvent, void, unknown> {
+    // Convert to prompt format
+    const prompt: Prompt = {
+      input: request.messages.map(msg => ({
+        type: 'message' as const,
+        role: msg.role,
+        content: msg.content || '',
+      })),
+      tools: request.tools || [],
+    };
+
+    const fullInstructions = this.getFullInstructions(prompt);
+    const toolsJson = this.createToolsJsonForResponsesApi(prompt.tools);
+    const reasoning = this.createReasoningParam();
+    const textControls = this.createTextParam(prompt.outputSchema);
+
+    const include: string[] = reasoning ? ['reasoning.encrypted_content'] : [];
+    const azureWorkaround = (this.provider.baseUrl && this.provider.baseUrl.indexOf('azure') !== -1) || false;
+
+    const payload: ResponsesApiRequest = {
+      model: this.currentModel,
+      instructions: fullInstructions,
+      input: prompt.input,
+      tools: toolsJson,
+      tool_choice: 'auto',
+      parallel_tool_calls: false,
+      reasoning,
+      store: azureWorkaround,
+      stream: true,
+      include,
+      prompt_cache_key: this.conversationId,
+      text: textControls,
+    };
+
+    const response = await this.makeResponsesApiRequest(payload);
+
+    if (!response.body) {
+      throw new ModelClientError('Response body is null');
+    }
+
+    yield* this.processSSE(response.body, response.headers);
+  }
+
+  /**
+   * Stream responses using OpenAI Responses API (internal method)
    * Main method implementing the experimental /v1/responses endpoint
    */
-  async *streamResponses(prompt: Prompt): AsyncGenerator<ResponseEvent> {
+  private async *streamResponsesInternal(prompt: Prompt): AsyncGenerator<ResponseEvent> {
     const fullInstructions = this.getFullInstructions(prompt);
     const toolsJson = this.createToolsJsonForResponsesApi(prompt.tools);
     const reasoning = this.createReasoningParam();
@@ -258,7 +345,7 @@ export class OpenAIResponsesClient extends ModelClient {
         }
 
         // Process SSE stream
-        yield* this.processSSEStream(response.body, response.headers);
+        yield* this.processSSE(response.body, response.headers);
         return;
 
       } catch (error) {
@@ -277,7 +364,7 @@ export class OpenAIResponsesClient extends ModelClient {
 
           // Check for auth errors
           if (error.statusCode === 401) {
-            throw new ModelClientError('Authentication failed - check API key', 401, this.getProvider());
+            throw new ModelClientError('Authentication failed - check API key', 401, this.provider.name);
           }
 
           // Non-retryable errors
@@ -299,11 +386,13 @@ export class OpenAIResponsesClient extends ModelClient {
 
   /**
    * Process Server-Sent Events stream from Responses API
+   * Rust Reference: codex-rs/core/src/client.rs Lines 488-550
    */
-  private async *processSSEStream(
-    body: ReadableStream<Uint8Array>,
-    headers: Headers
+  protected async *processSSE(
+    stream: ReadableStream<Uint8Array>,
+    headers?: Headers
   ): AsyncGenerator<ResponseEvent> {
+    const body = stream;
     // Parse rate limit information from headers
     const rateLimitSnapshot = this.parseRateLimitSnapshot(headers);
     if (rateLimitSnapshot) {
@@ -500,7 +589,7 @@ export class OpenAIResponsesClient extends ModelClient {
       throw new ModelClientError(
         errorMessage,
         response.status,
-        this.getProvider(),
+        this.provider.name,
         this.isRetryableHttpError(response.status)
       );
     }
@@ -582,7 +671,12 @@ export class OpenAIResponsesClient extends ModelClient {
   /**
    * Parse rate limit information from response headers
    */
-  private parseRateLimitSnapshot(headers: Headers): RateLimitSnapshot | null {
+  /**
+   * Parse rate limit snapshot from HTTP headers
+   * Rust Reference: codex-rs/core/src/client.rs Lines 552-590
+   */
+  protected parseRateLimitSnapshot(headers?: Headers): RateLimitSnapshot | undefined {
+    if (!headers) return undefined;
     const primary = this.parseRateLimitWindow(
       headers,
       'x-codex-primary-used-percent',
@@ -598,7 +692,7 @@ export class OpenAIResponsesClient extends ModelClient {
     );
 
     if (!primary && !secondary) {
-      return null;
+      return undefined;
     }
 
     return { primary, secondary };
@@ -612,16 +706,16 @@ export class OpenAIResponsesClient extends ModelClient {
     usedPercentHeader: string,
     windowMinutesHeader: string,
     resetsHeader: string
-  ) {
+  ): import('./types/RateLimits').RateLimitWindow | undefined {
     const usedPercent = this.parseHeaderFloat(headers, usedPercentHeader);
     if (usedPercent === null) {
-      return null;
+      return undefined;
     }
 
     return {
       used_percent: usedPercent,
-      window_minutes: this.parseHeaderInt(headers, windowMinutesHeader),
-      resets_in_seconds: this.parseHeaderInt(headers, resetsHeader),
+      window_minutes: this.parseHeaderInt(headers, windowMinutesHeader) ?? undefined,
+      resets_in_seconds: this.parseHeaderInt(headers, resetsHeader) ?? undefined,
     };
   }
 

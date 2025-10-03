@@ -47,8 +47,16 @@ class TestModelClient extends ModelClient {
     return text.length / 4; // Rough approximation
   }
 
-  getProvider(): string {
-    return 'test';
+  getProvider(): any {
+    return {
+      name: 'test',
+      baseUrl: 'https://test.api.com',
+      wireApi: 'Responses',
+      requiresOpenaiAuth: false,
+      requestMaxRetries: 3,
+      streamMaxRetries: 2,
+      streamIdleTimeoutMs: 30000,
+    };
   }
 
   async *streamCompletion(request: any): AsyncGenerator<any> {
@@ -67,6 +75,27 @@ class TestModelClient extends ModelClient {
     return 4000;
   }
 
+  getModelContextWindow(): number | undefined {
+    return 4000;
+  }
+
+  getAutoCompactTokenLimit(): number | undefined {
+    return 3200;
+  }
+
+  getModelFamily(): any {
+    return {
+      family: 'test-family',
+      baseInstructions: 'Test instructions',
+      supportsReasoningSummaries: false,
+      needsSpecialApplyPatchInstructions: false,
+    };
+  }
+
+  getAuthManager(): any {
+    return null;
+  }
+
   getReasoningEffort(): any {
     return null;
   }
@@ -81,6 +110,26 @@ class TestModelClient extends ModelClient {
 
   setReasoningSummary(summary: any): void {
     // No-op for testing
+  }
+
+  protected async *streamResponses(request: any): AsyncGenerator<any> {
+    yield* this.stream(request);
+  }
+
+  protected async *streamChat(request: any): AsyncGenerator<any> {
+    yield* this.stream(request);
+  }
+
+  protected async *attemptStreamResponses(request: any, attempt: number): AsyncGenerator<any> {
+    yield* this.stream(request);
+  }
+
+  protected async *processSSE(stream: ReadableStream<Uint8Array>): AsyncGenerator<any> {
+    yield {};
+  }
+
+  protected parseRateLimitSnapshot(headers: Headers): any {
+    return undefined;
   }
 
   // Expose protected methods for testing

@@ -24,8 +24,8 @@ export interface IModelConfig {
   contextWindow?: number | null;
   maxOutputTokens?: number | null;
   autoCompactTokenLimit?: number | null;
-  reasoningEffort?: 'low' | 'medium' | 'high' | null;
-  reasoningSummary?: 'none' | 'brief' | 'detailed';
+  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high' | null;
+  reasoningSummary?: 'auto' | 'concise' | 'detailed' | 'none';
   verbosity?: 'low' | 'medium' | 'high' | null;
 }
 

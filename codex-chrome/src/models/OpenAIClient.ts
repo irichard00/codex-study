@@ -156,8 +156,104 @@ export class OpenAIClient extends ModelClient {
     this.organization = options.organization;
   }
 
-  getProvider(): string {
-    return 'openai';
+  getProvider(): import('./types/ResponsesAPI').ModelProviderInfo {
+    // Return minimal provider info for OpenAI Chat Completions API
+    return {
+      name: 'openai',
+      wireApi: 'Chat',
+      requiresOpenaiAuth: true,
+    };
+  }
+
+  getModel(): string {
+    return this.currentModel;
+  }
+
+  setModel(model: string): void {
+    this.currentModel = model;
+  }
+
+  getContextWindow(): number | undefined {
+    return this.getModelContextWindow();
+  }
+
+  getModelContextWindow(): number | undefined {
+    // Return context window sizes for known OpenAI models
+    const contextWindows: Record<string, number> = {
+      'gpt-4': 8192,
+      'gpt-4-32k': 32768,
+      'gpt-4-turbo': 128000,
+      'gpt-4o': 128000,
+      'gpt-5': 200000,
+      'gpt-3.5-turbo': 4096,
+      'gpt-3.5-turbo-16k': 16384,
+    };
+    return contextWindows[this.currentModel];
+  }
+
+  getAutoCompactTokenLimit(): number | undefined {
+    const contextWindow = this.getModelContextWindow();
+    return contextWindow ? Math.floor(contextWindow * 0.8) : undefined;
+  }
+
+  getModelFamily(): any {
+    // Return minimal model family info for Chat Completions
+    return {
+      family: this.currentModel,
+      baseInstructions: '',
+      supportsReasoningSummaries: false,
+      needsSpecialApplyPatchInstructions: false,
+    };
+  }
+
+  getAuthManager(): any {
+    // Chrome extension doesn't use auth manager
+    return undefined;
+  }
+
+  getReasoningEffort(): any {
+    return this.reasoningEffort;
+  }
+
+  setReasoningEffort(effort: any): void {
+    this.reasoningEffort = effort;
+  }
+
+  getReasoningSummary(): any {
+    return this.reasoningSummary;
+  }
+
+  setReasoningSummary(summary: any): void {
+    this.reasoningSummary = summary;
+  }
+
+  protected async *streamResponses(request: import('./ModelClient').CompletionRequest): AsyncGenerator<import('./types/ResponsesAPI').ResponseEvent> {
+    throw new ModelClientError('streamResponses not supported by Chat Completions API - use streamChat instead');
+  }
+
+  protected async *streamChat(request: import('./ModelClient').CompletionRequest): AsyncGenerator<import('./types/ResponsesAPI').ResponseEvent> {
+    // Convert streaming chunks to ResponseEvents
+    for await (const chunk of this.stream(request)) {
+      if (chunk.delta?.content) {
+        yield { type: 'OutputTextDelta', delta: chunk.delta.content };
+      }
+    }
+  }
+
+  protected async *attemptStreamResponses(
+    request: import('./ModelClient').CompletionRequest,
+    attempt: number
+  ): AsyncGenerator<import('./types/ResponsesAPI').ResponseEvent, void, unknown> {
+    throw new ModelClientError('attemptStreamResponses not supported by Chat Completions API');
+  }
+
+  protected async *processSSE(stream: ReadableStream<Uint8Array>): AsyncGenerator<import('./types/ResponsesAPI').ResponseEvent> {
+    throw new ModelClientError('processSSE not supported by Chat Completions API');
+  }
+
+  protected parseRateLimitSnapshot(headers: Headers): import('./types/RateLimits').RateLimitSnapshot | undefined {
+    // Chat Completions API doesn't provide detailed rate limit headers like Responses API
+    return undefined;
   }
 
   async complete(request: CompletionRequest): Promise<CompletionResponse> {
@@ -418,7 +514,7 @@ export class OpenAIClient extends ModelClient {
     return response;
   }
 
-  private isRetryableError(error: any): boolean {
+  protected isRetryableError(error: any): boolean {
     if (error instanceof ModelClientError) {
       return error.retryable;
     }
@@ -732,42 +828,6 @@ export class OpenAIClient extends ModelClient {
 
     await processor.start(response.body);
     return processor;
-  }
-
-  getModel(): string {
-    return this.currentModel;
-  }
-
-  setModel(model: string): void {
-    this.currentModel = model;
-  }
-
-  getContextWindow(): number | undefined {
-    // Return context window sizes for known models
-    const contextWindows: Record<string, number> = {
-      'gpt-5': 128000,
-      'gpt-4': 8192,
-      'gpt-4-32k': 32768,
-      'gpt-4-turbo': 128000,
-      'gpt-4o': 128000
-    };
-    return contextWindows[this.currentModel];
-  }
-
-  getReasoningEffort(): any {
-    return this.reasoningEffort;
-  }
-
-  setReasoningEffort(effort: any): void {
-    this.reasoningEffort = effort;
-  }
-
-  getReasoningSummary(): any {
-    return this.reasoningSummary;
-  }
-
-  setReasoningSummary(summary: any): void {
-    this.reasoningSummary = summary;
   }
 
   /**

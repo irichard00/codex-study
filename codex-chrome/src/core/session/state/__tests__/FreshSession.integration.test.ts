@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { Session } from '../../Session';
+import { Session } from '../../../Session';
 import { SessionState } from '../SessionState';
 import { createSessionServices } from '../SessionServices';
 import type { InputItem } from '../../../protocol/types';

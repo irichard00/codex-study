@@ -5,32 +5,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EventCollector, createMockToolResult, assertRejects } from '../utils/test-helpers';
-
-// Define ToolRegistry contract interfaces
-interface ToolDefinition {
-  name: string;
-  description: string;
-  parameters: ToolParameterSchema;
-  category?: string;
-  version?: string;
-  metadata?: Record<string, any>;
-}
-
-interface ToolParameterSchema {
-  type: 'object';
-  properties: Record<string, ParameterProperty>;
-  required?: string[];
-  additionalProperties?: boolean;
-}
-
-interface ParameterProperty {
-  type: 'string' | 'number' | 'boolean' | 'array' | 'object';
-  description?: string;
-  enum?: string[];
-  items?: ParameterProperty;
-  properties?: Record<string, ParameterProperty>;
-  default?: any;
-}
+import type { ToolDefinition, ToolParameterSchema, ParameterProperty } from '../../tools/BaseTool';
 
 interface ToolExecutionRequest {
   toolName: string;

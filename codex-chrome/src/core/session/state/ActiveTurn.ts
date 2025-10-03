@@ -5,7 +5,7 @@
 
 import { TurnState } from './TurnState';
 import type { RunningTask, ApprovalResolver } from './types';
-import type { InputItem } from '../../protocol/types';
+import type { InputItem } from '../../../protocol/types';
 
 /**
  * Manages the lifecycle and state of an active turn

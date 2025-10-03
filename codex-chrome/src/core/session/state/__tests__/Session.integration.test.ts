@@ -5,7 +5,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { Session } from '../../Session';
+import { Session } from '../../../Session';
 import type { InputItem } from '../../../protocol/types';
 
 describe('Session Integration (Refactored)', () => {

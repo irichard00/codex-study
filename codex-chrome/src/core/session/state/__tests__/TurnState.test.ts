@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { TurnState } from '../TurnState';
-import { ReviewDecision } from '../../../protocol/types';
+import { ReviewDecision } from '../../../../protocol/types';
 import type { ApprovalResolver } from '../types';
 
 describe('TurnState', () => {
@@ -54,9 +54,9 @@ describe('TurnState', () => {
       turnState.insertPendingApproval('exec-1', resolver);
 
       const retrieved = turnState.removePendingApproval('exec-1');
-      retrieved?.(ReviewDecision.Approve);
+      retrieved?.('approve');
 
-      expect(resolver).toHaveBeenCalledWith(ReviewDecision.Approve);
+      expect(resolver).toHaveBeenCalledWith('approve');
       expect(resolver).toHaveBeenCalledTimes(1);
     });
 

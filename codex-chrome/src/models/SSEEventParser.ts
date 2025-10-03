@@ -1,4 +1,4 @@
-import { ResponseEvent } from './types/ResponseEvent';
+import type { ResponseEvent } from './types/ResponsesAPI';
 
 /**
  * SSE event structure matching Rust SseEvent
