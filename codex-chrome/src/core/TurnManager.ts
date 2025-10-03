@@ -166,7 +166,7 @@ export class TurnManager {
     const request = await this.buildCompletionRequest(processedPrompt);
 
     // Start model streaming
-    const stream = await this.turnContext.getModelClient().streamCompletion(request);
+    const stream = await this.turnContext.getModelClient().stream(request);
 
     const processedItems: ProcessedResponseItem[] = [];
     let totalTokenUsage: TokenUsage | undefined;

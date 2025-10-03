@@ -514,7 +514,7 @@ export class OpenAIClient extends ModelClient {
     return response;
   }
 
-  private isRetryableError(error: any): boolean {
+  protected isRetryableError(error: any): boolean {
     if (error instanceof ModelClientError) {
       return error.retryable;
     }
