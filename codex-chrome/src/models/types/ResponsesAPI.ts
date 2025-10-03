@@ -1,25 +1,8 @@
 // Import types from their respective modules
-import type { TokenUsage } from './TokenUsage';
-import type { RateLimitSnapshot } from './RateLimits';
 import type { ResponseItem } from '../../protocol/types';
 
-/**
- * Response events emitted during model streaming
- * Preserves exact naming from Rust's ResponseEvent enum
- *
- * Rust Reference: codex-rs/core/src/client_common.rs Lines 72-87
- * ✅ ALIGNED: All 9 event types match Rust enum variants exactly (PascalCase)
- */
-export type ResponseEvent =
-  | { type: 'Created' }  // Rust: Created
-  | { type: 'OutputItemDone'; item: ResponseItem }  // Rust: OutputItemDone(ResponseItem)
-  | { type: 'Completed'; responseId: string; tokenUsage?: TokenUsage }  // Rust: Completed { response_id, usage }
-  | { type: 'OutputTextDelta'; delta: string }  // Rust: OutputTextDelta(String)
-  | { type: 'ReasoningSummaryDelta'; delta: string }  // Rust: ReasoningSummaryDelta(String)
-  | { type: 'ReasoningContentDelta'; delta: string }  // Rust: ReasoningContentDelta(String)
-  | { type: 'ReasoningSummaryPartAdded' }  // Rust: ReasoningSummaryPartAdded
-  | { type: 'WebSearchCallBegin'; callId: string }  // Rust: WebSearchCallBegin(String)
-  | { type: 'RateLimits'; snapshot: RateLimitSnapshot };  // Rust: RateLimits(RateLimitSnapshot)
+// Re-export ResponseEvent from its dedicated file
+export type { ResponseEvent } from './ResponseEvent';
 
 
 /**
@@ -43,13 +26,32 @@ export interface ResponsesApiRequest {
 
 /**
  * Prompt structure for model requests
- * Based on Rust's Prompt struct
  *
- * Rust Reference: codex-rs/core/src/client_common.rs Lines 26-69
- * ✅ ALIGNED: Structure matches Rust Prompt struct
+ * This interface matches Rust's Prompt struct exactly, containing the input
+ * messages, tool definitions, and optional configuration overrides.
  *
- * NOTE: This interface already exists and is correctly aligned.
- * No refactoring needed - using existing implementation.
+ * **Rust Reference**: `codex-rs/core/src/client_common.rs` Lines 24-69
+ *
+ * **Type Mapping**:
+ * - Rust `Vec<ResponseItem>` → TypeScript `ResponseItem[]`
+ * - Rust `Vec<OpenAiTool>` → TypeScript `any[]` (tool definitions)
+ * - Rust `Option<String>` → TypeScript `string | undefined`
+ * - Rust `Option<serde_json::Value>` → TypeScript `any | undefined`
+ *
+ * **Field Name Convention**:
+ * - input: Matches Rust exactly
+ * - tools: Matches Rust exactly
+ * - baseInstructionsOverride: camelCase (Rust: base_instructions_override)
+ * - outputSchema: camelCase (Rust: output_schema)
+ *
+ * @example
+ * ```typescript
+ * const prompt: Prompt = {
+ *   input: [{ type: 'message', role: 'user', content: 'Hello' }],
+ *   tools: [],
+ * };
+ * const stream = await client.stream(prompt);
+ * ```
  */
 export interface Prompt {
   /** Conversation context input items */

@@ -12,6 +12,7 @@ import {
   type StreamChunk,
   type RetryConfig,
 } from './ModelClient';
+import { ResponseStream } from './ResponseStream';
 import type {
   ResponseEvent,
   ResponsesApiRequest,
@@ -208,8 +209,90 @@ export class OpenAIResponsesClient extends ModelClient {
     throw new ModelClientError('Direct completion not supported by Responses API - use streamResponses instead');
   }
 
-  async *stream(request: CompletionRequest): AsyncGenerator<StreamChunk> {
-    throw new ModelClientError('Basic streaming not supported by Responses API - use streamResponses instead');
+  /**
+   * Stream a model response using the Responses API
+   *
+   * This method creates and returns a ResponseStream that will emit ResponseEvent
+   * objects as the model generates its response. The stream is returned immediately,
+   * with events being added asynchronously as they arrive from the API.
+   *
+   * **Rust Reference**: `codex-rs/core/src/client.rs` Line 124
+   *
+   * @param prompt The prompt containing input messages and tools
+   * @returns Promise resolving to ResponseStream that yields ResponseEvent objects
+   * @throws ModelClientError if prompt validation fails
+   */
+  async stream(prompt: Prompt): Promise<ResponseStream> {
+    // Validate prompt (matches Rust behavior)
+    if (!prompt.input || prompt.input.length === 0) {
+      throw new ModelClientError('Prompt input is required');
+    }
+
+    // Build request payload
+    const fullInstructions = this.getFullInstructions(prompt);
+    const toolsJson = this.createToolsJsonForResponsesApi(prompt.tools);
+    const reasoning = this.createReasoningParam();
+    const textControls = this.createTextParam(prompt.outputSchema);
+
+    const include: string[] = reasoning ? ['reasoning.encrypted_content'] : [];
+    const azureWorkaround = (this.provider.baseUrl && this.provider.baseUrl.indexOf('azure') !== -1) || false;
+
+    const payload: ResponsesApiRequest = {
+      model: this.currentModel,
+      instructions: fullInstructions,
+      input: prompt.input,
+      tools: toolsJson,
+      tool_choice: 'auto',
+      parallel_tool_calls: false,
+      reasoning,
+      store: azureWorkaround,
+      stream: true,
+      include,
+      prompt_cache_key: this.conversationId,
+      text: textControls,
+    };
+
+    // Retry logic with exponential backoff
+    const maxRetries = this.provider.requestMaxRetries ?? 3;
+    let attempt = 0;
+    let lastError: any;
+
+    while (attempt <= maxRetries) {
+      try {
+        // Make API request - returns ResponseStream immediately
+        return await this.attemptStreamResponses(attempt, payload);
+      } catch (error) {
+        lastError = error;
+
+        // Don't retry on the last attempt
+        if (attempt === maxRetries) {
+          break;
+        }
+
+        // Check for non-retryable errors (e.g., 401)
+        if (error instanceof ModelClientError) {
+          if (error.statusCode === 401) {
+            throw error; // Don't retry auth errors
+          }
+
+          if (error.statusCode && error.statusCode < 500 && error.statusCode !== 429) {
+            throw error; // Don't retry client errors except 429
+          }
+        }
+
+        // Calculate backoff delay
+        let retryAfter: number | undefined;
+        if (error instanceof ModelClientError && error.retryAfter) {
+          retryAfter = error.retryAfter;
+        }
+
+        const delay = this.calculateBackoff(attempt, retryAfter);
+        await new Promise(resolve => setTimeout(resolve, delay));
+        attempt++;
+      }
+    }
+
+    throw lastError;
   }
 
   async *streamCompletion(request: CompletionRequest): AsyncGenerator<ResponseEvent> {
@@ -251,53 +334,44 @@ export class OpenAIResponsesClient extends ModelClient {
   }
 
   /**
-   * Attempt a single streaming request with retry logic
-   * Rust Reference: codex-rs/core/src/client.rs Lines 447-486
+   * Attempt a single streaming request without retry logic
+   *
+   * This method makes a single attempt to create a streaming connection.
+   * It makes the HTTP request synchronously (throwing on connection errors),
+   * then returns a ResponseStream that will be populated asynchronously.
+   *
+   * **Rust Reference**: `codex-rs/core/src/client.rs` Line 269
+   *
+   * @param attempt The attempt number (0-based) for logging/metrics
+   * @param payload The API request payload
+   * @returns Promise resolving to ResponseStream
+   * @throws Error if the connection fails or response is invalid
    */
-  protected async *attemptStreamResponses(
-    request: CompletionRequest,
-    attempt: number
-  ): AsyncGenerator<ResponseEvent, void, unknown> {
-    // Convert to prompt format
-    const prompt: Prompt = {
-      input: request.messages.map(msg => ({
-        type: 'message' as const,
-        role: msg.role,
-        content: msg.content || '',
-      })),
-      tools: request.tools || [],
-    };
-
-    const fullInstructions = this.getFullInstructions(prompt);
-    const toolsJson = this.createToolsJsonForResponsesApi(prompt.tools);
-    const reasoning = this.createReasoningParam();
-    const textControls = this.createTextParam(prompt.outputSchema);
-
-    const include: string[] = reasoning ? ['reasoning.encrypted_content'] : [];
-    const azureWorkaround = (this.provider.baseUrl && this.provider.baseUrl.indexOf('azure') !== -1) || false;
-
-    const payload: ResponsesApiRequest = {
-      model: this.currentModel,
-      instructions: fullInstructions,
-      input: prompt.input,
-      tools: toolsJson,
-      tool_choice: 'auto',
-      parallel_tool_calls: false,
-      reasoning,
-      store: azureWorkaround,
-      stream: true,
-      include,
-      prompt_cache_key: this.conversationId,
-      text: textControls,
-    };
-
+  protected async attemptStreamResponses(
+    attempt: number,
+    payload: any
+  ): Promise<ResponseStream> {
+    // Make HTTP request - this will throw on connection errors (401, 429, etc.)
     const response = await this.makeResponsesApiRequest(payload);
 
     if (!response.body) {
       throw new ModelClientError('Response body is null');
     }
 
-    yield* this.processSSE(response.body, response.headers);
+    // Create stream and start processing asynchronously
+    const stream = new ResponseStream();
+
+    // Spawn async task to populate stream from SSE
+    (async () => {
+      try {
+        await this.processSSEToStream(response.body!, response.headers, stream);
+        stream.complete();
+      } catch (error) {
+        stream.error(error as Error);
+      }
+    })();
+
+    return stream;
   }
 
   /**
@@ -385,7 +459,108 @@ export class OpenAIResponsesClient extends ModelClient {
   }
 
   /**
-   * Process Server-Sent Events stream from Responses API
+   * Process Server-Sent Events stream and populate ResponseStream
+   *
+   * This method processes the SSE stream from the API and adds events to the
+   * provided ResponseStream. It matches the Rust implementation's event processing
+   * logic exactly.
+   *
+   * **Rust Reference**: `codex-rs/core/src/client.rs` Lines 488-550
+   *
+   * @param body ReadableStream from fetch response
+   * @param headers HTTP response headers
+   * @param stream ResponseStream to populate with events
+   */
+  private async processSSEToStream(
+    body: ReadableStream<Uint8Array>,
+    headers: Headers | undefined,
+    stream: ResponseStream
+  ): Promise<void> {
+    // Parse rate limit information from headers (yield first, per Rust)
+    const rateLimitSnapshot = this.parseRateLimitSnapshot(headers);
+    if (rateLimitSnapshot) {
+      stream.addEvent({ type: 'RateLimits', snapshot: rateLimitSnapshot });
+    }
+
+    const reader = body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let responseCompleted: ResponseCompleted | null = null;
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+
+        if (done) {
+          // Handle completion - yield Completed event at stream end
+          if (responseCompleted) {
+            stream.addEvent({
+              type: 'Completed',
+              responseId: responseCompleted.id,
+              tokenUsage: responseCompleted.usage ? this.convertTokenUsage(responseCompleted.usage) : undefined,
+            });
+          } else {
+            throw new Error('Stream closed before response.completed');
+          }
+          break;
+        }
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+
+        // Use optimized batch processing for better performance
+        const dataLines = lines
+          .filter(line => {
+            const trimmed = line.trim();
+            return trimmed && trimmed.indexOf('data: ') === 0;
+          })
+          .map(line => line.slice(6)); // Remove 'data: ' prefix
+
+        if (dataLines.length === 0) continue;
+
+        // Check for [DONE] signal
+        if (dataLines.some(data => data === '[DONE]')) {
+          break;
+        }
+
+        // Process events using optimized parser
+        for (const data of dataLines) {
+          try {
+            const event = this.sseParser.parse(data);
+            if (event) {
+              const responseEvents = this.sseParser.processEvent(event);
+
+              for (const responseEvent of responseEvents) {
+                // Store Completed event to yield at stream end (Rust behavior)
+                if (responseEvent.type === 'Completed' && 'responseId' in responseEvent) {
+                  responseCompleted = {
+                    id: responseEvent.responseId,
+                    usage: responseEvent.tokenUsage ? this.convertToApiUsage(responseEvent.tokenUsage) : undefined,
+                  };
+                } else {
+                  // Add all other events immediately
+                  stream.addEvent(responseEvent);
+                }
+              }
+            }
+          } catch (error) {
+            // SSEEventParser.processEvent() throws on response.failed
+            throw error;
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  /**
+   * Process Server-Sent Events stream from Responses API (legacy AsyncGenerator version)
+   *
+   * This is kept for backward compatibility with streamResponsesInternal().
+   * New code should use processSSEToStream() instead.
+   *
    * Rust Reference: codex-rs/core/src/client.rs Lines 488-550
    */
   protected async *processSSE(
@@ -403,7 +578,6 @@ export class OpenAIResponsesClient extends ModelClient {
     const decoder = new TextDecoder();
     let buffer = '';
     let responseCompleted: ResponseCompleted | null = null;
-    let responseError: Error | null = null;
 
     try {
       while (true) {
@@ -418,7 +592,7 @@ export class OpenAIResponsesClient extends ModelClient {
               tokenUsage: responseCompleted.usage ? this.convertTokenUsage(responseCompleted.usage) : undefined,
             };
           } else {
-            throw responseError || new Error('Stream closed before response.completed');
+            throw new Error('Stream closed before response.completed');
           }
           break;
         }
@@ -449,12 +623,15 @@ export class OpenAIResponsesClient extends ModelClient {
             const responseEvents = this.sseParser.processEvent(event);
 
             for (const responseEvent of responseEvents) {
-              const convertedEvent = this.convertSSEEventToResponseEvent(responseEvent);
-              if (convertedEvent) {
-                if (convertedEvent.type === 'Completed' && 'responseId' in convertedEvent) {
-                  responseCompleted = { id: convertedEvent.responseId };
-                }
-                yield convertedEvent;
+              // Store Completed event to yield at stream end
+              if (responseEvent.type === 'Completed' && 'responseId' in responseEvent) {
+                responseCompleted = {
+                  id: responseEvent.responseId,
+                  usage: responseEvent.tokenUsage ? this.convertToApiUsage(responseEvent.tokenUsage) : undefined,
+                };
+              } else {
+                // Yield all other events immediately
+                yield responseEvent;
               }
             }
           }
@@ -681,14 +858,14 @@ export class OpenAIResponsesClient extends ModelClient {
       headers,
       'x-codex-primary-used-percent',
       'x-codex-primary-window-minutes',
-      'x-codex-primary-reset-after-seconds'
+      'x-codex-primary-resets-in-seconds'
     );
 
     const secondary = this.parseRateLimitWindow(
       headers,
       'x-codex-secondary-used-percent',
       'x-codex-secondary-window-minutes',
-      'x-codex-secondary-reset-after-seconds'
+      'x-codex-secondary-resets-in-seconds'
     );
 
     if (!primary && !secondary) {
@@ -742,6 +919,23 @@ export class OpenAIResponsesClient extends ModelClient {
       cached_input_tokens: usage.input_tokens_details?.cached_tokens || 0,
       output_tokens: usage.output_tokens,
       reasoning_output_tokens: usage.output_tokens_details?.reasoning_tokens || 0,
+      total_tokens: usage.total_tokens,
+    };
+  }
+
+  /**
+   * Convert internal TokenUsage back to API usage format
+   */
+  private convertToApiUsage(usage: TokenUsage): ResponseCompletedUsage {
+    return {
+      input_tokens: usage.input_tokens,
+      input_tokens_details: usage.cached_input_tokens ? {
+        cached_tokens: usage.cached_input_tokens,
+      } : undefined,
+      output_tokens: usage.output_tokens,
+      output_tokens_details: usage.reasoning_output_tokens ? {
+        reasoning_tokens: usage.reasoning_output_tokens,
+      } : undefined,
       total_tokens: usage.total_tokens,
     };
   }
