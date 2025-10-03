@@ -6,17 +6,20 @@ import type { ResponseItem } from '../../protocol/types';
 /**
  * Response events emitted during model streaming
  * Preserves exact naming from Rust's ResponseEvent enum
+ *
+ * Rust Reference: codex-rs/core/src/client_common.rs Lines 72-87
+ * ✅ ALIGNED: All 9 event types match Rust enum variants exactly (PascalCase)
  */
 export type ResponseEvent =
-  | { type: 'Created' }
-  | { type: 'OutputItemDone'; item: ResponseItem }
-  | { type: 'Completed'; responseId: string; tokenUsage?: TokenUsage }
-  | { type: 'OutputTextDelta'; delta: string }
-  | { type: 'ReasoningSummaryDelta'; delta: string }
-  | { type: 'ReasoningContentDelta'; delta: string }
-  | { type: 'ReasoningSummaryPartAdded' }
-  | { type: 'WebSearchCallBegin'; callId: string }
-  | { type: 'RateLimits'; snapshot: RateLimitSnapshot };
+  | { type: 'Created' }  // Rust: Created
+  | { type: 'OutputItemDone'; item: ResponseItem }  // Rust: OutputItemDone(ResponseItem)
+  | { type: 'Completed'; responseId: string; tokenUsage?: TokenUsage }  // Rust: Completed { response_id, usage }
+  | { type: 'OutputTextDelta'; delta: string }  // Rust: OutputTextDelta(String)
+  | { type: 'ReasoningSummaryDelta'; delta: string }  // Rust: ReasoningSummaryDelta(String)
+  | { type: 'ReasoningContentDelta'; delta: string }  // Rust: ReasoningContentDelta(String)
+  | { type: 'ReasoningSummaryPartAdded' }  // Rust: ReasoningSummaryPartAdded
+  | { type: 'WebSearchCallBegin'; callId: string }  // Rust: WebSearchCallBegin(String)
+  | { type: 'RateLimits'; snapshot: RateLimitSnapshot };  // Rust: RateLimits(RateLimitSnapshot)
 
 
 /**
@@ -41,16 +44,22 @@ export interface ResponsesApiRequest {
 /**
  * Prompt structure for model requests
  * Based on Rust's Prompt struct
+ *
+ * Rust Reference: codex-rs/core/src/client_common.rs Lines 26-69
+ * ✅ ALIGNED: Structure matches Rust Prompt struct
+ *
+ * NOTE: This interface already exists and is correctly aligned.
+ * No refactoring needed - using existing implementation.
  */
 export interface Prompt {
   /** Conversation context input items */
-  input: ResponseItem[];
+  input: ResponseItem[];  // Rust: input: Vec<ResponseItem>
   /** Tools available to the model */
-  tools: any[];
+  tools: any[];  // Rust: tools: Vec<OpenAiTool>
   /** Optional override for base instructions */
-  baseInstructionsOverride?: string;
+  baseInstructionsOverride?: string;  // Rust: base_instructions_override: Option<String>
   /** Optional output schema for the model's response */
-  outputSchema?: any;
+  outputSchema?: any;  // Rust: output_schema: Option<serde_json::Value>
 }
 
 /**
