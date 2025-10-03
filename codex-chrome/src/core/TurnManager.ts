@@ -162,11 +162,8 @@ export class TurnManager {
     // Process missing call IDs (calls that were interrupted)
     const processedPrompt = this.processMissingCalls(prompt);
 
-    // Create streaming request
-    const request = await this.buildCompletionRequest(processedPrompt);
-
-    // Start model streaming
-    const stream = await this.turnContext.getModelClient().stream(request);
+    // Start model streaming (using new Prompt-based stream() API)
+    const stream = await this.turnContext.getModelClient().stream(processedPrompt);
 
     const processedItems: ProcessedResponseItem[] = [];
     let totalTokenUsage: TokenUsage | undefined;

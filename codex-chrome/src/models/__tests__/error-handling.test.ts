@@ -758,3 +758,452 @@ describe('Integration with ModelClient Base Class', () => {
     })).toThrow(ModelClientError);
   });
 });
+
+/**
+ * T008: Error Handling and Retries Integration Tests
+ * Reference: tasks.md T008
+ * Rust Reference: codex-rs/core/src/client.rs:549-622
+ *
+ * These tests verify error handling and retry logic for the Responses API
+ * matching Rust behavior exactly.
+ */
+describe('T008: Error Handling and Retries Integration', () => {
+  let client: any;
+  let mockModelFamily: any;
+  let mockProvider: any;
+
+  beforeEach(async () => {
+    // Dynamically import to avoid module resolution issues during testing
+    const { OpenAIResponsesClient } = await import('../OpenAIResponsesClient');
+
+    mockModelFamily = {
+      family: 'gpt-4',
+      baseInstructions: 'You are a helpful assistant.',
+      supportsReasoningSummaries: false,
+      needsSpecialApplyPatchInstructions: false,
+    };
+
+    mockProvider = {
+      name: 'openai',
+      baseUrl: 'https://api.openai.com/v1',
+      wireApi: 'responses' as const,
+      requestMaxRetries: 3,
+      streamIdleTimeoutMs: 60000,
+    };
+
+    client = new OpenAIResponsesClient(
+      {
+        apiKey: 'test-api-key',
+        conversationId: 'error-test',
+        modelFamily: mockModelFamily,
+        provider: mockProvider,
+      },
+      { maxRetries: 3, baseDelayMs: 100 }
+    );
+
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  describe('Invalid API Key (401) - No Retries', () => {
+    it('throws immediately on 401 authentication error without retrying', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        statusText: 'Unauthorized',
+        text: async () => JSON.stringify({
+          error: {
+            message: 'Invalid API key provided',
+            type: 'invalid_request_error',
+            code: 'invalid_api_key',
+          },
+        }),
+        headers: new Headers(),
+      } as Response);
+
+      const prompt = {
+        input: [{ type: 'message' as const, role: 'user' as const, content: 'Test' }],
+        tools: [],
+      };
+
+      // Contract: 401 errors should NOT retry (Rust client.rs:573-577)
+      await expect(client.stream(prompt)).rejects.toThrow(/invalid api key|unauthorized/i);
+
+      // Should only be called once (no retries)
+      expect(global.fetch).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('Empty Input Validation', () => {
+    it('throws ModelClientError on empty input array', async () => {
+      const prompt = {
+        input: [],
+        tools: [],
+      };
+
+      // Contract: Must validate before making API call (Rust client.rs:258-261)
+      await expect(client.stream(prompt)).rejects.toThrow();
+
+      // Should not make any API calls
+      expect(global.fetch).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('429 Rate Limit - Retry with Exponential Backoff', () => {
+    it('retries 429 errors with exponential backoff', async () => {
+      let callCount = 0;
+
+      global.fetch = vi.fn().mockImplementation(async () => {
+        callCount++;
+
+        if (callCount < 3) {
+          // First 2 calls return 429
+          return {
+            ok: false,
+            status: 429,
+            statusText: 'Too Many Requests',
+            text: async () => JSON.stringify({
+              error: {
+                message: 'Rate limit exceeded. Please retry after 2 seconds.',
+                type: 'rate_limit_error',
+                code: 'rate_limit_exceeded',
+              },
+            }),
+            headers: new Headers({
+              'retry-after': '2',
+              'x-ratelimit-limit': '100',
+              'x-ratelimit-remaining': '0',
+              'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 120),
+            }),
+          } as Response;
+        }
+
+        // Third call succeeds
+        return {
+          ok: true,
+          headers: new Headers(),
+          body: new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode('data: {"type":"response.created","response":{"id":"test"}}\\n\\n')
+              );
+              controller.enqueue(
+                new TextEncoder().encode('data: {"type":"response.completed","response":{"id":"test"}}\\n\\n')
+              );
+              controller.close();
+            },
+          }),
+        } as Response;
+      });
+
+      const prompt = {
+        input: [{ type: 'message' as const, role: 'user' as const, content: 'Test' }],
+        tools: [],
+      };
+
+      // Contract: Should retry 429 errors (Rust client.rs:581-594)
+      const streamPromise = client.stream(prompt);
+
+      // Advance through retry delays
+      await vi.advanceTimersToNextTimerAsync();
+      await vi.advanceTimersToNextTimerAsync();
+
+      const stream = await streamPromise;
+
+      // Should have retried and succeeded
+      expect(callCount).toBeGreaterThanOrEqual(2);
+      expect(stream).toBeDefined();
+    });
+
+    it('respects retry-after header from 429 response', async () => {
+      let callCount = 0;
+      const retryAfterSeconds = 5;
+
+      global.fetch = vi.fn().mockImplementation(async () => {
+        callCount++;
+
+        if (callCount === 1) {
+          return {
+            ok: false,
+            status: 429,
+            statusText: 'Too Many Requests',
+            text: async () => JSON.stringify({
+              error: { message: 'Rate limit exceeded', type: 'rate_limit_error' },
+            }),
+            headers: new Headers({
+              'retry-after': String(retryAfterSeconds),
+            }),
+          } as Response;
+        }
+
+        return {
+          ok: true,
+          headers: new Headers(),
+          body: new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode('data: {"type":"response.created","response":{"id":"test"}}\\n\\n')
+              );
+              controller.close();
+            },
+          }),
+        } as Response;
+      });
+
+      const prompt = {
+        input: [{ type: 'message' as const, role: 'user' as const, content: 'Test' }],
+        tools: [],
+      };
+
+      const streamPromise = client.stream(prompt);
+
+      // Should wait approximately retry-after seconds
+      await vi.advanceTimersByTimeAsync((retryAfterSeconds * 1000) + 500);
+
+      await streamPromise;
+
+      expect(callCount).toBe(2);
+    });
+  });
+
+  describe('5xx Server Errors - Retry with Backoff', () => {
+    it('retries 500 internal server errors', async () => {
+      let callCount = 0;
+
+      global.fetch = vi.fn().mockImplementation(async () => {
+        callCount++;
+
+        if (callCount === 1) {
+          return {
+            ok: false,
+            status: 500,
+            statusText: 'Internal Server Error',
+            text: async () => JSON.stringify({
+              error: { message: 'Internal server error', type: 'server_error' },
+            }),
+            headers: new Headers(),
+          } as Response;
+        }
+
+        return {
+          ok: true,
+          headers: new Headers(),
+          body: new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode('data: {"type":"response.created","response":{"id":"test"}}\\n\\n')
+              );
+              controller.close();
+            },
+          }),
+        } as Response;
+      });
+
+      const prompt = {
+        input: [{ type: 'message' as const, role: 'user' as const, content: 'Test' }],
+        tools: [],
+      };
+
+      const streamPromise = client.stream(prompt);
+
+      await vi.advanceTimersToNextTimerAsync();
+
+      await streamPromise;
+
+      // Contract: 5xx errors should retry (Rust client.rs:595-607)
+      expect(callCount).toBe(2);
+    });
+
+    it('retries 503 service unavailable errors', async () => {
+      let callCount = 0;
+
+      global.fetch = vi.fn().mockImplementation(async () => {
+        callCount++;
+
+        if (callCount < 2) {
+          return {
+            ok: false,
+            status: 503,
+            statusText: 'Service Unavailable',
+            text: async () => JSON.stringify({
+              error: { message: 'Service temporarily unavailable', type: 'server_error' },
+            }),
+            headers: new Headers(),
+          } as Response;
+        }
+
+        return {
+          ok: true,
+          headers: new Headers(),
+          body: new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode('data: {"type":"response.created","response":{"id":"test"}}\\n\\n')
+              );
+              controller.close();
+            },
+          }),
+        } as Response;
+      });
+
+      const prompt = {
+        input: [{ type: 'message' as const, role: 'user' as const, content: 'Test' }],
+        tools: [],
+      };
+
+      const streamPromise = client.stream(prompt);
+
+      await vi.advanceTimersToNextTimerAsync();
+
+      await streamPromise;
+
+      expect(callCount).toBeGreaterThanOrEqual(2);
+    });
+  });
+
+  describe('Max Retries Exhausted', () => {
+    it('throws after max retries are exhausted', async () => {
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: false,
+        status: 503,
+        statusText: 'Service Unavailable',
+        text: async () => JSON.stringify({
+          error: { message: 'Service unavailable', type: 'server_error' },
+        }),
+        headers: new Headers(),
+      } as Response);
+
+      const prompt = {
+        input: [{ type: 'message' as const, role: 'user' as const, content: 'Test' }],
+        tools: [],
+      };
+
+      const streamPromise = client.stream(prompt);
+
+      // Advance through all retry attempts (maxRetries = 3)
+      for (let i = 0; i <= 3; i++) {
+        await vi.advanceTimersToNextTimerAsync();
+      }
+
+      // Contract: Should throw after all retries exhausted (Rust client.rs:608-622)
+      await expect(streamPromise).rejects.toThrow(/service unavailable|server error/i);
+
+      // Should have tried initial + 3 retries = 4 total
+      expect(global.fetch).toHaveBeenCalledTimes(4);
+    });
+  });
+
+  describe('Exponential Backoff Verification', () => {
+    it('increases delay exponentially between retries', async () => {
+      const delays: number[] = [];
+      let callCount = 0;
+      let lastCallTime = Date.now();
+
+      global.fetch = vi.fn().mockImplementation(async () => {
+        const now = Date.now();
+        if (callCount > 0) {
+          delays.push(now - lastCallTime);
+        }
+        lastCallTime = now;
+        callCount++;
+
+        if (callCount <= 3) {
+          return {
+            ok: false,
+            status: 503,
+            statusText: 'Service Unavailable',
+            text: async () => JSON.stringify({
+              error: { message: 'Service unavailable', type: 'server_error' },
+            }),
+            headers: new Headers(),
+          } as Response;
+        }
+
+        return {
+          ok: true,
+          headers: new Headers(),
+          body: new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode('data: {"type":"response.created","response":{"id":"test"}}\\n\\n')
+              );
+              controller.close();
+            },
+          }),
+        } as Response;
+      });
+
+      const prompt = {
+        input: [{ type: 'message' as const, role: 'user' as const, content: 'Test' }],
+        tools: [],
+      };
+
+      const streamPromise = client.stream(prompt);
+
+      // Advance through all retries
+      for (let i = 0; i < 4; i++) {
+        await vi.advanceTimersToNextTimerAsync();
+      }
+
+      await streamPromise;
+
+      // Contract: Each delay should be larger than previous (exponential)
+      // Formula: baseDelay * 2^attempt with jitter (Rust client.rs:549-564)
+      expect(delays.length).toBeGreaterThan(0);
+
+      // First delay should be around baseDelayMs (100ms)
+      if (delays.length > 0) {
+        expect(delays[0]).toBeGreaterThan(80); // Account for jitter
+      }
+
+      // Each subsequent delay should generally increase (exponential pattern)
+      if (delays.length > 1) {
+        expect(delays[1]).toBeGreaterThan(delays[0] * 0.8); // Allow for jitter variance
+      }
+    });
+  });
+
+  describe('Network Errors - Retry Logic', () => {
+    it('retries on network connection errors', async () => {
+      let callCount = 0;
+
+      global.fetch = vi.fn().mockImplementation(async () => {
+        callCount++;
+
+        if (callCount === 1) {
+          throw Object.assign(new Error('Connection reset'), { code: 'ECONNRESET' });
+        }
+
+        return {
+          ok: true,
+          headers: new Headers(),
+          body: new ReadableStream({
+            start(controller) {
+              controller.enqueue(
+                new TextEncoder().encode('data: {"type":"response.created","response":{"id":"test"}}\\n\\n')
+              );
+              controller.close();
+            },
+          }),
+        } as Response;
+      });
+
+      const prompt = {
+        input: [{ type: 'message' as const, role: 'user' as const, content: 'Test' }],
+        tools: [],
+      };
+
+      const streamPromise = client.stream(prompt);
+
+      await vi.advanceTimersToNextTimerAsync();
+
+      await streamPromise;
+
+      // Should have retried network error
+      expect(callCount).toBe(2);
+    });
+  });
+});

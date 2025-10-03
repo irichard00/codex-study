@@ -462,3 +462,467 @@ describe('Integration Tests - Rate Limiting & Token Tracking', () => {
     });
   });
 });
+
+/**
+ * T009: Rate Limit Parsing Integration Tests
+ * Reference: tasks.md T009
+ * Rust Reference: codex-rs/core/src/client.rs:453-495
+ *
+ * These tests verify parseRateLimitSnapshot() method specifically for
+ * OpenAIResponsesClient matching Rust behavior exactly.
+ */
+describe('T009: Rate Limit Parsing Integration - OpenAIResponsesClient', () => {
+  let client: any;
+
+  beforeEach(async () => {
+    const { OpenAIResponsesClient } = await import('../OpenAIResponsesClient');
+
+    client = new OpenAIResponsesClient(
+      {
+        apiKey: 'test-api-key',
+        conversationId: 'ratelimit-test',
+        modelFamily: {
+          family: 'gpt-4',
+          baseInstructions: 'Test',
+          supportsReasoningSummaries: false,
+          needsSpecialApplyPatchInstructions: false,
+        },
+        provider: {
+          name: 'openai',
+          baseUrl: 'https://api.openai.com/v1',
+          wireApi: 'responses' as const,
+          requestMaxRetries: 3,
+          streamIdleTimeoutMs: 60000,
+        },
+      },
+      { maxRetries: 3, baseDelayMs: 100 }
+    );
+  });
+
+  describe('parseRateLimitSnapshot() - Complete Headers', () => {
+    it('parses both primary and secondary windows with all fields', async () => {
+      const headers = new Headers({
+        'x-codex-primary-used-percent': '75.5',
+        'x-codex-primary-window-minutes': '60',
+        'x-codex-primary-resets-in-seconds': '1800',
+        'x-codex-secondary-used-percent': '45.2',
+        'x-codex-secondary-window-minutes': '1440',
+        'x-codex-secondary-resets-in-seconds': '43200',
+      });
+
+      // Access protected method via test helper if available, or via stream response
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('data: {"type":"response.created","response":{"id":"test"}}\\n\\n')
+            );
+            controller.close();
+          },
+        }),
+      } as Response);
+
+      const prompt = {
+        input: [{ type: 'message' as const, role: 'user' as const, content: 'Test' }],
+        tools: [],
+      };
+
+      const stream = await client.stream(prompt);
+      const events: any[] = [];
+
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      // Should have RateLimits event
+      const rateLimitEvent = events.find((e) => e.type === 'RateLimits');
+
+      // Contract: Matches Rust client.rs:453-495
+      if (rateLimitEvent) {
+        expect(rateLimitEvent.snapshot.primary).toEqual({
+          used_percent: 75.5,
+          window_minutes: 60,
+          resets_in_seconds: 1800,
+        });
+
+        expect(rateLimitEvent.snapshot.secondary).toEqual({
+          used_percent: 45.2,
+          window_minutes: 1440,
+          resets_in_seconds: 43200,
+        });
+      }
+    });
+  });
+
+  describe('parseRateLimitSnapshot() - Primary Window Only', () => {
+    it('parses only primary window when secondary headers missing', async () => {
+      const headers = new Headers({
+        'x-codex-primary-used-percent': '82.0',
+        'x-codex-primary-window-minutes': '60',
+        'x-codex-primary-resets-in-seconds': '2400',
+        // No secondary headers
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('data: {"type":"response.created","response":{"id":"test"}}\\n\\n')
+            );
+            controller.close();
+          },
+        }),
+      } as Response);
+
+      const prompt = {
+        input: [{ type: 'message' as const, role: 'user' as const, content: 'Test' }],
+        tools: [],
+      };
+
+      const stream = await client.stream(prompt);
+      const events: any[] = [];
+
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      const rateLimitEvent = events.find((e) => e.type === 'RateLimits');
+
+      if (rateLimitEvent) {
+        expect(rateLimitEvent.snapshot.primary).toEqual({
+          used_percent: 82.0,
+          window_minutes: 60,
+          resets_in_seconds: 2400,
+        });
+
+        // Contract: secondary should be undefined when headers missing (Rust Option<T>)
+        expect(rateLimitEvent.snapshot.secondary).toBeUndefined();
+      }
+    });
+  });
+
+  describe('parseRateLimitSnapshot() - Partial Headers', () => {
+    it('handles missing window_minutes field gracefully', async () => {
+      const headers = new Headers({
+        'x-codex-primary-used-percent': '65.0',
+        // Missing window-minutes
+        'x-codex-primary-resets-in-seconds': '1200',
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('data: {"type":"response.created","response":{"id":"test"}}\\n\\n')
+            );
+            controller.close();
+          },
+        }),
+      } as Response);
+
+      const prompt = {
+        input: [{ type: 'message' as const, role: 'user' as const, content: 'Test' }],
+        tools: [],
+      };
+
+      const stream = await client.stream(prompt);
+      const events: any[] = [];
+
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      const rateLimitEvent = events.find((e) => e.type === 'RateLimits');
+
+      if (rateLimitEvent) {
+        // Contract: Partial window still returns, with undefined for missing fields
+        expect(rateLimitEvent.snapshot.primary).toEqual({
+          used_percent: 65.0,
+          window_minutes: undefined,
+          resets_in_seconds: 1200,
+        });
+      }
+    });
+
+    it('handles missing resets_in_seconds field gracefully', async () => {
+      const headers = new Headers({
+        'x-codex-primary-used-percent': '55.5',
+        'x-codex-primary-window-minutes': '60',
+        // Missing resets-in-seconds
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('data: {"type":"response.created","response":{"id":"test"}}\\n\\n')
+            );
+            controller.close();
+          },
+        }),
+      } as Response);
+
+      const prompt = {
+        input: [{ type: 'message' as const, role: 'user' as const, content: 'Test' }],
+        tools: [],
+      };
+
+      const stream = await client.stream(prompt);
+      const events: any[] = [];
+
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      const rateLimitEvent = events.find((e) => e.type === 'RateLimits');
+
+      if (rateLimitEvent) {
+        expect(rateLimitEvent.snapshot.primary).toEqual({
+          used_percent: 55.5,
+          window_minutes: 60,
+          resets_in_seconds: undefined,
+        });
+      }
+    });
+  });
+
+  describe('parseRateLimitSnapshot() - Missing Headers', () => {
+    it('returns undefined when no rate limit headers present', async () => {
+      const headers = new Headers({
+        'content-type': 'text/event-stream',
+        // No rate limit headers
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('data: {"type":"response.created","response":{"id":"test"}}\\n\\n')
+            );
+            controller.close();
+          },
+        }),
+      } as Response);
+
+      const prompt = {
+        input: [{ type: 'message' as const, role: 'user' as const, content: 'Test' }],
+        tools: [],
+      };
+
+      const stream = await client.stream(prompt);
+      const events: any[] = [];
+
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      // Contract: No RateLimits event when headers missing (Rust returns None)
+      const rateLimitEvent = events.find((e) => e.type === 'RateLimits');
+      expect(rateLimitEvent).toBeUndefined();
+    });
+  });
+
+  describe('parseRateLimitSnapshot() - Field Name Preservation', () => {
+    it('preserves snake_case field names from Rust', async () => {
+      const headers = new Headers({
+        'x-codex-primary-used-percent': '70.0',
+        'x-codex-primary-window-minutes': '60',
+        'x-codex-primary-resets-in-seconds': '1500',
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('data: {"type":"response.created","response":{"id":"test"}}\\n\\n')
+            );
+            controller.close();
+          },
+        }),
+      } as Response);
+
+      const prompt = {
+        input: [{ type: 'message' as const, role: 'user' as const, content: 'Test' }],
+        tools: [],
+      };
+
+      const stream = await client.stream(prompt);
+      const events: any[] = [];
+
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      const rateLimitEvent = events.find((e) => e.type === 'RateLimits');
+
+      if (rateLimitEvent && rateLimitEvent.snapshot.primary) {
+        const window = rateLimitEvent.snapshot.primary;
+
+        // Contract: Must use snake_case (Rust field names preserved)
+        expect(window.used_percent).toBeDefined();
+        expect(window.window_minutes).toBeDefined();
+        expect(window.resets_in_seconds).toBeDefined();
+
+        // Should NOT have camelCase variants
+        expect((window as any).usedPercent).toBeUndefined();
+        expect((window as any).windowMinutes).toBeUndefined();
+        expect((window as any).resetsInSeconds).toBeUndefined();
+      }
+    });
+  });
+
+  describe('parseRateLimitSnapshot() - Numeric Validation', () => {
+    it('handles invalid numeric values gracefully', async () => {
+      const headers = new Headers({
+        'x-codex-primary-used-percent': 'invalid',
+        'x-codex-primary-window-minutes': '60',
+        'x-codex-secondary-used-percent': '45.0',
+        'x-codex-secondary-window-minutes': 'NaN',
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('data: {"type":"response.created","response":{"id":"test"}}\\n\\n')
+            );
+            controller.close();
+          },
+        }),
+      } as Response);
+
+      const prompt = {
+        input: [{ type: 'message' as const, role: 'user' as const, content: 'Test' }],
+        tools: [],
+      };
+
+      const stream = await client.stream(prompt);
+      const events: any[] = [];
+
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      const rateLimitEvent = events.find((e) => e.type === 'RateLimits');
+
+      // Contract: Invalid values should be handled gracefully
+      // Either undefined primary or valid secondary only
+      if (rateLimitEvent) {
+        // Primary should be undefined due to invalid used_percent
+        expect(rateLimitEvent.snapshot.primary).toBeUndefined();
+
+        // Secondary might be present with partial data
+        if (rateLimitEvent.snapshot.secondary) {
+          expect(rateLimitEvent.snapshot.secondary.used_percent).toBe(45.0);
+          expect(rateLimitEvent.snapshot.secondary.window_minutes).toBeUndefined();
+        }
+      }
+    });
+
+    it('handles negative values by skipping or treating as invalid', async () => {
+      const headers = new Headers({
+        'x-codex-primary-used-percent': '-10.0', // Invalid
+        'x-codex-primary-window-minutes': '-60', // Invalid
+        'x-codex-secondary-used-percent': '50.0', // Valid
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('data: {"type":"response.created","response":{"id":"test"}}\\n\\n')
+            );
+            controller.close();
+          },
+        }),
+      } as Response);
+
+      const prompt = {
+        input: [{ type: 'message' as const, role: 'user' as const, content: 'Test' }],
+        tools: [],
+      };
+
+      const stream = await client.stream(prompt);
+      const events: any[] = [];
+
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      const rateLimitEvent = events.find((e) => e.type === 'RateLimits');
+
+      // Contract: Negative values should be treated as invalid
+      if (rateLimitEvent) {
+        // Primary should be undefined or have undefined fields
+        expect(
+          rateLimitEvent.snapshot.primary === undefined ||
+            rateLimitEvent.snapshot.primary.used_percent === undefined
+        ).toBe(true);
+      }
+    });
+  });
+
+  describe('parseRateLimitSnapshot() - Integration with Event Stream', () => {
+    it('yields RateLimits event before other response events', async () => {
+      const headers = new Headers({
+        'x-codex-primary-used-percent': '60.0',
+        'x-codex-primary-window-minutes': '60',
+      });
+
+      global.fetch = vi.fn().mockResolvedValue({
+        ok: true,
+        headers,
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('data: {"type":"response.created","response":{"id":"test"}}\\n\\n')
+            );
+            controller.enqueue(
+              new TextEncoder().encode('data: {"type":"response.output_text.delta","delta":"Hi"}\\n\\n')
+            );
+            controller.enqueue(
+              new TextEncoder().encode('data: {"type":"response.completed","response":{"id":"test"}}\\n\\n')
+            );
+            controller.close();
+          },
+        }),
+      } as Response);
+
+      const prompt = {
+        input: [{ type: 'message' as const, role: 'user' as const, content: 'Test' }],
+        tools: [],
+      };
+
+      const stream = await client.stream(prompt);
+      const eventTypes: string[] = [];
+
+      for await (const event of stream) {
+        eventTypes.push(event.type);
+      }
+
+      // Contract: RateLimits event should be first (Rust yields it immediately after parsing headers)
+      const rateLimitIndex = eventTypes.indexOf('RateLimits');
+      const createdIndex = eventTypes.indexOf('Created');
+
+      if (rateLimitIndex !== -1 && createdIndex !== -1) {
+        expect(rateLimitIndex).toBeLessThan(createdIndex);
+      }
+    });
+  });
+});

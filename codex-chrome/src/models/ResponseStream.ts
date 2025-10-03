@@ -1,4 +1,4 @@
-import { ResponseEvent } from './types/ResponseEvent';
+import type { ResponseEvent } from './types/ResponseEvent';
 
 /**
  * Configuration for ResponseStream behavior
@@ -27,14 +27,51 @@ export class ResponseStreamError extends Error {
 }
 
 /**
- * Async iterable stream of ResponseEvent objects with buffering and backpressure handling
- * Implements the async iterator protocol for streaming SSE events
+ * Async iterable stream of ResponseEvent objects
+ *
+ * This class implements a producer-consumer pattern matching Rust's mpsc::channel behavior.
+ * Events are added by the producer (API response handler) and consumed via async iteration.
+ *
+ * **Rust Reference**: `codex-rs/core/src/client_common.rs` Lines 149-164
+ *
+ * **Pattern**:
+ * - Producer: Calls `addEvent()` to send events → Rust: `tx_event.send(Ok(event))`
+ * - Consumer: Uses `for await` to receive events → Rust: `rx_event.recv()`
+ * - Completion: Calls `complete()` → Rust: `tx_event` is dropped
+ * - Error: Calls `error()` → Rust: `tx_event.send(Err(e))`
+ *
+ * **Features**:
+ * - Buffering: Events are queued until consumed
+ * - Backpressure: Optional buffer size limit throws when exceeded
+ * - Timeout: Configurable idle timeout for event arrival
+ * - Abort: Cancellation via AbortSignal
+ *
+ * **Type Mapping**:
+ * - Rust `mpsc::Sender<Result<ResponseEvent>>` → TypeScript `addEvent()` / `error()` methods
+ * - Rust `mpsc::Receiver<Result<ResponseEvent>>` → TypeScript async iterator
+ * - Rust `tokio::spawn` → TypeScript async IIFE pattern
+ *
+ * @example
+ * ```typescript
+ * // Producer
+ * const stream = new ResponseStream();
+ * setTimeout(() => {
+ *   stream.addEvent({ type: 'Created' });
+ *   stream.addEvent({ type: 'OutputTextDelta', delta: 'Hello' });
+ *   stream.complete();
+ * }, 0);
+ *
+ * // Consumer
+ * for await (const event of stream) {
+ *   console.log(event);
+ * }
+ * ```
  */
 export class ResponseStream {
   private eventBuffer: ResponseEvent[] = [];
   private isCompleted = false;
-  private error: Error | null = null;
-  private waitingResolvers: Array<(value: IteratorResult<ResponseEvent>) => void> = [];
+  private streamError: Error | null = null;  // Renamed from 'error' to avoid conflict with error() method
+  private waitingResolvers: Array<() => void> = [];
   private abortController: AbortController;
   private config: ResponseStreamConfig;
 
@@ -80,7 +117,7 @@ export class ResponseStream {
     // Check for backpressure
     if (this.config.enableBackpressure && this.eventBuffer.length >= this.config.maxBufferSize) {
       throw new ResponseStreamError(
-        `Event buffer full (${this.config.maxBufferSize} events)`,
+        `Event buffer full (${this.config.maxBufferSize} events) - backpressure limit reached`,
         'BACKPRESSURE'
       );
     }
@@ -109,10 +146,10 @@ export class ResponseStream {
 
   /**
    * Error the stream, causing all future reads to throw
-   * @param error The error that occurred
+   * @param err The error that occurred
    */
-  public error(error: Error): void {
-    this.error = error;
+  public error(err: Error): void {
+    this.streamError = err;
     this.isCompleted = true;
     this.notifyWaiters();
   }
@@ -158,8 +195,8 @@ export class ResponseStream {
         }
 
         // If there's an error, throw it
-        if (this.error) {
-          throw new ResponseStreamError('Stream error', 'STREAM_ERROR', this.error);
+        if (this.streamError) {
+          throw new ResponseStreamError('Stream error', 'STREAM_ERROR', this.streamError);
         }
 
         // If we have buffered events, yield them
@@ -226,7 +263,7 @@ export class ResponseStream {
       this.waitingResolvers.push(wrappedResolve);
 
       // Check if we should resolve immediately
-      if (this.eventBuffer.length > 0 || this.isCompleted || this.error) {
+      if (this.eventBuffer.length > 0 || this.isCompleted || this.streamError) {
         wrappedResolve();
       }
     });

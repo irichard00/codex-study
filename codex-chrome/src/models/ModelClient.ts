@@ -4,9 +4,11 @@
  */
 
 import type { ToolDefinition } from '../tools/BaseTool';
-import type { ModelProviderInfo } from './types/ResponsesAPI';
-import type { ResponseEvent } from './types/ResponsesAPI';
+import type { ModelProviderInfo, Prompt } from './types/ResponsesAPI';
+import type { ResponseEvent } from './types/ResponseEvent';
 import type { StreamAttemptError } from './types/StreamAttemptError';
+import type { ResponseStream } from './ResponseStream';
+import type { RateLimitSnapshot } from './types/RateLimits';
 
 /**
  * Request configuration for completion API calls
@@ -167,11 +169,43 @@ export abstract class ModelClient {
   abstract complete(request: CompletionRequest): Promise<CompletionResponse>;
 
   /**
-   * Stream a chat conversation
-   * @param request The completion request
-   * @returns Async generator yielding stream chunks
+   * Stream a model response using the Responses API
+   *
+   * This method creates and returns a ResponseStream that will emit ResponseEvent
+   * objects as the model generates its response. The stream is returned immediately,
+   * with events being added asynchronously as they arrive from the API.
+   *
+   * **Rust Reference**: `codex-rs/core/src/client.rs` Line 124
+   *
+   * **Type Mapping**:
+   * - Rust `Result<ResponseStream>` → TypeScript `Promise<ResponseStream>`
+   * - Errors are thrown rather than returned in a Result type
+   *
+   * **Behavior**:
+   * 1. Validates the prompt (empty input throws error)
+   * 2. Creates a ResponseStream instance
+   * 3. Spawns async task to populate stream via network call
+   * 4. Returns stream immediately (channel pattern from Rust)
+   *
+   * @param prompt The prompt containing input messages and tools
+   * @returns Promise resolving to ResponseStream that yields ResponseEvent objects
+   * @throws ModelClientError if prompt validation fails
+   *
+   * @example
+   * ```typescript
+   * const prompt: Prompt = {
+   *   input: [{ type: 'message', role: 'user', content: 'Hello' }],
+   *   tools: [],
+   * };
+   * const stream = await client.stream(prompt);
+   * for await (const event of stream) {
+   *   if (event.type === 'OutputTextDelta') {
+   *     console.log(event.delta);
+   *   }
+   * }
+   * ```
    */
-  abstract stream(request: CompletionRequest): AsyncGenerator<StreamChunk>;
+  abstract stream(prompt: Prompt): Promise<ResponseStream>;
 
   /**
    * Count tokens in a text string for a given model
@@ -232,7 +266,16 @@ export abstract class ModelClient {
 
   /**
    * Get auth manager instance
-   * Rust Reference: codex-rs/core/src/client.rs Lines 443-445
+   *
+   * **Browser Environment Deviation**: Always returns `undefined` in Chrome extension.
+   *
+   * In the Rust implementation, this returns an `AuthManager` that handles OAuth flows
+   * and token refresh. However, in the browser environment:
+   * - Chrome extensions use the Chrome Storage API for API key management
+   * - No OAuth flow is implemented (users provide API keys directly)
+   * - See `ChromeAuthManager.ts` for the browser-specific implementation
+   *
+   * **Rust Reference**: codex-rs/core/src/client.rs Lines 443-445
    */
   abstract getAuthManager(): any;
 
@@ -271,13 +314,22 @@ export abstract class ModelClient {
 
   /**
    * Attempt a single streaming request with retry logic
-   * Rust Reference: codex-rs/core/src/client.rs Lines 447-486
-   * @returns AsyncGenerator yielding ResponseEvents or throwing StreamAttemptError
+   *
+   * This method makes a single attempt to create a streaming connection,
+   * without retry logic. Returns a ResponseStream that will be populated
+   * with events from the API response.
+   *
+   * **Rust Reference**: `codex-rs/core/src/client.rs` Line 269
+   *
+   * @param attempt The attempt number (0-based) for logging/metrics
+   * @param payload The API request payload
+   * @returns Promise resolving to ResponseStream
+   * @throws Error if the connection fails or response is invalid
    */
   protected abstract attemptStreamResponses(
-    request: CompletionRequest,
-    attempt: number
-  ): AsyncGenerator<ResponseEvent, void, unknown>;
+    attempt: number,
+    payload: any
+  ): Promise<ResponseStream>;
 
   /**
    * Process Server-Sent Events (SSE) stream into ResponseEvents
@@ -289,11 +341,23 @@ export abstract class ModelClient {
 
   /**
    * Parse rate limit snapshot from HTTP headers
-   * Rust Reference: codex-rs/core/src/client.rs Lines 552-590
-   * @param headers HTTP response headers
-   * @returns RateLimitSnapshot if headers present, undefined otherwise
+   *
+   * Extracts rate limit information from HTTP response headers, if present.
+   * Supports both primary and secondary rate limit windows.
+   *
+   * **Rust Reference**: `codex-rs/core/src/client.rs` Lines 453-495
+   *
+   * **Header Format**:
+   * - Primary: `x-codex-primary-used-percent`, `x-codex-primary-window-minutes`, `x-codex-primary-resets-in-seconds`
+   * - Secondary: `x-codex-secondary-used-percent`, `x-codex-secondary-window-minutes`, `x-codex-secondary-resets-in-seconds`
+   *
+   * **Type Mapping**:
+   * - Rust `Option<RateLimitSnapshot>` → TypeScript `RateLimitSnapshot | undefined`
+   *
+   * @param headers HTTP response headers from fetch()
+   * @returns RateLimitSnapshot if rate limit headers present, undefined otherwise
    */
-  protected abstract parseRateLimitSnapshot(headers: Headers): import('./types/RateLimits').RateLimitSnapshot | undefined;
+  protected abstract parseRateLimitSnapshot(headers?: Headers): RateLimitSnapshot | undefined;
 
   /**
    * Validate a request before sending

@@ -129,9 +129,8 @@ describe('SSEEventParser', () => {
         }
       };
 
-      // Failed events are logged but not returned as ResponseEvents
-      const result = parser.processEvent(event);
-      expect(result).toHaveLength(0);
+      // Failed events throw error (matches Rust contract)
+      expect(() => parser.processEvent(event)).toThrow('Rate limit reached. Please try again in 1.5s.');
     });
 
     it('should process response.completed event', () => {
