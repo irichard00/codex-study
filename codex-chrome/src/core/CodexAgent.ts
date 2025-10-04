@@ -30,7 +30,8 @@ export class CodexAgent {
   private eventQueue: Event[] = [];
   private session: Session;
   private isProcessing: boolean = false;
-  private activeTask: AgentTask | null = null;
+  // REMOVED (Feature 012): private activeTask: AgentTask | null = null;
+  // Task management now handled by Session.spawnTask() matching Rust pattern
   private config: AgentConfig;
   private approvalManager: ApprovalManager;
   private diffTracker: DiffTracker;
@@ -221,6 +222,14 @@ export class CodexAgent {
           await this.handleGetPath();
           break;
 
+        case 'Compact':
+          await this.handleCompact();
+          break;
+
+        case 'GetHistoryEntryRequest':
+          await this.handleGetHistoryEntryRequest(submission.op);
+          break;
+
         case 'Shutdown':
           await this.handleShutdown();
           break;
@@ -265,6 +274,7 @@ export class CodexAgent {
 
   /**
    * Handle interrupt operation
+   * Updated (Feature 012): Delegate to Session.abortAllTasks()
    */
   private async handleInterrupt(): Promise<void> {
     // Set interrupt flag in session
@@ -286,19 +296,18 @@ export class CodexAgent {
       },
     });
 
-    // Cancel active task if any
-    if (this.activeTask) {
-      await this.activeTask.cancel();
-      this.activeTask = null;
-    }
+    // Delegate to Session.abortAllTasks() (Feature 012: Session task management)
+    // Session will abort all tasks and emit TurnAborted events
+    await this.session.abortAllTasks('UserInterrupt');
 
     // Clear interrupt flag after handling
     this.session.clearInterrupt();
   }
 
   /**
-   * Process user input with AgentTask
+   * Process user input with SessionTask
    * Common method for handling both handleUserInput and handleUserTurn
+   * Updated (Feature 012): Use RegularTask and delegate to Session.spawnTask()
    */
   private async processUserInputWithTask(
     items: Array<any>,
@@ -314,94 +323,44 @@ export class CodexAgent {
     newTask: boolean = false
   ): Promise<void> {
     try {
-      // Get current running task if exists
-      let currentTask = this.activeTask;
-      if (newTask) {
-        currentTask?.cancel();
-        this.activeTask = null;
-        currentTask = null;
-      }
-
-      // Convert input items to ResponseItem format
-      const responseItems: ResponseItem[] = items.map(item => ({
-        role: 'user' as const,
-        content: item.type === 'text' ? item.text || '' : `[${item.type}]`,
+      // Convert input items to InputItem format for SessionTask
+      const inputItems: InputItem[] = items.map(item => ({
+        type: item.type || 'text',
+        text: item.type === 'text' ? item.text || '' : undefined,
       }));
 
-      if (currentTask) {
-        await currentTask.injectUserInput(responseItems);
+      // Create TurnContext for this task
+      let taskContext: TurnContext;
+
+      if (contextOverrides) {
+        // Create fresh context with overrides for this turn
+        const modelClient = await this.modelClientFactory.createClientForModel(contextOverrides.model || 'default');
+        taskContext = new TurnContext(modelClient, contextOverrides);
+
+        // Update session turn context with overrides
+        this.session.updateTurnContext(contextOverrides);
       } else {
-        // No running task, spawn a new one
-        let taskContext: TurnContext;
-
-        if (contextOverrides) {
-          // Create fresh context with overrides for this turn
-          const modelClient = await this.modelClientFactory.createClientForModel(contextOverrides.model || 'default');
-          taskContext = new TurnContext(modelClient, contextOverrides);
-
-          // Update session turn context with overrides
-          this.session.updateTurnContext(contextOverrides);
-        } else {
-          // Create a new context for this turn
-          const modelClient = await this.modelClientFactory.createClientForModel('default');
-          taskContext = new TurnContext(modelClient, {});
-        }
-
-        // Create TurnManager for this task
-        const turnManager = new TurnManager(
-          this.session,
-          taskContext,
-          this.toolRegistry
-        );
-
-        // Create and run AgentTask - AgentTask will create its own TaskRunner
-        const submissionId = uuidv4();
-        const agentTask = new AgentTask(
-          this.session,
-          taskContext,
-          turnManager,
-          this.session.getId(),
-          submissionId,
-          responseItems
-        );
-
-        this.activeTask = agentTask;
-
-        try {
-          const result = await agentTask.run();
-
-          // Extract last assistant message from session history
-          const conversationHistory = this.session.getConversationHistory();
-          const lastAgentMessage = conversationHistory.items
-            .filter(item => item.role === 'assistant')
-            .map(item => typeof item.content === 'string' ? item.content : JSON.stringify(item.content))
-            .pop();
-
-          // Extract input messages from this turn
-          const inputMessages = responseItems
-            .filter(item => item.role === 'user')
-            .map(item => typeof item.content === 'string' ? item.content : JSON.stringify(item.content));
-
-          // Emit TaskComplete with turn metadata for notification compatibility
-          this.emitEvent({
-            type: 'TaskComplete',
-            data: {
-              last_agent_message: lastAgentMessage,
-              turn_id: submissionId,
-              input_messages: inputMessages,
-            },
-          });
-
-          this.emitEvent({
-            type: 'AgentMessage',
-            data: {
-              message: 'Task completed successfully.',
-            },
-          });
-        } finally {
-          this.activeTask = null;
-        }
+        // Create a new context for this turn
+        const modelClient = await this.modelClientFactory.createClientForModel('default');
+        taskContext = new TurnContext(modelClient, {});
       }
+
+      // Create RegularTask instance (Feature 011 architecture)
+      // RegularTask will delegate to AgentTask → TaskRunner
+      const { RegularTask } = await import('./tasks/RegularTask');
+      const task = new RegularTask();
+
+      // Generate submission ID
+      const submissionId = uuidv4();
+
+      // Delegate to Session.spawnTask() (Feature 012: Session task management)
+      // Session will manage task lifecycle, emit events, and handle abortion
+      await this.session.spawnTask(task, taskContext, submissionId, inputItems);
+
+      // Note: Session.spawnTask() is fire-and-forget
+      // Task completion/abortion events are emitted by Session via eventEmitter
+      // We don't need to wait for completion or manually manage activeTask
+
     } catch (error) {
       console.error('Error processing user input:', error);
 
@@ -442,11 +401,14 @@ export class CodexAgent {
 
   /**
    * Cancel a running task
+   * Updated (Feature 012): Use Session.abortAllTasks()
    */
-  cancelTask(submissionId: string): void {
-    if (this.activeTask && this.activeTask.submissionId === submissionId) {
-      this.activeTask.cancel();
-      this.activeTask = null;
+  async cancelTask(submissionId: string): Promise<void> {
+    // Check if task is running in Session
+    if (this.session.hasRunningTask(submissionId)) {
+      // Abort the specific task (currently aborts all tasks)
+      // Note: Rust pattern is to abort all tasks, not individual ones
+      await this.session.abortAllTasks('UserInterrupt');
     }
   }
 
@@ -473,8 +435,8 @@ export class CodexAgent {
    * Handle exec approval
    */
   private async handleExecApproval(op: Extract<Op, { type: 'ExecApproval' }>): Promise<void> {
-    // For now, just log the approval - proper implementation would integrate with the approval system
-    console.log(`Approval ${op.decision === 'approve' ? 'granted' : 'denied'} for ${op.id}`);
+    // Resolve the pending approval through Session
+    await this.session.notifyApproval(op.id, op.decision);
 
     // Emit event
     this.emitEvent({
@@ -490,8 +452,8 @@ export class CodexAgent {
    * Handle patch approval
    */
   private async handlePatchApproval(op: Extract<Op, { type: 'PatchApproval' }>): Promise<void> {
-    // For now, just log the approval - proper implementation would integrate with the diff system
-    console.log(`Patch ${op.decision === 'approve' ? 'approved' : 'rejected'} for ${op.id}`);
+    // Resolve the pending approval through Session
+    await this.session.notifyApproval(op.id, op.decision);
 
     // Emit event
     this.emitEvent({
@@ -539,6 +501,88 @@ export class CodexAgent {
     this.emitEvent({
       type: 'ShutdownComplete',
     });
+  }
+
+  /**
+   * Handle compact operation
+   * Triggers conversation history compaction to reduce token usage
+   */
+  private async handleCompact(): Promise<void> {
+    try {
+      // Emit background event indicating compaction started
+      this.emitEvent({
+        type: 'BackgroundEvent',
+        data: {
+          message: 'History compaction started',
+          level: 'info',
+        },
+      });
+
+      // Get history size before compaction
+      const historyBefore = this.session.getConversationHistory().items.length;
+
+      // Perform compaction
+      await this.session.compact();
+
+      // Get history size after compaction
+      const historyAfter = this.session.getConversationHistory().items.length;
+
+      // Emit background event indicating compaction completed
+      this.emitEvent({
+        type: 'BackgroundEvent',
+        data: {
+          message: `History compaction completed: ${historyBefore} → ${historyAfter} items`,
+          level: 'info',
+        },
+      });
+    } catch (error) {
+      this.emitEvent({
+        type: 'Error',
+        data: {
+          message: `History compaction failed: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        },
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Handle get history entry request
+   * Returns a specific entry from the conversation history
+   */
+  private async handleGetHistoryEntryRequest(
+    op: Extract<Op, { type: 'GetHistoryEntryRequest' }>
+  ): Promise<void> {
+    try {
+      const entry = this.session.getHistoryEntry(op.index);
+
+      if (entry) {
+        // Emit event with the history entry
+        this.emitEvent({
+          type: 'BackgroundEvent',
+          data: {
+            message: `History entry ${op.index}: ${JSON.stringify(entry).substring(0, 100)}...`,
+            level: 'info',
+          },
+        });
+      } else {
+        // Emit error if entry not found
+        this.emitEvent({
+          type: 'Error',
+          data: {
+            message: `History entry ${op.index} not found`,
+          },
+        });
+      }
+    } catch (error) {
+      this.emitEvent({
+        type: 'Error',
+        data: {
+          message: `Failed to get history entry: ${error instanceof Error ? error.message : 'Unknown error'}`,
+        },
+      });
+      throw error;
+    }
   }
 
   /**
