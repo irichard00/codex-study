@@ -521,7 +521,11 @@ export class TurnManager {
 
       // Emit all mapped events
       for (const msg of eventMsgs) {
-        await this.emitEvent(msg);
+        if (msg && msg.type && msg.data) {
+          await this.emitEvent(msg);
+        } else {
+          console.warn('Skipping malformed event from mapResponseItemToEventMessages:', msg);
+        }
       }
 
       // Handle web search response if needed

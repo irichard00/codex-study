@@ -76,6 +76,8 @@ export class Session {
     // Note: TurnContext requires a ModelClient, which will be set during initialize()
     // For now, create a minimal context that will be replaced
     this.turnContext = {} as TurnContext;
+
+    this.activeTurn = new ActiveTurn();
   }
 
   /**
@@ -1264,7 +1266,7 @@ export class Session {
     }));
 
     // Record to SessionState history
-    this.sessionState.recordItems(responseItems);
+    this.recordConversationItemsDual(responseItems);
 
     // Derive user message events using event mapping (matches Rust logic in codex.rs line 794-805)
     // This ensures proper handling of user_instructions and environment_context tags
@@ -1509,18 +1511,22 @@ export class Session {
     }
 
     // Determine abort reason from error
-    const reason: TurnAbortReason = error?.name === 'AbortError' ? 'Replaced' : 'Error';
+    const reason: TurnAbortReason = error?.name === 'AbortError' ? 'user_interrupt' : 'error';
 
     // Emit TurnAborted event (if eventEmitter is set)
     if (this.eventEmitter) {
-      await this.eventEmitter({
-        type: 'Event',
-        payload: {
+      const event: Event = {
+        id: uuidv4(),
+        msg: {
           type: 'TurnAborted',
-          subId,
-          reason
+          data: {
+            reason,
+            submission_id: subId,
+            turn_count: 0,
+          }
         }
-      } as Event);
+      };
+      await this.eventEmitter(event);
     }
   }
 }
