@@ -12,6 +12,7 @@ import type { InputItem, ResponseItem } from '../../protocol/types';
 import { TaskKind } from '../session/state/types';
 import { AgentTask } from '../AgentTask';
 import { TurnManager } from '../TurnManager';
+import type { ToolRegistry } from '../../tools/ToolRegistry';
 
 /**
  * RegularTask implementation
@@ -42,7 +43,7 @@ export class RegularTask implements SessionTask {
     const turnManager = new TurnManager(
       session,
       context,
-      session.getToolRegistry?.() || null // Optional: get tool registry if available
+      session.getToolRegistry() as ToolRegistry // Tool registry is required
     );
 
     // Convert InputItem[] to ResponseItem[] for AgentTask
