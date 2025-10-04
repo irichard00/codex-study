@@ -7,6 +7,7 @@
  */
 
 import type { InputItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig, Event, ResponseItem, ConversationHistory, ReviewDecision } from '../protocol/types';
+import { mapResponseItemToEventMessages } from './events/EventMapping';
 import type { EventMsg } from '../protocol/events';
 import { RolloutRecorder, type RolloutItem } from '../storage/rollout';
 import { v4 as uuidv4 } from 'uuid';
@@ -1265,36 +1266,26 @@ export class Session {
     // Record to SessionState history
     this.sessionState.recordItems(responseItems);
 
-    // Derive UserMessage text from input
-    const messageText = input
-      .map((item) => {
-        if (typeof item === 'string') {
-          return item;
-        } else if (typeof item === 'object' && 'text' in item) {
-          return (item as any).text;
+    // Derive user message events using event mapping (matches Rust logic in codex.rs line 794-805)
+    // This ensures proper handling of user_instructions and environment_context tags
+    if (this.services?.rollout && responseItems.length > 0) {
+      const showRawReasoning = false; // User messages don't have reasoning
+      const eventMsgs = mapResponseItemToEventMessages(responseItems[0], showRawReasoning);
+
+      // Filter and persist only UserMessage events to rollout
+      const userMsgEvents = eventMsgs.filter(msg => msg.type === 'UserMessage');
+
+      if (userMsgEvents.length > 0) {
+        const rolloutItems: RolloutItem[] = userMsgEvents.map(event => ({
+          type: 'event_msg',
+          payload: event,
+        }));
+
+        try {
+          await this.services.rollout.recordItems(rolloutItems);
+        } catch (error) {
+          console.error('Failed to persist user message to rollout:', error);
         }
-        return '';
-      })
-      .join(' ');
-
-    // Create and persist UserMessage event to rollout (NOT full ResponseItem)
-    if (this.services?.rollout && messageText) {
-      const userMsgEvent: EventMsg = {
-        type: 'UserMessage',
-        data: {
-          message: messageText,
-        },
-      };
-
-      const rolloutItems: RolloutItem[] = [{
-        type: 'event_msg',
-        payload: userMsgEvent,
-      }];
-
-      try {
-        await this.services.rollout.recordItems(rolloutItems);
-      } catch (error) {
-        console.error('Failed to persist user message to rollout:', error);
       }
     }
   }

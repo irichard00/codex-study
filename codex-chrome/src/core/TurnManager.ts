@@ -14,6 +14,8 @@ import type { ResponseEvent } from '../models/types/ResponseEvent';
 import { v4 as uuidv4 } from 'uuid';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import type { IToolsConfig } from '../config/types';
+import { mapResponseItemToEventMessages } from './events/EventMapping';
+import type { ResponseItem } from '../protocol/types';
 
 /**
  * Result of processing a single response item
@@ -511,38 +513,41 @@ export class TurnManager {
           success: false,
         };
       }
-    } else if (item.type === 'message' && item.role === 'assistant') {
-      // Assistant message - emit event but no response needed
-      await this.emitEvent({
-        type: 'AgentMessage',
-        data: {
-          message: typeof item.content === 'string' ? item.content : JSON.stringify(item.content),
-        },
-      });
-      return undefined;
-    } else if (item.type === 'reasoning') {
-      // Reasoning item (for o1/o3 models) - no response needed
-      return undefined;
-    } else if (item.type === 'web_search_call') {
-      // Web search call - execute and return response
-      const { call_id, query } = item;
+    } else if (item.type === 'message' || item.type === 'reasoning' || item.type === 'web_search_call') {
+      // Use event mapping to convert ResponseItem to EventMsg(s)
+      // This matches the Rust logic in codex.rs line 2219-2235
+      const showRawReasoning = this.session.getShowRawAgentReasoning?.() ?? false;
+      const eventMsgs = mapResponseItemToEventMessages(item as ResponseItem, showRawReasoning);
 
-      try {
-        const result = await this.executeWebSearch(query);
-        return {
-          type: 'function_call_output',
-          call_id,
-          content: JSON.stringify(result),
-          success: true,
-        };
-      } catch (error) {
-        return {
-          type: 'function_call_output',
-          call_id,
-          content: `Error: ${error instanceof Error ? error.message : String(error)}`,
-          success: false,
-        };
+      // Emit all mapped events
+      for (const msg of eventMsgs) {
+        await this.emitEvent(msg);
       }
+
+      // Handle web search response if needed
+      if (item.type === 'web_search_call') {
+        const { call_id, action } = item;
+        if (action?.type === 'search') {
+          try {
+            const result = await this.executeWebSearch(action.query);
+            return {
+              type: 'function_call_output',
+              call_id,
+              content: JSON.stringify(result),
+              success: true,
+            };
+          } catch (error) {
+            return {
+              type: 'function_call_output',
+              call_id,
+              content: `Error: ${error instanceof Error ? error.message : String(error)}`,
+              success: false,
+            };
+          }
+        }
+      }
+
+      return undefined;
     }
 
     // Other item types don't require responses
