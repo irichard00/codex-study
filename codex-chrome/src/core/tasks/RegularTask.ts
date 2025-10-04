@@ -9,7 +9,7 @@ import type { SessionTask } from './SessionTask';
 import type { Session } from '../Session';
 import type { TurnContext } from '../TurnContext';
 import type { InputItem, ResponseItem } from '../../protocol/types';
-import type { TaskKind } from '../session/state/types';
+import { TaskKind } from '../session/state/types';
 import { AgentTask } from '../AgentTask';
 import { TurnManager } from '../TurnManager';
 
@@ -24,7 +24,7 @@ export class RegularTask implements SessionTask {
    * Return task kind
    */
   kind(): TaskKind {
-    return 'Regular';
+    return TaskKind.Regular;
   }
 
   /**

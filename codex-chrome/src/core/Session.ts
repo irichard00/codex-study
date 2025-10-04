@@ -12,13 +12,13 @@ import { RolloutRecorder, type RolloutItem } from '../storage/rollout';
 import { v4 as uuidv4 } from 'uuid';
 import { TurnContext } from './TurnContext';
 import type { AgentConfig } from '../config/AgentConfig';
+import type { SessionTask } from './tasks/SessionTask';
+import type { ToolRegistry } from '../tools/ToolRegistry';
 
 // New state management imports
 import { SessionState, type SessionStateExport } from './session/state/SessionState';
 import { type SessionServices, createSessionServices } from './session/state/SessionServices';
 import { ActiveTurn } from './session/state/ActiveTurn';
-import { TurnState } from './session/state/TurnState';
-import { TaskKind } from './session/state/types';
 import type { TokenUsageInfo, RunningTask, RateLimitSnapshot, TurnAbortReason, InitialHistory } from './session/state/types';
 
 /**
@@ -45,13 +45,14 @@ export class Session {
   private messageCount: number = 0;
   private eventEmitter: ((event: Event) => Promise<void>) | null = null;
   private isPersistent: boolean = true;
+  private toolRegistry: ToolRegistry | null = null; // Tool registry from CodexAgent
 
   // Runtime state (not persisted, lives in Session only)
   private toolUsageStats: Map<string, number> = new Map();
   private errorHistory: Array<{timestamp: number, error: string, context?: any}> = [];
   private interruptRequested: boolean = false;
 
-  constructor(configOrIsPersistent?: AgentConfig | boolean, isPersistent?: boolean, services?: SessionServices) {
+  constructor(configOrIsPersistent?: AgentConfig | boolean, isPersistent?: boolean, services?: SessionServices, toolRegistry?: ToolRegistry) {
     this.conversationId = `conv_${uuidv4()}`;
 
     // Handle both new and old signatures for backward compatibility
@@ -60,7 +61,7 @@ export class Session {
       this.isPersistent = configOrIsPersistent;
       this.config = undefined;
     } else {
-      // New signature: Session(config?: AgentConfig, isPersistent?: boolean, services?: SessionServices)
+      // New signature: Session(config?: AgentConfig, isPersistent?: boolean, services?: SessionServices, toolRegistry?: ToolRegistry)
       this.config = configOrIsPersistent;
       this.isPersistent = isPersistent ?? true;
     }
@@ -68,6 +69,7 @@ export class Session {
     // Initialize session state
     this.sessionState = new SessionState(); // Pure data state
     this.services = services ?? null; // Will be created in initialize()
+    this.toolRegistry = toolRegistry ?? null; // Tool registry from CodexAgent
 
     // Initialize with default turn context, using config values if available
     // Note: TurnContext requires a ModelClient, which will be set during initialize()
@@ -257,8 +259,8 @@ export class Session {
       lastAccessed: number;
       messageCount: number;
     };
-  }, services?: SessionServices): Session {
-    const session = new Session(undefined, true, services);
+  }, services?: SessionServices, toolRegistry?: ToolRegistry): Session {
+    const session = new Session(undefined, true, services, toolRegistry);
 
     // Import SessionState
     session.sessionState = SessionState.import(data.state);
@@ -747,6 +749,20 @@ export class Session {
   }
 
   /**
+   * Get tool registry
+   */
+  getToolRegistry(): ToolRegistry | null {
+    return this.toolRegistry;
+  }
+
+  /**
+   * Set tool registry (called by CodexAgent)
+   */
+  setToolRegistry(toolRegistry: ToolRegistry): void {
+    this.toolRegistry = toolRegistry;
+  }
+
+  /**
    * Initialize session with RolloutRecorder (replaces ConversationStore)
    * T023: Follows codex-rs pattern from research.md
    */
@@ -1035,13 +1051,17 @@ export class Session {
     // Abort the task via AbortController
     task.abortController.abort();
 
+    // Convert session state reason to protocol reason
+    const protocolReason = reason === 'UserInterrupt' ? 'user_interrupt' : 
+                          reason === 'Error' ? 'error' : 'automatic_abort';
+
     // Emit TurnAbortedEvent
     const event: Event = {
       id: subId,
       msg: {
         type: 'TurnAborted',
         data: {
-          reason,
+          reason: protocolReason,
           submission_id: subId,
           turn_count: undefined, // Could track turn count if needed
         },
@@ -1092,11 +1112,13 @@ export class Session {
     // Emit TaskComplete event (if eventEmitter is set)
     if (this.eventEmitter) {
       await this.eventEmitter({
-        type: 'Event',
-        payload: {
+        id: subId,
+        msg: {
           type: 'TaskComplete',
-          subId,
-          message: result
+          data: {
+            submission_id: subId,
+            message: result
+          }
         }
       } as Event);
     }
@@ -1114,7 +1136,7 @@ export class Session {
    * @param input - Input items for the task
    */
   async spawnTask(
-    task: any, // SessionTask type
+    task: SessionTask, // SessionTask type
     context: TurnContext,
     subId: string,
     input: InputItem[]
