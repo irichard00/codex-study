@@ -48,6 +48,8 @@ export class CodexAgent {
 
     // Initialize session with config and toolRegistry
     this.session = new Session(this.config, true, undefined, this.toolRegistry);
+    // Wire up session event emitter to CodexAgent's event queue
+    this.session.setEventEmitter(async (event: Event) => this.emitEvent(event.msg));
 
     // Setup event processing for notifications
     this.setupNotificationHandlers();

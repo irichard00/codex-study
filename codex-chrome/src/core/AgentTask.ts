@@ -74,7 +74,7 @@ export class AgentTask {
 
       // Delegate actual task execution to TaskRunner
       // TaskRunner contains the main execution logic
-      await this.taskRunner.executeWithCoordination(
+      await this.taskRunner.run_task(
         this.submissionId,
         this.abortController.signal
       );

@@ -418,7 +418,6 @@ export class Session {
       // Delegate to ActiveTurn
       items.forEach(item => this.activeTurn!.pushPendingInput(item));
     }
-    // If no active turn, input is ignored (no legacy storage)
   }
 
   /**
@@ -1248,10 +1247,9 @@ export class Session {
    *
    * @param subId Submission ID
    * @param input Input items from user
-   * @private
+   * @public
    */
-  private async recordInputAndRolloutUsermsg(
-    subId: string,
+  public async recordInputAndRolloutUsermsg(
     input: InputItem[]
   ): Promise<void> {
     // Convert input to ResponseItem (simplified - would need full protocol mapping)
