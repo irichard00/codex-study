@@ -30,8 +30,6 @@ export class CodexAgent {
   private eventQueue: Event[] = [];
   private session: Session;
   private isProcessing: boolean = false;
-  // REMOVED (Feature 012): private activeTask: AgentTask | null = null;
-  // Task management now handled by Session.spawnTask() matching Rust pattern
   private config: AgentConfig;
   private approvalManager: ApprovalManager;
   private diffTracker: DiffTracker;

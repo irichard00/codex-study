@@ -57,7 +57,7 @@ export class ActiveTurn {
   abort(): void {
     // Abort all tasks
     for (const [_, task] of this.tasks) {
-      task.handle.abort();
+      task.abortController.abort();
     }
 
     // Clear tasks
@@ -76,6 +76,14 @@ export class ActiveTurn {
     const drained = new Map(this.tasks);
     this.tasks.clear();
     return drained;
+  }
+
+  /**
+   * Get snapshot of all tasks (non-destructive)
+   * @returns Copy of tasks map
+   */
+  getTasks(): Map<string, RunningTask> {
+    return new Map(this.tasks);
   }
 
   // ===== TurnState Delegation =====

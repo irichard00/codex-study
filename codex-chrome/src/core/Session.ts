@@ -43,7 +43,6 @@ export class Session {
   private activeTurn: ActiveTurn | null = null; // Active turn management
   private turnContext: TurnContext;
   private messageCount: number = 0;
-  private currentTurnItems: InputItem[] = [];
   private eventEmitter: ((event: Event) => Promise<void>) | null = null;
   private isPersistent: boolean = true;
 
@@ -51,9 +50,6 @@ export class Session {
   private toolUsageStats: Map<string, number> = new Map();
   private errorHistory: Array<{timestamp: number, error: string, context?: any}> = [];
   private interruptRequested: boolean = false;
-
-  /** Map of running tasks keyed by submission ID (Feature 012: Session task management) */
-  private runningTasks: Map<string, RunningTask> = new Map();
 
   constructor(configOrIsPersistent?: AgentConfig | boolean, isPersistent?: boolean, services?: SessionServices) {
     this.conversationId = `conv_${uuidv4()}`;
@@ -208,26 +204,6 @@ export class Session {
     return this.messageCount;
   }
 
-  /**
-   * Set current turn input items
-   */
-  setCurrentTurnItems(items: InputItem[]): void {
-    this.currentTurnItems = items;
-  }
-
-  /**
-   * Get current turn input items
-   */
-  getCurrentTurnItems(): InputItem[] {
-    return [...this.currentTurnItems];
-  }
-
-  /**
-   * Clear current turn items
-   */
-  clearCurrentTurn(): void {
-    this.currentTurnItems = [];
-  }
 
   /**
    * Get session metadata
@@ -577,9 +553,6 @@ export class Session {
   async reset(): Promise<void> {
     // Clear conversation history
     this.clearHistory();
-
-    // Clear current turn items
-    this.currentTurnItems = [];
 
     // Create new conversation ID
     Object.assign(this, { conversationId: `conv_${uuidv4()}` });
@@ -1019,22 +992,6 @@ export class Session {
   // Task Lifecycle Management
   // ========================================================================
 
-  /**
-   * T020: Register new active task
-   *
-   * Creates ActiveTurn if needed and registers a running task.
-   * This is called when a new task is spawned.
-   *
-   * @param subId Submission ID for the task
-   * @param task RunningTask information
-   * @private
-   */
-  private registerNewActiveTask(subId: string, task: RunningTask): void {
-    if (!this.activeTurn) {
-      this.activeTurn = new ActiveTurn();
-    }
-    this.activeTurn.addTask(subId, task);
-  }
 
   /**
    * T021: Take all running tasks
@@ -1076,7 +1033,7 @@ export class Session {
     reason: TurnAbortReason
   ): Promise<void> {
     // Abort the task via AbortController
-    task.handle.abort();
+    task.abortController.abort();
 
     // Emit TurnAbortedEvent
     const event: Event = {
@@ -1118,14 +1075,19 @@ export class Session {
    * T024: On task finished (UPDATED for Feature 012)
    *
    * Called when a task completes successfully.
-   * Removes the task from runningTasks map and emits TaskComplete event.
+   * Removes the task from ActiveTurn and emits TaskComplete event.
    *
    * @param subId Submission ID of the completed task
    * @param result Final assistant message (or null)
    */
   private async onTaskFinished(subId: string, result: string | null): Promise<void> {
-    // Remove from running tasks
-    this.runningTasks.delete(subId);
+    // Remove from ActiveTurn
+    if (this.activeTurn) {
+      const isEmpty = this.activeTurn.removeTask(subId);
+      if (isEmpty) {
+        this.activeTurn = null;
+      }
+    }
 
     // Emit TaskComplete event (if eventEmitter is set)
     if (this.eventEmitter) {
@@ -1137,14 +1099,6 @@ export class Session {
           message: result
         }
       } as Event);
-    }
-
-    // Also emit via old ActiveTurn path for backward compatibility
-    if (this.activeTurn) {
-      const isEmpty = this.activeTurn.removeTask(subId);
-      if (isEmpty) {
-        this.activeTurn = null;
-      }
     }
   }
 
@@ -1194,8 +1148,11 @@ export class Session {
       startTime: Date.now()
     };
 
-    // Register in map
-    this.runningTasks.set(subId, runningTask);
+    // Create ActiveTurn if needed and register task
+    if (!this.activeTurn) {
+      this.activeTurn = new ActiveTurn();
+    }
+    this.activeTurn.addTask(subId, runningTask);
 
     // Execute asynchronously (fire-and-forget, don't await)
     // The promise will handle completion/abortion internally
@@ -1501,21 +1458,24 @@ export class Session {
   /**
    * Get snapshot of running tasks (for debugging/monitoring)
    *
-   * @returns Copy of runningTasks map (not live reference)
+   * @returns Copy of tasks map (not live reference)
    */
   getRunningTasks(): Map<string, RunningTask> {
-    // Return shallow copy to prevent external mutation
-    return new Map(this.runningTasks);
+    if (!this.activeTurn) {
+      return new Map();
+    }
+    // Return snapshot (non-destructive)
+    return this.activeTurn.getTasks();
   }
 
   /**
    * Check if a specific task is running
    *
    * @param subId - Submission ID to check
-   * @returns true if task exists in runningTasks map
+   * @returns true if task exists in ActiveTurn
    */
   hasRunningTask(subId: string): boolean {
-    return this.runningTasks.has(subId);
+    return this.activeTurn?.hasTask(subId) ?? false;
   }
 
   /**
@@ -1526,8 +1486,13 @@ export class Session {
    * @private
    */
   private async onTaskAborted(subId: string, error: any): Promise<void> {
-    // Remove from running tasks
-    this.runningTasks.delete(subId);
+    // Remove from ActiveTurn
+    if (this.activeTurn) {
+      const isEmpty = this.activeTurn.removeTask(subId);
+      if (isEmpty) {
+        this.activeTurn = null;
+      }
+    }
 
     // Determine abort reason from error
     const reason: TurnAbortReason = error?.name === 'AbortError' ? 'Replaced' : 'Error';
@@ -1542,14 +1507,6 @@ export class Session {
           reason
         }
       } as Event);
-    }
-
-    // Also emit via old ActiveTurn path for backward compatibility
-    if (this.activeTurn) {
-      const isEmpty = this.activeTurn.removeTask(subId);
-      if (isEmpty) {
-        this.activeTurn = null;
-      }
     }
   }
 }
