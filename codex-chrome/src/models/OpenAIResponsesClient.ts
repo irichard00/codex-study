@@ -317,7 +317,7 @@ export class OpenAIResponsesClient extends ModelClient {
       input: request.messages.map(msg => ({
         type: 'message' as const,
         role: msg.role,
-        content: msg.content || '',
+        content: [{ type: 'input_text' as const, text: msg.content || '' }],
       })),
       tools: request.tools || [],
     };

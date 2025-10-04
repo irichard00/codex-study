@@ -151,9 +151,9 @@ export class Session {
 
     // Record in SessionState
     const responseItem: ResponseItem = {
+      type: 'message',
       role: entry.type === 'user' ? 'user' : entry.type === 'system' ? 'system' : 'assistant',
-      content: entry.text,
-      timestamp: entry.timestamp,
+      content: [{ type: 'input_text', text: entry.text }],
     };
     this.sessionState.recordItems([responseItem]);
 
@@ -1254,9 +1254,12 @@ export class Session {
   ): Promise<void> {
     // Convert input to ResponseItem (simplified - would need full protocol mapping)
     const responseItems: ResponseItem[] = input.map((item) => ({
+      type: 'message',
       role: 'user',
-      content: typeof item === 'string' ? item : JSON.stringify(item),
-      type: 'message'
+      content: [{
+        type: 'input_text',
+        text: typeof item === 'string' ? item : JSON.stringify(item)
+      }]
     }));
 
     // Record to SessionState history

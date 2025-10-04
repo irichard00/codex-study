@@ -57,7 +57,7 @@ describe('ModelClient Contract', () => {
           {
             type: 'message',
             role: 'user',
-            content: 'Hello',
+            content: [{ type: 'input_text', text: 'Hello' }],
           },
         ],
         tools: [],
@@ -217,7 +217,7 @@ describe('ModelClient Contract', () => {
       } as Response);
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Test' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Test' }] }],
         tools: [],
       };
 
@@ -262,7 +262,7 @@ describe('ModelClient Contract', () => {
       } as Response);
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Test' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Test' }] }],
         tools: [],
       };
 
@@ -301,7 +301,7 @@ describe('ModelClient Contract', () => {
       });
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Test' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Test' }] }],
         tools: [],
       };
 

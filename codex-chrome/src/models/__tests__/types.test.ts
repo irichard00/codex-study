@@ -15,7 +15,7 @@ import {
   isRateLimits,
 } from '../types/ResponseEvent';
 
-import type { ResponseItem, ContentBlock } from '../../protocol/types';
+import type { ResponseItem, ContentItem } from '../../protocol/types';
 
 // TokenUsage types and functions
 import {
@@ -84,7 +84,7 @@ describe('ResponseEvent Types and Guards', () => {
         id: 'item-1',
         type: 'message',
         role: 'assistant',
-        content: 'Hello world',
+        content: [{ type: 'input_text', text: 'Hello world' }],
       };
 
       const rateLimitSnapshot: RateLimitSnapshot = {
@@ -116,38 +116,50 @@ describe('ResponseEvent Types and Guards', () => {
     });
   });
 
-  describe('ResponseItem and ContentBlock', () => {
-    it('should create valid ResponseItem objects', () => {
+  describe('ResponseItem and ContentItem', () => {
+    it('should create valid ResponseItem message objects', () => {
       const item: ResponseItem = {
         id: 'test-item',
         type: 'message',
         role: 'assistant',
-        content: 'Test content',
-        metadata: {
-          timestamp: Date.now(),
-          model: 'gpt-4',
-        },
+        content: [
+          { type: 'output_text', text: 'Test content' }
+        ],
       };
 
       expect(item.id).toBe('test-item');
       expect(item.type).toBe('message');
       expect(item.role).toBe('assistant');
-      expect(item.content).toBe('Test content');
+      expect(item.content.length).toBe(1);
+      expect(item.content[0].type).toBe('output_text');
     });
 
-    it('should support ContentBlock arrays', () => {
-      const contentBlocks: ContentBlock[] = [
-        { type: 'text', text: 'Hello' },
+    it('should support ContentItem arrays in messages', () => {
+      const contentItems: ContentItem[] = [
+        { type: 'input_text', text: 'Hello' },
         { type: 'output_text', text: 'World' },
       ];
 
       const item: ResponseItem = {
-        type: 'function_call',
-        content: contentBlocks,
+        type: 'message',
+        role: 'user',
+        content: contentItems,
       };
 
       expect(Array.isArray(item.content)).toBe(true);
-      expect((item.content as ContentBlock[]).length).toBe(2);
+      expect(item.content.length).toBe(2);
+    });
+
+    it('should create function call ResponseItem', () => {
+      const item: ResponseItem = {
+        type: 'function_call',
+        name: 'test_function',
+        arguments: '{"key":"value"}',
+        call_id: 'call_123',
+      };
+
+      expect(item.type).toBe('function_call');
+      expect(item.name).toBe('test_function');
     });
   });
 });
@@ -418,21 +430,12 @@ describe('Type Compilation and Integration', () => {
   });
 
   it('should work with complex nested structures', () => {
-    const contentBlocks: ContentBlock[] = [
-      { type: 'text', text: 'Hello' },
-      { type: 'output_text', text: 'World' },
-    ];
-
     const responseItem: ResponseItem = {
       id: 'item-1',
       type: 'function_call',
-      role: 'assistant',
-      content: contentBlocks,
-      metadata: {
-        timestamp: Date.now(),
-        model: 'gpt-4',
-        custom_field: 'test',
-      },
+      name: 'test_function',
+      arguments: '{"key":"value"}',
+      call_id: 'call_123',
     };
 
     const event: ResponseEvent = {

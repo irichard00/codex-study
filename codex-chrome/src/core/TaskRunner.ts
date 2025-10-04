@@ -9,6 +9,7 @@ import { TurnManager } from './TurnManager';
 import { TurnContext } from './TurnContext';
 import type { ProcessedResponseItem, TurnRunResult } from './TurnManager';
 import type { InputItem, Event, ResponseItem } from '../protocol/types';
+import { getResponseItemContent, getResponseItemRole } from '../protocol/types';
 import type {
   EventMsg,
   TaskCompleteEvent,
@@ -549,8 +550,8 @@ export class TaskRunner {
       const messageItem = item as ResponseItem;
 
       // Check if this is an assistant message (task completion indicator)
-      if (messageItem.role === 'assistant' && !response) {
-        lastAgentMessage = this.extractTextContent(messageItem);
+      if (getResponseItemRole(messageItem) === 'assistant' && !response) {
+        lastAgentMessage = getResponseItemContent(messageItem);
         itemsToRecord.push(messageItem);
       }
       // Check if this is a tool call that needs response (task continues)
@@ -581,27 +582,6 @@ export class TaskRunner {
     };
   }
 
-  /**
-   * Extract text content from a message item
-   */
-  private extractTextContent(item: ResponseItem): string | undefined {
-    if (!item.content) {
-      return undefined;
-    }
-
-    if (typeof item.content === 'string') {
-      return item.content;
-    }
-
-    if (Array.isArray(item.content)) {
-      return item.content
-        .filter((content: any) => content?.type === 'text')
-        .map((content: any) => content.text)
-        .join(' ');
-    }
-
-    return undefined;
-  }
 
   /**
    * Attempt automatic compaction when token limit is reached

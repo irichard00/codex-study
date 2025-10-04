@@ -136,6 +136,8 @@ export interface AgentMessageEvent {
 
 export interface UserMessageEvent {
   message: string;
+  kind?: 'plain' | 'user_instructions' | 'environment_context' | null;
+  images?: string[];
 }
 
 export interface AgentMessageDeltaEvent {
@@ -182,8 +184,8 @@ export interface WebSearchBeginEvent {
 }
 
 export interface WebSearchEndEvent {
+  call_id: string;
   query: string;
-  results_count: number;
 }
 
 export interface ExecCommandBeginEvent {
