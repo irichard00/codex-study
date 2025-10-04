@@ -52,6 +52,9 @@ export class Session {
   private errorHistory: Array<{timestamp: number, error: string, context?: any}> = [];
   private interruptRequested: boolean = false;
 
+  /** Map of running tasks keyed by submission ID (Feature 012: Session task management) */
+  private runningTasks: Map<string, RunningTask> = new Map();
+
   constructor(configOrIsPersistent?: AgentConfig | boolean, isPersistent?: boolean, services?: SessionServices) {
     this.conversationId = `conv_${uuidv4()}`;
 
@@ -1112,89 +1115,90 @@ export class Session {
   }
 
   /**
-   * T024: On task finished
+   * T024: On task finished (UPDATED for Feature 012)
    *
    * Called when a task completes successfully.
-   * Removes the task from ActiveTurn, clears ActiveTurn if empty,
-   * and emits TaskCompleteEvent.
+   * Removes the task from runningTasks map and emits TaskComplete event.
    *
    * @param subId Submission ID of the completed task
+   * @param result Final assistant message (or null)
    */
-  async onTaskFinished(subId: string): Promise<void> {
-    if (!this.activeTurn) {
-      return;
+  private async onTaskFinished(subId: string, result: string | null): Promise<void> {
+    // Remove from running tasks
+    this.runningTasks.delete(subId);
+
+    // Emit TaskComplete event (if eventEmitter is set)
+    if (this.eventEmitter) {
+      await this.eventEmitter({
+        type: 'Event',
+        payload: {
+          type: 'TaskComplete',
+          subId,
+          message: result
+        }
+      } as Event);
     }
 
-    // Remove task from ActiveTurn
-    const isEmpty = this.activeTurn.removeTask(subId);
-
-    // Clear ActiveTurn if no more tasks
-    if (isEmpty) {
-      this.activeTurn = null;
+    // Also emit via old ActiveTurn path for backward compatibility
+    if (this.activeTurn) {
+      const isEmpty = this.activeTurn.removeTask(subId);
+      if (isEmpty) {
+        this.activeTurn = null;
+      }
     }
-
-    // Emit TaskCompleteEvent
-    const event: Event = {
-      id: subId,
-      msg: {
-        type: 'TaskComplete',
-        data: {
-          submission_id: subId,
-          last_agent_message: undefined,
-          turn_count: undefined,
-        },
-      } as EventMsg,
-    };
-    await this.sendEvent(event);
   }
 
   /**
-   * T025: Spawn task
+   * T025: Spawn task (UPDATED for Feature 012: Session task management)
    *
-   * Aborts any existing tasks, creates a new task with AbortController,
-   * registers it in ActiveTurn, and executes the task function.
+   * Spawns a SessionTask and manages its lifecycle.
+   * Matches Rust Session::spawn_task() pattern.
    *
-   * @param subId Submission ID for this task
-   * @param taskFn Task function to execute (receives AbortSignal)
+   * @param task - The SessionTask to execute (RegularTask or CompactTask)
+   * @param context - Turn context for execution
+   * @param subId - Submission ID (unique identifier for this task)
+   * @param input - Input items for the task
    */
-  async spawnTask<T>(
+  async spawnTask(
+    task: any, // SessionTask type
+    context: TurnContext,
     subId: string,
-    taskFn: (signal: AbortSignal) => Promise<T>
+    input: InputItem[]
   ): Promise<void> {
-    // Abort all existing tasks (new task replaces them)
-    await this.abortAllTasks('automatic_abort');
+    // Abort all existing tasks before spawning new one (Rust pattern)
+    await this.abortAllTasks('Replaced');
 
-    // Create AbortController for this task
+    // Create AbortController for cancellation
     const abortController = new AbortController();
+
+    // Create promise wrapper for task execution
+    const promise = (async (): Promise<string | null> => {
+      try {
+        // Execute task
+        const result = await task.run(this, context, subId, input);
+        // On success, call completion handler
+        await this.onTaskFinished(subId, result);
+        return result;
+      } catch (error) {
+        // On error, call abort handler
+        await this.onTaskAborted(subId, error);
+        return null;
+      }
+    })();
 
     // Create RunningTask entry
     const runningTask: RunningTask = {
-      handle: abortController,
-      kind: TaskKind.Regular,
-      startTime: Date.now(),
-      subId: subId,
+      kind: task.kind(),
+      abortController,
+      promise,
+      startTime: Date.now()
     };
 
-    // Register in ActiveTurn
-    this.registerNewActiveTask(subId, runningTask);
+    // Register in map
+    this.runningTasks.set(subId, runningTask);
 
-    // Execute task asynchronously (don't await here - let it run in background)
-    taskFn(abortController.signal)
-      .then(() => {
-        // Task completed successfully
-        this.onTaskFinished(subId);
-      })
-      .catch((error) => {
-        // Task failed or was aborted
-        if (abortController.signal.aborted) {
-          // Already aborted, no need to emit error
-          console.debug(`Task ${subId} was aborted`);
-        } else {
-          // Task failed with error
-          console.error(`Task ${subId} failed:`, error);
-          this.notifyStreamError(subId, error.message || 'Unknown error');
-        }
-      });
+    // Execute asynchronously (fire-and-forget, don't await)
+    // The promise will handle completion/abortion internally
   }
 
   /**
@@ -1487,6 +1491,65 @@ export class Session {
       // Persist forked history to new rollout
       const history = this.sessionState.historySnapshot();
       await this.persistRolloutResponseItems(history);
+    }
+  }
+
+  // ========================================================================
+  // Task Management Helper Methods (Feature 012)
+  // ========================================================================
+
+  /**
+   * Get snapshot of running tasks (for debugging/monitoring)
+   *
+   * @returns Copy of runningTasks map (not live reference)
+   */
+  getRunningTasks(): Map<string, RunningTask> {
+    // Return shallow copy to prevent external mutation
+    return new Map(this.runningTasks);
+  }
+
+  /**
+   * Check if a specific task is running
+   *
+   * @param subId - Submission ID to check
+   * @returns true if task exists in runningTasks map
+   */
+  hasRunningTask(subId: string): boolean {
+    return this.runningTasks.has(subId);
+  }
+
+  /**
+   * Handle task abortion (internal callback)
+   *
+   * @param subId - Submission ID of aborted task
+   * @param error - Error that caused abort (or AbortError)
+   * @private
+   */
+  private async onTaskAborted(subId: string, error: any): Promise<void> {
+    // Remove from running tasks
+    this.runningTasks.delete(subId);
+
+    // Determine abort reason from error
+    const reason: TurnAbortReason = error?.name === 'AbortError' ? 'Replaced' : 'Error';
+
+    // Emit TurnAborted event (if eventEmitter is set)
+    if (this.eventEmitter) {
+      await this.eventEmitter({
+        type: 'Event',
+        payload: {
+          type: 'TurnAborted',
+          subId,
+          reason
+        }
+      } as Event);
+    }
+
+    // Also emit via old ActiveTurn path for backward compatibility
+    if (this.activeTurn) {
+      const isEmpty = this.activeTurn.removeTask(subId);
+      if (isEmpty) {
+        this.activeTurn = null;
+      }
     }
   }
 }

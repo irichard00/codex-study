@@ -21,16 +21,20 @@ export enum TaskKind {
 /**
  * A running task in an active turn
  * Maps to Rust RunningTask struct
+ * Updated for Feature 012: Session task management
  */
 export interface RunningTask {
-  /** Abort controller to cancel the task */
-  handle: AbortController;
-  /** Kind of task */
+  /** Kind of task (Regular or Compact) */
   kind: TaskKind;
-  /** When the task started (milliseconds since epoch) */
+
+  /** AbortController for cancelling task execution */
+  abortController: AbortController;
+
+  /** Promise representing the running task (returns final assistant message or null) */
+  promise: Promise<string | null>;
+
+  /** Timestamp when task was spawned (for debugging/monitoring) */
   startTime: number;
-  /** Subscription ID for tracking */
-  subId: string;
 }
 
 /**
@@ -95,9 +99,10 @@ export interface SessionExport {
 
 /**
  * Reason for aborting a turn
- * Maps to protocol TurnAbortReason type
+ * Maps to protocol TurnAbortReason type and Rust TurnAbortReason enum
+ * Updated for Feature 012: Aligned with Rust naming (PascalCase)
  */
-export type TurnAbortReason = 'user_interrupt' | 'automatic_abort' | 'error';
+export type TurnAbortReason = 'Replaced' | 'UserInterrupt' | 'Error' | 'Timeout';
 
 /**
  * Configuration for initializing a new Session

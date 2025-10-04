@@ -126,16 +126,40 @@ describe('OpenAIResponsesClient', () => {
       );
     });
 
-    it('should throw error for basic streaming', async () => {
-      const request = {
-        model: 'gpt-4o',
-        messages: [{ role: 'user' as const, content: 'Hello' }],
+    it('should support streaming with Prompt format', async () => {
+      const prompt: Prompt = {
+        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        tools: [],
       };
 
-      const generator = client.stream(request);
-      await expect(generator.next()).rejects.toThrow(
-        'Basic streaming not supported by Responses API'
-      );
+      // Mock fetch to simulate SSE response
+      global.fetch = vi.fn().mockResolvedValueOnce({
+        ok: true,
+        headers: new Headers(),
+        body: new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('data: {"type":"response.created","response":{"id":"test"}}\n\n')
+            );
+            controller.enqueue(
+              new TextEncoder().encode('data: {"type":"response.completed","response":{"id":"test"}}\n\n')
+            );
+            controller.close();
+          },
+        }),
+      } as Response);
+
+      const stream = await client.stream(prompt);
+      expect(stream).toBeDefined();
+
+      // Stream should be a ResponseStream
+      const events = [];
+      for await (const event of stream) {
+        events.push(event);
+      }
+
+      // Should have at least a Created event
+      expect(events.length).toBeGreaterThan(0);
     });
   });
 
