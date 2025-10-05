@@ -61,8 +61,8 @@ export type ToolDefinition =
   | { type: 'custom'; custom: FreeformTool };
 
 /**
- * Legacy parameter property definition (deprecated - use JsonSchema instead)
- * @deprecated Use JsonSchema type instead
+ * Simplified parameter property definition for tool creation
+ * This is a convenience type that gets converted to JsonSchema internally
  */
 export interface ParameterProperty {
   type: 'string' | 'number' | 'boolean' | 'array' | 'object';
@@ -71,17 +71,6 @@ export interface ParameterProperty {
   items?: ParameterProperty;
   properties?: Record<string, ParameterProperty>;
   default?: any;
-}
-
-/**
- * Legacy tool parameter schema (deprecated - use JsonSchema instead)
- * @deprecated Use JsonSchema type instead
- */
-export interface ToolParameterSchema {
-  type: 'object';
-  properties: Record<string, ParameterProperty>;
-  required?: string[];
-  additionalProperties?: boolean;
 }
 
 /**
@@ -676,8 +665,14 @@ export function createObjectSchema(
 }
 
 /**
- * Legacy utility function (deprecated - use createFunctionTool instead)
- * @deprecated Use createFunctionTool instead
+ * Convenience function to create a tool definition using simplified parameter syntax
+ * Converts ParameterProperty format to JsonSchema internally
+ *
+ * @param name - Tool name
+ * @param description - Tool description
+ * @param properties - Tool parameters in simplified format
+ * @param options - Additional options (required fields, etc.)
+ * @returns ToolDefinition in OpenAI Responses API format
  */
 export function createToolDefinition(
   name: string,

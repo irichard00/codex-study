@@ -96,35 +96,6 @@ export interface DOMElement {
 }
 
 /**
- * Legacy DOMElement to new contract adapter
- */
-function adaptDOMElementToContract(element: DOMElement): DOMElementInfo {
-  return {
-    tagName: element.tagName,
-    id: element.id,
-    className: element.className,
-    textContent: element.textContent,
-    attributes: element.attributes,
-    boundingBox: element.boundingBox ? adaptBoundingBox(element.boundingBox) : undefined,
-    visible: element.visible ?? false,
-    enabled: element.enabled ?? false
-  };
-}
-
-function adaptBoundingBox(box: BoundingBox): ContractBoundingBox {
-  return {
-    x: box.x,
-    y: box.y,
-    width: box.width,
-    height: box.height,
-    top: box.top,
-    left: box.left,
-    bottom: box.bottom,
-    right: box.right
-  };
-}
-
-/**
  * Element bounding box
  */
 export interface BoundingBox {
@@ -1156,21 +1127,7 @@ export class DOMTool extends BaseTool {
   }
 
   /**
-   * Execute multiple DOM actions in sequence (Legacy compatibility method)
-   */
-  async executeSequenceLegacy(tabId: number, actions: Omit<DOMToolRequest, 'tabId'>[]): Promise<DOMToolResponse[]> {
-    // Delegate to the new sequence operation
-    const result = await this.executeOperation(tabId, {
-      action: 'executeSequence',
-      sequence: actions,
-      tabId
-    });
-
-    return result.sequence || [];
-  }
-
-  /**
-   * Extract all text from page (Legacy compatibility method)
+   * Extract all text from page
    */
   async extractPageText(tabId: number): Promise<string> {
     const result = await this.executeOperation(tabId, {
@@ -1179,54 +1136,5 @@ export class DOMTool extends BaseTool {
       tabId
     });
     return result.text || '';
-  }
-
-  /**
-   * Extract all links from page (Legacy compatibility method)
-   */
-  async extractLinksLegacy(tabId: number, selector?: string): Promise<Array<{ text: string; href: string; title?: string }>> {
-    const result = await this.executeOperation(tabId, {
-      action: 'extractLinks',
-      selector: selector || 'a[href]',
-      tabId
-    });
-    return result.links || [];
-  }
-
-  /**
-   * Fill form with data (Legacy compatibility method)
-   */
-  async fillFormLegacy(tabId: number, formData: Record<string, string>, formSelector?: string): Promise<DOMToolResponse> {
-    // Delegate to the new fillForm operation
-    return this.executeOperation(tabId, {
-      action: 'fillForm',
-      formData,
-      formSelector,
-      tabId
-    });
-  }
-
-  // Maintain full backward compatibility with original method signatures
-  // These are aliases for the legacy methods to ensure existing code doesn't break
-
-  /**
-   * Execute multiple DOM actions in sequence (Backward compatible)
-   */
-  async executeSequence(tabId: number, actions: Omit<DOMToolRequest, 'tabId'>[]): Promise<DOMToolResponse[]> {
-    return this.executeSequenceLegacy(tabId, actions);
-  }
-
-  /**
-   * Extract all links from page (Backward compatible)
-   */
-  async extractLinks(tabId: number, selector?: string): Promise<Array<{ text: string; href: string; title?: string }>> {
-    return this.extractLinksLegacy(tabId, selector);
-  }
-
-  /**
-   * Fill form with data (Backward compatible)
-   */
-  async fillForm(tabId: number, formData: Record<string, string>, formSelector?: string): Promise<DOMToolResponse> {
-    return this.fillFormLegacy(tabId, formData, formSelector);
   }
 }
