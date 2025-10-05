@@ -1171,7 +1171,7 @@ export class Session {
     input: InputItem[]
   ): Promise<void> {
     // Abort all existing tasks before spawning new one (Rust pattern)
-    await this.abortAllTasks('automatic_abort');
+    await this.abortAllTasks('UserInterrupt');
 
     // Create AbortController for cancellation
     const abortController = new AbortController();

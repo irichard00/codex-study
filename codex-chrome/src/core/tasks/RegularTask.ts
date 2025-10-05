@@ -66,8 +66,16 @@ export class RegularTask implements SessionTask {
       // Extract final assistant message from session history
       const conversationHistory = session.getConversationHistory();
       const lastAgentMessage = conversationHistory.items
-        .filter(item => item.role === 'assistant')
-        .map(item => typeof item.content === 'string' ? item.content : JSON.stringify(item.content))
+        .filter((item): item is Extract<ResponseItem, { type: 'message' }> => 
+          item.type === 'message' && item.role === 'assistant')
+        .map(item => {
+          // Extract text content from ContentItem array
+          return item.content
+            .filter((content): content is Extract<typeof content, { type: 'output_text' }> => 
+              content.type === 'output_text')
+            .map(content => content.text)
+            .join('');
+        })
         .pop();
 
       return lastAgentMessage || null;
@@ -83,11 +91,26 @@ export class RegularTask implements SessionTask {
    * AgentTask expects ResponseItem[], but SessionTask.run() provides InputItem[]
    */
   private convertInput(input: InputItem[]): ResponseItem[] {
-    return input.map(item => ({
-      type: 'message' as const,
-      role: 'user' as const,
-      content: item.text || JSON.stringify(item)
-    }));
+    return input.map(item => {
+      // Handle different InputItem types
+      let text: string;
+      if (item.type === 'text') {
+        text = item.text;
+      } else if (item.type === 'image') {
+        text = `[Image: ${item.image_url}]`;
+      } else {
+        text = JSON.stringify(item);
+      }
+      
+      return {
+        type: 'message' as const,
+        role: 'user' as const,
+        content: [{
+          type: 'input_text' as const,
+          text: text
+        }]
+      };
+    });
   }
 
   /**
