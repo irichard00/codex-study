@@ -685,7 +685,7 @@ export function createToolDefinition(
     metadata?: Record<string, any>;
   } = {}
 ): ToolDefinition {
-  // Convert legacy ParameterProperty to JsonSchema
+  // Convert ParameterProperty to JsonSchema
   const convertToJsonSchema = (prop: ParameterProperty): JsonSchema => {
     if (prop.type === 'array' && prop.items) {
       return {
