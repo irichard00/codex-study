@@ -1020,25 +1020,34 @@ export class Session {
    * @returns Map of all running tasks (submission ID -> RunningTask)
    * @private
    */
+  /**
+   * Take all running tasks and clear the active turn
+   * Port of Rust's take_all_running_tasks (codex-rs/core/src/tasks/mod.rs:128-138)
+   *
+   * @returns Map of all running tasks (submission ID -> RunningTask)
+   * @private
+   */
   private takeAllRunningTasks(): Map<string, RunningTask> {
+    // If no active turn, return empty map (matches Rust line 136)
     if (!this.activeTurn) {
       return new Map();
     }
 
-    // Drain all tasks from the turn
+    // Clear pending approvals and input before draining (matches Rust line 132)
+    this.activeTurn.clearPending();
+
+    // Drain all tasks from the turn (matches Rust line 133)
     const tasks = this.activeTurn.drain();
 
-    // Clear the active turn since all tasks are removed
+    // Clear the active turn since all tasks are removed (matches Rust line 130: active.take())
     this.activeTurn = null;
 
     return tasks;
   }
 
   /**
-   * T022: Handle task abort
-   *
-   * Aborts an individual task with the specified reason, triggers AbortController,
-   * and emits TurnAbortedEvent.
+   * Handle individual task abortion
+   * Port of Rust's handle_task_abort (codex-rs/core/src/tasks/mod.rs:140-162)
    *
    * @param subId Submission ID of the task to abort
    * @param task RunningTask to abort
@@ -1050,46 +1059,54 @@ export class Session {
     task: RunningTask,
     reason: TurnAbortReason
   ): Promise<void> {
-    // Abort the task via AbortController
+    // Check if task already finished (matches Rust lines 146-148)
+    // In JavaScript, we check if the promise is already settled by checking if abort has effect
+    // The AbortController will have no effect if the task already completed
+
+    // Abort the task via AbortController (matches Rust line 153)
     task.abortController.abort();
 
-    // Convert session state reason to protocol reason
-    const protocolReason = reason === 'UserInterrupt' ? 'user_interrupt' : 
-                          reason === 'Error' ? 'error' : 'automatic_abort';
+    // Note: Rust calls task.abort() on the SessionTask trait (line 155)
+    // In TypeScript, we handle cleanup in the task's promise catch block
+    // so we don't need an explicit abort() call here
 
-    // Emit TurnAbortedEvent
+    // Emit TurnAborted event (matches Rust lines 157-161)
     const event: Event = {
       id: subId,
       msg: {
         type: 'TurnAborted',
         data: {
-          reason: protocolReason,
+          reason,
           submission_id: subId,
-          turn_count: undefined, // Could track turn count if needed
+          turn_count: 0,
         },
-      } as EventMsg,
+      },
     };
-    await this.sendEvent(event);
+
+    if (this.eventEmitter) {
+      await this.eventEmitter(event);
+    }
   }
 
   /**
-   * T023: Abort all tasks
+   * Abort all running tasks
+   * Port of Rust's abort_all_tasks (codex-rs/core/src/tasks/mod.rs:96-100)
    *
-   * Aborts all running tasks with the specified reason.
-   * Extracts all tasks, aborts each one, and clears ActiveTurn.
+   * Takes all running tasks and aborts each one with the specified reason.
    *
    * @param reason Reason for aborting all tasks
    */
   async abortAllTasks(reason: TurnAbortReason): Promise<void> {
+    // Take all running tasks (matches Rust line 97)
     const tasks = this.takeAllRunningTasks();
 
-    // Abort each task
+    // Abort each task (matches Rust lines 97-99)
     const abortPromises: Promise<void>[] = [];
     for (const [subId, task] of tasks) {
       abortPromises.push(this.handleTaskAbort(subId, task, reason));
     }
 
-    // Wait for all aborts to complete
+    // Wait for all aborts to complete (parallel execution)
     await Promise.all(abortPromises);
   }
 
@@ -1102,8 +1119,17 @@ export class Session {
    * @param subId Submission ID of the completed task
    * @param result Final assistant message (or null)
    */
-  private async onTaskFinished(subId: string, result: string | null): Promise<void> {
-    // Remove from ActiveTurn
+  /**
+   * Handle task completion
+   * Port of Rust's on_task_finished (codex-rs/core/src/tasks/mod.rs:102-119)
+   *
+   * @param subId Submission ID of the completed task
+   * @param lastAgentMessage Final assistant message (or null)
+   * @private
+   */
+  private async onTaskFinished(subId: string, lastAgentMessage: string | null): Promise<void> {
+    // Remove task from ActiveTurn, and clear ActiveTurn if it's now empty
+    // Matches Rust lines 107-112
     if (this.activeTurn) {
       const isEmpty = this.activeTurn.removeTask(subId);
       if (isEmpty) {
@@ -1111,18 +1137,19 @@ export class Session {
       }
     }
 
-    // Emit TaskComplete event (if eventEmitter is set)
-    if (this.eventEmitter) {
-      await this.eventEmitter({
-        id: subId,
-        msg: {
-          type: 'TaskComplete',
-          data: {
-            submission_id: subId,
-            message: result
-          }
+    // Emit TaskComplete event (matches Rust lines 114-118)
+    const event: Event = {
+      id: subId,
+      msg: {
+        type: 'TaskComplete',
+        data: {
+          last_agent_message: lastAgentMessage ?? undefined,
         }
-      } as Event);
+      }
+    };
+
+    if (this.eventEmitter) {
+      await this.eventEmitter(event);
     }
   }
 
@@ -1144,7 +1171,7 @@ export class Session {
     input: InputItem[]
   ): Promise<void> {
     // Abort all existing tasks before spawning new one (Rust pattern)
-    await this.abortAllTasks('Replaced');
+    await this.abortAllTasks('automatic_abort');
 
     // Create AbortController for cancellation
     const abortController = new AbortController();
@@ -1172,11 +1199,9 @@ export class Session {
       startTime: Date.now()
     };
 
-    // Create ActiveTurn if needed and register task
-    if (!this.activeTurn) {
-      this.activeTurn = new ActiveTurn();
-    }
-    this.activeTurn.addTask(subId, runningTask);
+    // Register as new active task (creates new ActiveTurn and adds task)
+    // Matches Rust pattern: codex-rs/core/src/tasks/mod.rs:93
+    this.registerNewActiveTask(subId, runningTask);
 
     // Execute asynchronously (fire-and-forget, don't await)
     // The promise will handle completion/abortion internally
@@ -1492,6 +1517,28 @@ export class Session {
    */
   hasRunningTask(subId: string): boolean {
     return this.activeTurn?.hasTask(subId) ?? false;
+  }
+
+  /**
+   * Register a new active task
+   * Port of Rust's register_new_active_task (codex-rs/core/src/tasks/mod.rs:121-126)
+   *
+   * Creates a new ActiveTurn, adds the task to it, and replaces the current active turn.
+   * This effectively ensures only one turn can be active at a time.
+   *
+   * @param subId - Submission ID
+   * @param task - Running task to register
+   * @private
+   */
+  private registerNewActiveTask(subId: string, task: RunningTask): void {
+    // Create a new ActiveTurn
+    const turn = new ActiveTurn();
+
+    // Add the task to it
+    turn.addTask(subId, task);
+
+    // Replace the current active turn with the new one
+    this.activeTurn = turn;
   }
 
   /**

@@ -52,6 +52,15 @@ export class ActiveTurn {
   }
 
   /**
+   * Clear pending approvals and input
+   * Port of Rust's clear_pending (codex-rs/core/src/state/turn.rs:104-107)
+   */
+  clearPending(): void {
+    this.turnState.clearPendingApprovals();
+    this.turnState.clearPendingInput();
+  }
+
+  /**
    * Abort all running tasks and clear state
    */
   abort(): void {
@@ -64,8 +73,7 @@ export class ActiveTurn {
     this.tasks.clear();
 
     // Clear turn state
-    this.turnState.clearPendingApprovals();
-    this.turnState.clearPendingInput();
+    this.clearPending();
   }
 
   /**
