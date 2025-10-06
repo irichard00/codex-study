@@ -203,7 +203,7 @@
 <TerminalContainer>
   <!-- Status Line -->
   <div class="flex justify-between mb-2">
-    <TerminalMessage type="system" content="Codex Terminal v1.0.0" />
+    <TerminalMessage type="system" content="Codex For Chrome v1.0.0 (By AI Republic)" />
     <div class="flex items-center space-x-2">
       {#if isProcessing}
         <TerminalMessage type="warning" content="[PROCESSING]" />
@@ -217,10 +217,14 @@
 
   <!-- Messages -->
   <div class="flex-1 overflow-y-auto mb-4 space-y-2" bind:this={scrollContainer}>
-    {#if processedEvents.length === 0}
+    {#if processedEvents.length === 0 && messages.length === 0}
       <TerminalMessage type="system" content="Welcome to Codex Terminal" />
       <TerminalMessage type="default" content="Ready for input. Type a command to begin..." />
     {/if}
+
+    {#each messages as message (message.timestamp)}
+      <TerminalMessage type={message.type === 'user' ? 'input' : getMessageType(message)} content={message.content} />
+    {/each}
 
     {#each processedEvents as event (event.id)}
       <EventDisplay {event} />
