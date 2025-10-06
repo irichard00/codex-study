@@ -21,8 +21,8 @@ export {
 export type { ToolDefinition } from '../tools/BaseTool';
 
 // Provider implementations
+// Note: AnthropicClient removed - not supported in Rust codex-rs implementation
 export { OpenAIClient } from './OpenAIClient';
-export { AnthropicClient } from './AnthropicClient';
 export { OpenAIResponsesClient, type OpenAIResponsesConfig } from './OpenAIResponsesClient';
 
 // Factory and utilities
@@ -33,23 +33,9 @@ export {
   type ModelClientConfig,
 } from './ModelClientFactory';
 
-// Rate limiting and token tracking
-export {
-  RateLimitManager,
-  createRateLimitManager,
-  type RateLimitConfig,
-  type RateLimitHistory,
-} from './RateLimitManager';
-
-export {
-  TokenUsageTracker,
-  createTokenUsageTracker,
-  createDefaultTokenUsageConfig,
-  type TokenUsageConfig,
-  type TokenUsageEntry,
-  type TimeRange,
-  type UsagePeriod,
-} from './TokenUsageTracker';
+// Legacy files removed - not in Rust codex-rs implementation
+// RateLimitManager - rate limiting handled inline in ModelClient
+// TokenUsageTracker - token tracking not in Rust client.rs
 
 // Authentication management
 export {
@@ -62,10 +48,12 @@ export {
   SSEEventParser,
 } from './SSEEventParser';
 
+// Note: RequestQueue kept for performance optimizations (Phase 9)
+// Not in Rust, but used for browser-specific rate limiting
 export {
   RequestQueue,
   RequestPriority,
   type QueuedRequest,
-  type RateLimitConfig,
+  type RateLimitConfig as RequestQueueRateLimitConfig,
   type QueueMetrics,
 } from './RequestQueue';
