@@ -27,6 +27,21 @@ describe('Integration Tests - Rate Limiting & Token Tracking', () => {
     responsesClient = new OpenAIResponsesClient({
       apiKey: 'test-api-key',
       baseUrl: 'https://api.openai.com',
+      conversationId: 'test-conversation-id',
+      modelFamily: {
+        family: 'gpt-4o',
+        base_instructions: 'You are a helpful assistant.',
+        supports_reasoning_summaries: false,
+        needs_special_apply_patch_instructions: false,
+      },
+      provider: {
+        name: 'openai',
+        base_url: 'https://api.openai.com/v1',
+        wire_api: 'Responses' as const,
+        request_max_retries: 3,
+        stream_idle_timeout_ms: 60000,
+        requires_openai_auth: true,
+      },
     });
   });
 
@@ -483,16 +498,17 @@ describe('T009: Rate Limit Parsing Integration - OpenAIResponsesClient', () => {
         conversationId: 'ratelimit-test',
         modelFamily: {
           family: 'gpt-4',
-          baseInstructions: 'Test',
-          supportsReasoningSummaries: false,
-          needsSpecialApplyPatchInstructions: false,
+          base_instructions: 'Test',
+          supports_reasoning_summaries: false,
+          needs_special_apply_patch_instructions: false,
         },
         provider: {
           name: 'openai',
-          baseUrl: 'https://api.openai.com/v1',
-          wireApi: 'responses' as const,
-          requestMaxRetries: 3,
-          streamIdleTimeoutMs: 60000,
+          base_url: 'https://api.openai.com/v1',
+          wire_api: 'Responses' as const,
+          request_max_retries: 3,
+          stream_idle_timeout_ms: 60000,
+          requires_openai_auth: true,
         },
       },
       { maxRetries: 3, baseDelayMs: 100 }

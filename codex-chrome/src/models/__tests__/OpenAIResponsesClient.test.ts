@@ -24,19 +24,19 @@ describe('OpenAIResponsesClient', () => {
 
   const mockModelFamily: ModelFamily = {
     family: 'gpt-4o',
-    baseInstructions: 'You are a helpful assistant.',
-    supportsReasoningSummaries: true,
-    needsSpecialApplyPatchInstructions: false,
+    base_instructions: 'You are a helpful assistant.',
+    supports_reasoning_summaries: true,
+    needs_special_apply_patch_instructions: false,
   };
 
   const mockProvider: ModelProviderInfo = {
     name: 'openai',
-    baseUrl: 'https://api.openai.com/v1',
-    wireApi: 'Responses',
-    requiresOpenaiAuth: true,
-    requestMaxRetries: 3,
-    streamMaxRetries: 2,
-    streamIdleTimeoutMs: 30000,
+    base_url: 'https://api.openai.com/v1',
+    wire_api: 'Responses',
+    requires_openai_auth: true,
+    request_max_retries: 3,
+    stream_max_retries: 2,
+    stream_idle_timeout_ms: 30000,
   };
 
   beforeEach(() => {
@@ -281,7 +281,7 @@ describe('OpenAIResponsesClient', () => {
       const prompt: Prompt = {
         input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Test' }] }],
         tools: [],
-        outputSchema: { type: 'object', properties: { answer: { type: 'string' } } },
+        output_schema: { type: 'object', properties: { answer: { type: 'string' } } },
       };
 
       mockFetch.mockResolvedValue(new Response('', { status: 500 }));

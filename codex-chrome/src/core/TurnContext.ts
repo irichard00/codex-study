@@ -353,7 +353,7 @@ export class TurnContext {
    * Get model context window size
    */
   getModelContextWindow(): number | undefined {
-    return this.modelClient.getContextWindow();
+    return this.modelClient.getModelContextWindow();
   }
 
   /**

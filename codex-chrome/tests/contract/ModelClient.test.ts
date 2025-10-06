@@ -12,23 +12,24 @@ import { ModelClient } from '../../src/models/ModelClient';
 import type { Prompt } from '../../src/models/types/ResponsesAPI';
 import type { ModelFamily, ModelProviderInfo } from '../../src/models/types/ResponsesAPI';
 
-// Mock configuration for testing
+// Mock configuration for testing (using snake_case from Phase 3.2)
 const mockConfig = {
   apiKey: 'test-key',
   baseUrl: 'https://api.openai.com/v1',
   conversationId: 'test-conversation-id',
   modelFamily: {
     family: 'gpt-4',
-    baseInstructions: 'You are a helpful assistant',
-    supportsReasoningSummaries: false,
-    needsSpecialApplyPatchInstructions: false,
+    base_instructions: 'You are a helpful assistant',
+    supports_reasoning_summaries: false,
+    needs_special_apply_patch_instructions: false,
   } as ModelFamily,
   provider: {
     name: 'openai',
-    baseUrl: 'https://api.openai.com/v1',
-    wireApi: 'responses',
-    requestMaxRetries: 3,
-    streamIdleTimeoutMs: 30000,
+    base_url: 'https://api.openai.com/v1',
+    wire_api: 'Responses',
+    request_max_retries: 3,
+    stream_idle_timeout_ms: 30000,
+    requires_openai_auth: true,
   } as ModelProviderInfo,
 };
 

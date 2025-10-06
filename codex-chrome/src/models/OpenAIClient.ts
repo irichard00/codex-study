@@ -164,8 +164,8 @@ export class OpenAIClient extends ModelClient {
     // Return minimal provider info for OpenAI Chat Completions API
     return {
       name: 'openai',
-      wireApi: 'Chat',
-      requiresOpenaiAuth: true,
+      wire_api: 'Chat',
+      requires_openai_auth: true,
     };
   }
 
@@ -175,10 +175,6 @@ export class OpenAIClient extends ModelClient {
 
   setModel(model: string): void {
     this.currentModel = model;
-  }
-
-  getContextWindow(): number | undefined {
-    return this.getModelContextWindow();
   }
 
   getModelContextWindow(): number | undefined {

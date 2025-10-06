@@ -29,17 +29,18 @@ describe('T007: Full Stream Lifecycle Integration', () => {
   beforeEach(() => {
     mockModelFamily = {
       family: 'gpt-4',
-      baseInstructions: 'You are a helpful assistant.',
-      supportsReasoningSummaries: false,
-      needsSpecialApplyPatchInstructions: false,
+      base_instructions: 'You are a helpful assistant.',
+      supports_reasoning_summaries: false,
+      needs_special_apply_patch_instructions: false,
     };
 
     mockProvider = {
       name: 'openai',
-      baseUrl: 'https://api.openai.com/v1',
-      wireApi: 'responses' as const,
-      requestMaxRetries: 3,
-      streamIdleTimeoutMs: 60000,
+      base_url: 'https://api.openai.com/v1',
+      wire_api: 'Responses' as const,
+      request_max_retries: 3,
+      stream_idle_timeout_ms: 60000,
+      requires_openai_auth: true,
     };
 
     client = new OpenAIResponsesClient(
