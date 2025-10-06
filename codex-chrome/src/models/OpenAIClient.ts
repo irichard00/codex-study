@@ -296,7 +296,7 @@ export class OpenAIClient extends ModelClient {
       tools: prompt.tools,
     };
 
-    this.validateRequest(request);
+    this.validateRequest(request as CompletionRequest);
 
     // Create ResponseStream to return immediately
     const stream = new ResponseStream();
@@ -304,7 +304,7 @@ export class OpenAIClient extends ModelClient {
     // Start async processing
     (async () => {
       try {
-        const openaiRequest = this.convertToOpenAIRequest({ ...request, stream: true });
+        const openaiRequest = this.convertToOpenAIRequest({ ...request, stream: true } as CompletionRequest);
 
         const response = await this.withRetry(
           () => this.makeStreamRequest(openaiRequest),
