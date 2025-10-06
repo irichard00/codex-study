@@ -24,19 +24,19 @@ describe('OpenAIResponsesClient', () => {
 
   const mockModelFamily: ModelFamily = {
     family: 'gpt-4o',
-    baseInstructions: 'You are a helpful assistant.',
-    supportsReasoningSummaries: true,
-    needsSpecialApplyPatchInstructions: false,
+    base_instructions: 'You are a helpful assistant.',
+    supports_reasoning_summaries: true,
+    needs_special_apply_patch_instructions: false,
   };
 
   const mockProvider: ModelProviderInfo = {
     name: 'openai',
-    baseUrl: 'https://api.openai.com/v1',
-    wireApi: 'Responses',
-    requiresOpenaiAuth: true,
-    requestMaxRetries: 3,
-    streamMaxRetries: 2,
-    streamIdleTimeoutMs: 30000,
+    base_url: 'https://api.openai.com/v1',
+    wire_api: 'Responses',
+    requires_openai_auth: true,
+    request_max_retries: 3,
+    stream_max_retries: 2,
+    stream_idle_timeout_ms: 30000,
   };
 
   beforeEach(() => {
@@ -128,7 +128,7 @@ describe('OpenAIResponsesClient', () => {
 
     it('should support streaming with Prompt format', async () => {
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
         tools: [],
       };
 
@@ -170,7 +170,7 @@ describe('OpenAIResponsesClient', () => {
           {
             type: 'message',
             role: 'user',
-            content: 'Hello world',
+            content: [{ type: 'input_text', text: 'Hello world' }],
           },
         ],
         tools: [
@@ -219,7 +219,7 @@ describe('OpenAIResponsesClient', () => {
           expect.objectContaining({
             type: 'message',
             role: 'user',
-            content: 'Hello world',
+            content: [{ type: 'input_text', text: 'Hello world' }],
           }),
         ]),
         tools: expect.arrayContaining([
@@ -248,7 +248,7 @@ describe('OpenAIResponsesClient', () => {
       });
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Test' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Test' }] }],
         tools: [],
       };
 
@@ -279,9 +279,9 @@ describe('OpenAIResponsesClient', () => {
       });
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Test' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Test' }] }],
         tools: [],
-        outputSchema: { type: 'object', properties: { answer: { type: 'string' } } },
+        output_schema: { type: 'object', properties: { answer: { type: 'string' } } },
       };
 
       mockFetch.mockResolvedValue(new Response('', { status: 500 }));
@@ -337,7 +337,7 @@ describe('OpenAIResponsesClient', () => {
       mockFetch.mockResolvedValue(createMockSSEResponse(events));
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
         tools: [],
       };
 
@@ -362,7 +362,7 @@ describe('OpenAIResponsesClient', () => {
       mockFetch.mockResolvedValue(createMockSSEResponse(events));
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
         tools: [],
       };
 
@@ -402,7 +402,7 @@ describe('OpenAIResponsesClient', () => {
       mockFetch.mockResolvedValue(createMockSSEResponse(events));
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
         tools: [],
       };
 
@@ -434,7 +434,7 @@ describe('OpenAIResponsesClient', () => {
       mockFetch.mockResolvedValue(createMockSSEResponse(events));
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
         tools: [],
       };
 
@@ -461,7 +461,7 @@ describe('OpenAIResponsesClient', () => {
       mockFetch.mockResolvedValue(createMockSSEResponse(events));
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
         tools: [],
       };
 
@@ -505,7 +505,7 @@ describe('OpenAIResponsesClient', () => {
       mockFetch.mockResolvedValue(response);
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
         tools: [],
       };
 
@@ -545,7 +545,7 @@ describe('OpenAIResponsesClient', () => {
       mockFetch.mockResolvedValue(createMockSSEResponse(events));
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
         tools: [],
       };
 
@@ -570,7 +570,7 @@ describe('OpenAIResponsesClient', () => {
       mockFetch.mockResolvedValue(createMockSSEResponse(events));
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
         tools: [],
       };
 
@@ -594,7 +594,7 @@ describe('OpenAIResponsesClient', () => {
       );
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
         tools: [],
       };
 
@@ -624,7 +624,7 @@ describe('OpenAIResponsesClient', () => {
         );
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
         tools: [],
       };
 
@@ -650,7 +650,7 @@ describe('OpenAIResponsesClient', () => {
         );
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
         tools: [],
       };
 
@@ -669,7 +669,7 @@ describe('OpenAIResponsesClient', () => {
       mockFetch.mockResolvedValue(new Response('Server error', { status: 500 }));
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
         tools: [],
       };
 
@@ -688,7 +688,7 @@ describe('OpenAIResponsesClient', () => {
       mockFetch.mockRejectedValue(new Error('Network error'));
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
         tools: [],
       };
 
@@ -711,7 +711,7 @@ describe('OpenAIResponsesClient', () => {
       mockFetch.mockResolvedValue(createMockSSEResponse(events));
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
         tools: [],
       };
 
@@ -735,7 +735,7 @@ describe('OpenAIResponsesClient', () => {
       mockFetch.mockResolvedValue(new Response('', { status: 500 }));
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
         tools: [],
       };
 
@@ -760,7 +760,7 @@ describe('OpenAIResponsesClient', () => {
       mockFetch.mockResolvedValue(new Response('', { status: 500 }));
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
         tools: [],
       };
 
@@ -786,7 +786,7 @@ describe('OpenAIResponsesClient', () => {
       mockFetch.mockResolvedValue(createMockSSEResponse(events));
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Hello' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Hello' }] }],
         tools: [],
       };
 

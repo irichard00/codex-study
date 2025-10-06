@@ -86,9 +86,9 @@ class TestModelClient extends ModelClient {
   getModelFamily(): any {
     return {
       family: 'test-family',
-      baseInstructions: 'Test instructions',
-      supportsReasoningSummaries: false,
-      needsSpecialApplyPatchInstructions: false,
+      base_instructions: 'Test instructions',
+      supports_reasoning_summaries: false,
+      needs_special_apply_patch_instructions: false,
     };
   }
 
@@ -778,8 +778,8 @@ describe('T008: Error Handling and Retries Integration', () => {
 
     mockModelFamily = {
       family: 'gpt-4',
-      baseInstructions: 'You are a helpful assistant.',
-      supportsReasoningSummaries: false,
+      base_instructions: 'You are a helpful assistant.',
+      supports_reasoning_summaries: false,
       needsSpecialApplyPatchInstructions: false,
     };
 

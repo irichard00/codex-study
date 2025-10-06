@@ -102,7 +102,7 @@ describe('MessageRouter ResponseEvent Integration', () => {
         expectedType: MessageType.RESPONSE_CREATED
       },
       {
-        event: { type: 'OutputItemDone', item: { id: 'test', type: 'message' } },
+        event: { type: 'OutputItemDone', item: { id: 'test', type: 'message', role: 'assistant', content: [{ type: 'output_text', text: 'test' }] } },
         expectedType: MessageType.RESPONSE_OUTPUT_ITEM_DONE
       },
       {

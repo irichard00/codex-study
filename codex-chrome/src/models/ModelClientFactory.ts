@@ -6,14 +6,14 @@
 import { ModelClient, ModelClientError, type RetryConfig } from './ModelClient';
 import { OpenAIClient } from './OpenAIClient';
 import { OpenAIResponsesClient } from './OpenAIResponsesClient';
-import { AnthropicClient } from './AnthropicClient';
 import { chromeAuthManager } from './ChromeAuthManager';
 import type { AgentConfig } from '../config/AgentConfig';
 
 /**
  * Supported model providers
+ * Note: Anthropic removed - not supported in Rust codex-rs implementation
  */
-export type ModelProvider = 'openai' | 'anthropic';
+export type ModelProvider = 'openai';
 
 /**
  * Configuration for model client creation
@@ -27,10 +27,8 @@ export interface ModelClientConfig {
   options?: {
     /** Base URL for API requests (optional) */
     baseUrl?: string;
-    /** Organization ID (OpenAI only) */
+    /** Organization ID (OpenAI) */
     organization?: string;
-    /** API version (Anthropic only) */
-    version?: string;
   };
 }
 
@@ -39,14 +37,13 @@ export interface ModelClientConfig {
  */
 const STORAGE_KEYS = {
   OPENAI_API_KEY: 'openai_api_key',
-  ANTHROPIC_API_KEY: 'anthropic_api_key',
   DEFAULT_PROVIDER: 'default_provider',
   OPENAI_ORGANIZATION: 'openai_organization',
-  ANTHROPIC_VERSION: 'anthropic_version',
 } as const;
 
 /**
  * Model name to provider mapping
+ * Note: Only OpenAI models supported (matching Rust codex-rs implementation)
  */
 const MODEL_PROVIDER_MAP: Record<string, ModelProvider> = {
   // OpenAI models
@@ -54,13 +51,6 @@ const MODEL_PROVIDER_MAP: Record<string, ModelProvider> = {
   'gpt-4': 'openai',
   'gpt-4-turbo': 'openai',
   'gpt-4o': 'openai',
-
-  // Anthropic models
-  'claude-3-opus-20240229': 'anthropic',
-  'claude-3-sonnet-20240229': 'anthropic',
-  'claude-3-haiku-20240307': 'anthropic',
-  'claude-3-5-sonnet-20240620': 'anthropic',
-  'claude-3-5-haiku-20241022': 'anthropic',
 };
 
 const DEFAULT_MODEL = 'gpt-5';
@@ -158,11 +148,9 @@ export class ModelClientFactory {
       // Try to infer from model name patterns
       if (model.startsWith('gpt-')) {
         return 'openai';
-      } else if (model.startsWith('claude-')) {
-        return 'anthropic';
       }
 
-      throw new ModelClientError(`Unknown model: ${model}. Cannot determine provider.`);
+      throw new ModelClientError(`Unknown model: ${model}. Only OpenAI models supported.`);
     }
 
     return provider;
@@ -189,7 +177,7 @@ export class ModelClientFactory {
     await chromeAuthManager.storeApiKey(apiKey);
 
     // Also save to original storage for backward compatibility
-    const key = provider === 'openai' ? STORAGE_KEYS.OPENAI_API_KEY : STORAGE_KEYS.ANTHROPIC_API_KEY;
+    const key = STORAGE_KEYS.OPENAI_API_KEY;
 
     await new Promise<void>((resolve, reject) => {
       chrome.storage.sync.set({ [key]: apiKey }, () => {
@@ -215,21 +203,17 @@ export class ModelClientFactory {
     const apiKey = await chromeAuthManager.retrieveApiKey();
 
     if (apiKey) {
-      // Validate if this key is for the requested provider
-      // OpenAI keys start with 'sk-' (but not 'sk-ant-')
-      // Anthropic keys start with 'sk-ant-'
-      const isAnthropicKey = apiKey.startsWith('sk-ant-');
-      const isOpenAIKey = apiKey.startsWith('sk-') && !isAnthropicKey;
+      // Validate if this key is for OpenAI
+      // OpenAI keys start with 'sk-'
+      const isOpenAIKey = apiKey.startsWith('sk-');
 
       if (provider === 'openai' && isOpenAIKey) {
-        return apiKey;
-      } else if (provider === 'anthropic' && isAnthropicKey) {
         return apiKey;
       }
     }
 
     // Fallback to original storage method for backward compatibility
-    const key = provider === 'openai' ? STORAGE_KEYS.OPENAI_API_KEY : STORAGE_KEYS.ANTHROPIC_API_KEY;
+    const key = STORAGE_KEYS.OPENAI_API_KEY;
 
     return new Promise((resolve, reject) => {
       chrome.storage.sync.get([key], (result) => {
@@ -307,9 +291,8 @@ export class ModelClientFactory {
    * @returns Promise resolving to configuration status
    */
   async getConfigurationStatus(): Promise<Record<ModelProvider, { hasApiKey: boolean; isDefault: boolean }>> {
-    const [openaiHasKey, anthropicHasKey, defaultProvider] = await Promise.all([
+    const [openaiHasKey, defaultProvider] = await Promise.all([
       this.hasValidApiKey('openai'),
-      this.hasValidApiKey('anthropic'),
       this.getDefaultProvider(),
     ]);
 
@@ -317,10 +300,6 @@ export class ModelClientFactory {
       openai: {
         hasApiKey: openaiHasKey,
         isDefault: defaultProvider === 'openai',
-      },
-      anthropic: {
-        hasApiKey: anthropicHasKey,
-        isDefault: defaultProvider === 'anthropic',
       },
     };
   }
@@ -348,11 +327,6 @@ export class ModelClientFactory {
       const organization = await this.loadFromStorage(STORAGE_KEYS.OPENAI_ORGANIZATION);
       if (organization) {
         config.options!.organization = organization;
-      }
-    } else if (provider === 'anthropic') {
-      const version = await this.loadFromStorage(STORAGE_KEYS.ANTHROPIC_VERSION);
-      if (version) {
-        config.options!.version = version;
       }
     }
 
@@ -387,12 +361,6 @@ export class ModelClientFactory {
         return new OpenAIClient(config.apiKey, {
           baseUrl: config.options?.baseUrl,
           organization: config.options?.organization,
-        });
-
-      case 'anthropic':
-        return new AnthropicClient(config.apiKey, {
-          baseUrl: config.options?.baseUrl,
-          version: config.options?.version,
         });
 
       default:

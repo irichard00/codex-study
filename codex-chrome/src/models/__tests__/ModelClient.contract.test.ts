@@ -25,17 +25,18 @@ describe('ModelClient Contract', () => {
   beforeEach(() => {
     mockModelFamily = {
       family: 'gpt-4',
-      baseInstructions: 'You are a helpful assistant.',
-      supportsReasoningSummaries: false,
-      needsSpecialApplyPatchInstructions: false,
+      base_instructions: 'You are a helpful assistant.',
+      supports_reasoning_summaries: false,
+      needs_special_apply_patch_instructions: false,
     };
 
     mockProvider = {
       name: 'openai',
-      baseUrl: 'https://api.openai.com/v1',
-      wireApi: 'responses' as const,
-      requestMaxRetries: 3,
-      streamIdleTimeoutMs: 60000,
+      base_url: 'https://api.openai.com/v1',
+      wire_api: 'Responses' as const,
+      request_max_retries: 3,
+      stream_idle_timeout_ms: 60000,
+      requires_openai_auth: true,
     };
 
     client = new OpenAIResponsesClient(
@@ -57,7 +58,7 @@ describe('ModelClient Contract', () => {
           {
             type: 'message',
             role: 'user',
-            content: 'Hello',
+            content: [{ type: 'input_text', text: 'Hello' }],
           },
         ],
         tools: [],
@@ -118,8 +119,8 @@ describe('ModelClient Contract', () => {
       // Contract: Must return ModelFamily object
       expect(family).toBeDefined();
       expect(typeof family.family).toBe('string');
-      expect(typeof family.baseInstructions).toBe('string');
-      expect(typeof family.supportsReasoningSummaries).toBe('boolean');
+      expect(typeof family.base_instructions).toBe('string');
+      expect(typeof family.supports_reasoning_summaries).toBe('boolean');
     });
   });
 
@@ -161,7 +162,7 @@ describe('ModelClient Contract', () => {
       expect(provider).toBeDefined();
       expect(typeof provider.name).toBe('string');
       expect(provider.name).toBe('openai');
-      expect(provider.wireApi).toBe('responses');
+      expect(provider.wire_api).toBe('Responses');
     });
   });
 
@@ -217,7 +218,7 @@ describe('ModelClient Contract', () => {
       } as Response);
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Test' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Test' }] }],
         tools: [],
       };
 
@@ -262,7 +263,7 @@ describe('ModelClient Contract', () => {
       } as Response);
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Test' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Test' }] }],
         tools: [],
       };
 
@@ -301,7 +302,7 @@ describe('ModelClient Contract', () => {
       });
 
       const prompt: Prompt = {
-        input: [{ type: 'message', role: 'user', content: 'Test' }],
+        input: [{ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'Test' }] }],
         tools: [],
       };
 

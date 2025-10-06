@@ -37,6 +37,12 @@ export class EventProcessor {
    * Process a single event and return a ProcessedEvent ready for UI display
    */
   processEvent(event: Event): ProcessedEvent | null {
+    // Defensive check for event structure
+    if (!event || !event.msg) {
+      console.error('Invalid event structure:', event);
+      return null;
+    }
+
     const msg = event.msg;
     const category = this.getCategoryForEvent(msg);
 

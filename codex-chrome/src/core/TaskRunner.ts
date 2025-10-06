@@ -9,6 +9,7 @@ import { TurnManager } from './TurnManager';
 import { TurnContext } from './TurnContext';
 import type { ProcessedResponseItem, TurnRunResult } from './TurnManager';
 import type { InputItem, Event, ResponseItem } from '../protocol/types';
+import { getResponseItemContent, getResponseItemRole } from '../protocol/types';
 import type {
   EventMsg,
   TaskCompleteEvent,
@@ -156,34 +157,43 @@ export class TaskRunner {
   /**
    * Run the task - main execution method
    */
-  async run(): Promise<TaskResult> {
-    return this.executeTask();
-  }
+  async run_task(submissionId?: string, signal?: AbortSignal): Promise<TaskResult> {
+    // Handle submission ID update if provided
+    if (submissionId && submissionId !== this.submissionId) {
+      this.state.submissionId = submissionId;
+    }
 
-  private async executeTask(signal?: AbortSignal): Promise<TaskResult> {
-    this.state.status = 'running';
-    this.state.abortReason = undefined;
-    this.state.compactionPerformed = false;
-    this.state.tokenUsage.used = 0;
-    this.state.currentTurnIndex = 0;
-    this.state.tokenUsageDetail = undefined;
-    this.state.lastAgentMessage = undefined;
-
-    await this.emitTaskStarted();
-
-    // Early exit for empty input tasks
-    if (this.input.length === 0) {
-      this.state.status = 'completed';
-      await this.emitTaskComplete({
-        lastAgentMessage: undefined,
-        compactionPerformed: false,
-        turnCount: 0,
-        tokenUsage: {},
-      });
-      return { success: true };
+    // Set up abort handler for signal if provided
+    let abortHandler: (() => void) | undefined;
+    if (signal) {
+      abortHandler = () => this.cancel();
+      signal.addEventListener('abort', abortHandler, { once: true });
     }
 
     try {
+      this.state.status = 'running';
+      this.state.abortReason = undefined;
+      this.state.compactionPerformed = false;
+      this.state.tokenUsage.used = 0;
+      this.state.currentTurnIndex = 0;
+      this.state.tokenUsageDetail = undefined;
+      this.state.lastAgentMessage = undefined;
+
+      await this.emitTaskStarted();
+
+      // Early exit for empty input tasks
+      if (this.input.length === 0) {
+        this.state.status = 'completed';
+        await this.emitTaskComplete({
+          lastAgentMessage: undefined,
+          compactionPerformed: false,
+          turnCount: 0,
+          tokenUsage: {},
+        });
+        return { success: true };
+      }
+      this.session.recordInputAndRolloutUsermsg(this.input);
+
       const outcome = await this.runLoop(signal);
 
       this.state.currentTurnIndex = outcome.turnCount;
@@ -235,11 +245,15 @@ export class TaskRunner {
         success: false,
         error: err.message,
       };
+    } finally {
+      // Clean up abort handler if it was set up
+      if (abortHandler && signal) {
+        signal.removeEventListener('abort', abortHandler);
+      }
     }
   }
 
   private async runLoop(signal?: AbortSignal): Promise<LoopOutcome> {
-    await this.session.recordInput(this.input);
 
     let turnCount = 0;
     let lastAgentMessage: string | undefined;
@@ -536,8 +550,8 @@ export class TaskRunner {
       const messageItem = item as ResponseItem;
 
       // Check if this is an assistant message (task completion indicator)
-      if (messageItem.role === 'assistant' && !response) {
-        lastAgentMessage = this.extractTextContent(messageItem);
+      if (getResponseItemRole(messageItem) === 'assistant' && !response) {
+        lastAgentMessage = getResponseItemContent(messageItem);
         itemsToRecord.push(messageItem);
       }
       // Check if this is a tool call that needs response (task continues)
@@ -568,27 +582,6 @@ export class TaskRunner {
     };
   }
 
-  /**
-   * Extract text content from a message item
-   */
-  private extractTextContent(item: ResponseItem): string | undefined {
-    if (!item.content) {
-      return undefined;
-    }
-
-    if (typeof item.content === 'string') {
-      return item.content;
-    }
-
-    if (Array.isArray(item.content)) {
-      return item.content
-        .filter((content: any) => content?.type === 'text')
-        .map((content: any) => content.text)
-        .join(' ');
-    }
-
-    return undefined;
-  }
 
   /**
    * Attempt automatic compaction when token limit is reached
@@ -637,28 +630,6 @@ export class TaskRunner {
         turn_count: this.state.currentTurnIndex,
       },
     });
-  }
-
-  /**
-   * New method for AgentTask coordination
-   * Contains the main task execution logic
-   */
-  async executeWithCoordination(
-    submissionId: string,
-    signal: AbortSignal
-  ): Promise<void> {
-    if (submissionId !== this.submissionId) {
-      this.state.submissionId = submissionId;
-    }
-
-    const abortHandler = () => this.cancel();
-    signal.addEventListener('abort', abortHandler, { once: true });
-
-    try {
-      await this.executeTask(signal);
-    } finally {
-      signal.removeEventListener('abort', abortHandler);
-    }
   }
 
   /**

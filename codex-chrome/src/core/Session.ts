@@ -7,18 +7,19 @@
  */
 
 import type { InputItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig, Event, ResponseItem, ConversationHistory, ReviewDecision } from '../protocol/types';
+import { mapResponseItemToEventMessages } from './events/EventMapping';
 import type { EventMsg } from '../protocol/events';
 import { RolloutRecorder, type RolloutItem } from '../storage/rollout';
 import { v4 as uuidv4 } from 'uuid';
 import { TurnContext } from './TurnContext';
 import type { AgentConfig } from '../config/AgentConfig';
+import type { SessionTask } from './tasks/SessionTask';
+import type { ToolRegistry } from '../tools/ToolRegistry';
 
 // New state management imports
 import { SessionState, type SessionStateExport } from './session/state/SessionState';
 import { type SessionServices, createSessionServices } from './session/state/SessionServices';
 import { ActiveTurn } from './session/state/ActiveTurn';
-import { TurnState } from './session/state/TurnState';
-import { TaskKind } from './session/state/types';
 import type { TokenUsageInfo, RunningTask, RateLimitSnapshot, TurnAbortReason, InitialHistory } from './session/state/types';
 
 /**
@@ -43,19 +44,16 @@ export class Session {
   private activeTurn: ActiveTurn | null = null; // Active turn management
   private turnContext: TurnContext;
   private messageCount: number = 0;
-  private currentTurnItems: InputItem[] = [];
   private eventEmitter: ((event: Event) => Promise<void>) | null = null;
   private isPersistent: boolean = true;
+  private toolRegistry: ToolRegistry | null = null; // Tool registry from CodexAgent
 
   // Runtime state (not persisted, lives in Session only)
   private toolUsageStats: Map<string, number> = new Map();
   private errorHistory: Array<{timestamp: number, error: string, context?: any}> = [];
   private interruptRequested: boolean = false;
 
-  /** Map of running tasks keyed by submission ID (Feature 012: Session task management) */
-  private runningTasks: Map<string, RunningTask> = new Map();
-
-  constructor(configOrIsPersistent?: AgentConfig | boolean, isPersistent?: boolean, services?: SessionServices) {
+  constructor(configOrIsPersistent?: AgentConfig | boolean, isPersistent?: boolean, services?: SessionServices, toolRegistry?: ToolRegistry) {
     this.conversationId = `conv_${uuidv4()}`;
 
     // Handle both new and old signatures for backward compatibility
@@ -64,7 +62,7 @@ export class Session {
       this.isPersistent = configOrIsPersistent;
       this.config = undefined;
     } else {
-      // New signature: Session(config?: AgentConfig, isPersistent?: boolean, services?: SessionServices)
+      // New signature: Session(config?: AgentConfig, isPersistent?: boolean, services?: SessionServices, toolRegistry?: ToolRegistry)
       this.config = configOrIsPersistent;
       this.isPersistent = isPersistent ?? true;
     }
@@ -72,11 +70,14 @@ export class Session {
     // Initialize session state
     this.sessionState = new SessionState(); // Pure data state
     this.services = services ?? null; // Will be created in initialize()
+    this.toolRegistry = toolRegistry ?? null; // Tool registry from CodexAgent
 
     // Initialize with default turn context, using config values if available
     // Note: TurnContext requires a ModelClient, which will be set during initialize()
     // For now, create a minimal context that will be replaced
     this.turnContext = {} as TurnContext;
+
+    this.activeTurn = new ActiveTurn();
   }
 
   /**
@@ -153,9 +154,9 @@ export class Session {
 
     // Record in SessionState
     const responseItem: ResponseItem = {
+      type: 'message',
       role: entry.type === 'user' ? 'user' : entry.type === 'system' ? 'system' : 'assistant',
-      content: entry.text,
-      timestamp: entry.timestamp,
+      content: [{ type: 'input_text', text: entry.text }],
     };
     this.sessionState.recordItems([responseItem]);
 
@@ -208,26 +209,6 @@ export class Session {
     return this.messageCount;
   }
 
-  /**
-   * Set current turn input items
-   */
-  setCurrentTurnItems(items: InputItem[]): void {
-    this.currentTurnItems = items;
-  }
-
-  /**
-   * Get current turn input items
-   */
-  getCurrentTurnItems(): InputItem[] {
-    return [...this.currentTurnItems];
-  }
-
-  /**
-   * Clear current turn items
-   */
-  clearCurrentTurn(): void {
-    this.currentTurnItems = [];
-  }
 
   /**
    * Get session metadata
@@ -281,8 +262,8 @@ export class Session {
       lastAccessed: number;
       messageCount: number;
     };
-  }, services?: SessionServices): Session {
-    const session = new Session(undefined, true, services);
+  }, services?: SessionServices, toolRegistry?: ToolRegistry): Session {
+    const session = new Session(undefined, true, services, toolRegistry);
 
     // Import SessionState
     session.sessionState = SessionState.import(data.state);
@@ -440,7 +421,6 @@ export class Session {
       // Delegate to ActiveTurn
       items.forEach(item => this.activeTurn!.pushPendingInput(item));
     }
-    // If no active turn, input is ignored (no legacy storage)
   }
 
   /**
@@ -577,9 +557,6 @@ export class Session {
   async reset(): Promise<void> {
     // Clear conversation history
     this.clearHistory();
-
-    // Clear current turn items
-    this.currentTurnItems = [];
 
     // Create new conversation ID
     Object.assign(this, { conversationId: `conv_${uuidv4()}` });
@@ -771,6 +748,20 @@ export class Session {
     // AgentConfig.getConfig() might return synchronously or via property
     // For now, return default until config structure is clarified
     return true;
+  }
+
+  /**
+   * Get tool registry
+   */
+  getToolRegistry(): ToolRegistry | null {
+    return this.toolRegistry;
+  }
+
+  /**
+   * Set tool registry (called by CodexAgent)
+   */
+  setToolRegistry(toolRegistry: ToolRegistry): void {
+    this.toolRegistry = toolRegistry;
   }
 
   /**
@@ -1019,22 +1010,6 @@ export class Session {
   // Task Lifecycle Management
   // ========================================================================
 
-  /**
-   * T020: Register new active task
-   *
-   * Creates ActiveTurn if needed and registers a running task.
-   * This is called when a new task is spawned.
-   *
-   * @param subId Submission ID for the task
-   * @param task RunningTask information
-   * @private
-   */
-  private registerNewActiveTask(subId: string, task: RunningTask): void {
-    if (!this.activeTurn) {
-      this.activeTurn = new ActiveTurn();
-    }
-    this.activeTurn.addTask(subId, task);
-  }
 
   /**
    * T021: Take all running tasks
@@ -1045,25 +1020,34 @@ export class Session {
    * @returns Map of all running tasks (submission ID -> RunningTask)
    * @private
    */
+  /**
+   * Take all running tasks and clear the active turn
+   * Port of Rust's take_all_running_tasks (codex-rs/core/src/tasks/mod.rs:128-138)
+   *
+   * @returns Map of all running tasks (submission ID -> RunningTask)
+   * @private
+   */
   private takeAllRunningTasks(): Map<string, RunningTask> {
+    // If no active turn, return empty map (matches Rust line 136)
     if (!this.activeTurn) {
       return new Map();
     }
 
-    // Drain all tasks from the turn
+    // Clear pending approvals and input before draining (matches Rust line 132)
+    this.activeTurn.clearPending();
+
+    // Drain all tasks from the turn (matches Rust line 133)
     const tasks = this.activeTurn.drain();
 
-    // Clear the active turn since all tasks are removed
+    // Clear the active turn since all tasks are removed (matches Rust line 130: active.take())
     this.activeTurn = null;
 
     return tasks;
   }
 
   /**
-   * T022: Handle task abort
-   *
-   * Aborts an individual task with the specified reason, triggers AbortController,
-   * and emits TurnAbortedEvent.
+   * Handle individual task abortion
+   * Port of Rust's handle_task_abort (codex-rs/core/src/tasks/mod.rs:140-162)
    *
    * @param subId Submission ID of the task to abort
    * @param task RunningTask to abort
@@ -1075,10 +1059,18 @@ export class Session {
     task: RunningTask,
     reason: TurnAbortReason
   ): Promise<void> {
-    // Abort the task via AbortController
-    task.handle.abort();
+    // Check if task already finished (matches Rust lines 146-148)
+    // In JavaScript, we check if the promise is already settled by checking if abort has effect
+    // The AbortController will have no effect if the task already completed
 
-    // Emit TurnAbortedEvent
+    // Abort the task via AbortController (matches Rust line 153)
+    task.abortController.abort();
+
+    // Note: Rust calls task.abort() on the SessionTask trait (line 155)
+    // In TypeScript, we handle cleanup in the task's promise catch block
+    // so we don't need an explicit abort() call here
+
+    // Emit TurnAborted event (matches Rust lines 157-161)
     const event: Event = {
       id: subId,
       msg: {
@@ -1086,31 +1078,35 @@ export class Session {
         data: {
           reason,
           submission_id: subId,
-          turn_count: undefined, // Could track turn count if needed
+          turn_count: 0,
         },
-      } as EventMsg,
+      },
     };
-    await this.sendEvent(event);
+
+    if (this.eventEmitter) {
+      await this.eventEmitter(event);
+    }
   }
 
   /**
-   * T023: Abort all tasks
+   * Abort all running tasks
+   * Port of Rust's abort_all_tasks (codex-rs/core/src/tasks/mod.rs:96-100)
    *
-   * Aborts all running tasks with the specified reason.
-   * Extracts all tasks, aborts each one, and clears ActiveTurn.
+   * Takes all running tasks and aborts each one with the specified reason.
    *
    * @param reason Reason for aborting all tasks
    */
   async abortAllTasks(reason: TurnAbortReason): Promise<void> {
+    // Take all running tasks (matches Rust line 97)
     const tasks = this.takeAllRunningTasks();
 
-    // Abort each task
+    // Abort each task (matches Rust lines 97-99)
     const abortPromises: Promise<void>[] = [];
     for (const [subId, task] of tasks) {
       abortPromises.push(this.handleTaskAbort(subId, task, reason));
     }
 
-    // Wait for all aborts to complete
+    // Wait for all aborts to complete (parallel execution)
     await Promise.all(abortPromises);
   }
 
@@ -1118,33 +1114,42 @@ export class Session {
    * T024: On task finished (UPDATED for Feature 012)
    *
    * Called when a task completes successfully.
-   * Removes the task from runningTasks map and emits TaskComplete event.
+   * Removes the task from ActiveTurn and emits TaskComplete event.
    *
    * @param subId Submission ID of the completed task
    * @param result Final assistant message (or null)
    */
-  private async onTaskFinished(subId: string, result: string | null): Promise<void> {
-    // Remove from running tasks
-    this.runningTasks.delete(subId);
-
-    // Emit TaskComplete event (if eventEmitter is set)
-    if (this.eventEmitter) {
-      await this.eventEmitter({
-        type: 'Event',
-        payload: {
-          type: 'TaskComplete',
-          subId,
-          message: result
-        }
-      } as Event);
-    }
-
-    // Also emit via old ActiveTurn path for backward compatibility
+  /**
+   * Handle task completion
+   * Port of Rust's on_task_finished (codex-rs/core/src/tasks/mod.rs:102-119)
+   *
+   * @param subId Submission ID of the completed task
+   * @param lastAgentMessage Final assistant message (or null)
+   * @private
+   */
+  private async onTaskFinished(subId: string, lastAgentMessage: string | null): Promise<void> {
+    // Remove task from ActiveTurn, and clear ActiveTurn if it's now empty
+    // Matches Rust lines 107-112
     if (this.activeTurn) {
       const isEmpty = this.activeTurn.removeTask(subId);
       if (isEmpty) {
         this.activeTurn = null;
       }
+    }
+
+    // Emit TaskComplete event (matches Rust lines 114-118)
+    const event: Event = {
+      id: subId,
+      msg: {
+        type: 'TaskComplete',
+        data: {
+          last_agent_message: lastAgentMessage ?? undefined,
+        }
+      }
+    };
+
+    if (this.eventEmitter) {
+      await this.eventEmitter(event);
     }
   }
 
@@ -1160,13 +1165,13 @@ export class Session {
    * @param input - Input items for the task
    */
   async spawnTask(
-    task: any, // SessionTask type
+    task: SessionTask, // SessionTask type
     context: TurnContext,
     subId: string,
     input: InputItem[]
   ): Promise<void> {
     // Abort all existing tasks before spawning new one (Rust pattern)
-    await this.abortAllTasks('Replaced');
+    await this.abortAllTasks('UserInterrupt');
 
     // Create AbortController for cancellation
     const abortController = new AbortController();
@@ -1194,8 +1199,9 @@ export class Session {
       startTime: Date.now()
     };
 
-    // Register in map
-    this.runningTasks.set(subId, runningTask);
+    // Register as new active task (creates new ActiveTurn and adds task)
+    // Matches Rust pattern: codex-rs/core/src/tasks/mod.rs:93
+    this.registerNewActiveTask(subId, runningTask);
 
     // Execute asynchronously (fire-and-forget, don't await)
     // The promise will handle completion/abortion internally
@@ -1269,52 +1275,44 @@ export class Session {
    *
    * @param subId Submission ID
    * @param input Input items from user
-   * @private
+   * @public
    */
-  private async recordInputAndRolloutUsermsg(
-    subId: string,
+  public async recordInputAndRolloutUsermsg(
     input: InputItem[]
   ): Promise<void> {
     // Convert input to ResponseItem (simplified - would need full protocol mapping)
     const responseItems: ResponseItem[] = input.map((item) => ({
+      type: 'message',
       role: 'user',
-      content: typeof item === 'string' ? item : JSON.stringify(item),
-      type: 'message'
+      content: [{
+        type: 'input_text',
+        text: typeof item === 'string' ? item : JSON.stringify(item)
+      }]
     }));
 
     // Record to SessionState history
-    this.sessionState.recordItems(responseItems);
+    this.recordConversationItemsDual(responseItems);
 
-    // Derive UserMessage text from input
-    const messageText = input
-      .map((item) => {
-        if (typeof item === 'string') {
-          return item;
-        } else if (typeof item === 'object' && 'text' in item) {
-          return (item as any).text;
+    // Derive user message events using event mapping (matches Rust logic in codex.rs line 794-805)
+    // This ensures proper handling of user_instructions and environment_context tags
+    if (this.services?.rollout && responseItems.length > 0) {
+      const showRawReasoning = false; // User messages don't have reasoning
+      const eventMsgs = mapResponseItemToEventMessages(responseItems[0], showRawReasoning);
+
+      // Filter and persist only UserMessage events to rollout
+      const userMsgEvents = eventMsgs.filter(msg => msg.type === 'UserMessage');
+
+      if (userMsgEvents.length > 0) {
+        const rolloutItems: RolloutItem[] = userMsgEvents.map(event => ({
+          type: 'event_msg',
+          payload: event,
+        }));
+
+        try {
+          await this.services.rollout.recordItems(rolloutItems);
+        } catch (error) {
+          console.error('Failed to persist user message to rollout:', error);
         }
-        return '';
-      })
-      .join(' ');
-
-    // Create and persist UserMessage event to rollout (NOT full ResponseItem)
-    if (this.services?.rollout && messageText) {
-      const userMsgEvent: EventMsg = {
-        type: 'UserMessage',
-        data: {
-          message: messageText,
-        },
-      };
-
-      const rolloutItems: RolloutItem[] = [{
-        type: 'event_msg',
-        payload: userMsgEvent,
-      }];
-
-      try {
-        await this.services.rollout.recordItems(rolloutItems);
-      } catch (error) {
-        console.error('Failed to persist user message to rollout:', error);
       }
     }
   }
@@ -1501,21 +1499,46 @@ export class Session {
   /**
    * Get snapshot of running tasks (for debugging/monitoring)
    *
-   * @returns Copy of runningTasks map (not live reference)
+   * @returns Copy of tasks map (not live reference)
    */
   getRunningTasks(): Map<string, RunningTask> {
-    // Return shallow copy to prevent external mutation
-    return new Map(this.runningTasks);
+    if (!this.activeTurn) {
+      return new Map();
+    }
+    // Return snapshot (non-destructive)
+    return this.activeTurn.getTasks();
   }
 
   /**
    * Check if a specific task is running
    *
    * @param subId - Submission ID to check
-   * @returns true if task exists in runningTasks map
+   * @returns true if task exists in ActiveTurn
    */
   hasRunningTask(subId: string): boolean {
-    return this.runningTasks.has(subId);
+    return this.activeTurn?.hasTask(subId) ?? false;
+  }
+
+  /**
+   * Register a new active task
+   * Port of Rust's register_new_active_task (codex-rs/core/src/tasks/mod.rs:121-126)
+   *
+   * Creates a new ActiveTurn, adds the task to it, and replaces the current active turn.
+   * This effectively ensures only one turn can be active at a time.
+   *
+   * @param subId - Submission ID
+   * @param task - Running task to register
+   * @private
+   */
+  private registerNewActiveTask(subId: string, task: RunningTask): void {
+    // Create a new ActiveTurn
+    const turn = new ActiveTurn();
+
+    // Add the task to it
+    turn.addTask(subId, task);
+
+    // Replace the current active turn with the new one
+    this.activeTurn = turn;
   }
 
   /**
@@ -1526,30 +1549,31 @@ export class Session {
    * @private
    */
   private async onTaskAborted(subId: string, error: any): Promise<void> {
-    // Remove from running tasks
-    this.runningTasks.delete(subId);
-
-    // Determine abort reason from error
-    const reason: TurnAbortReason = error?.name === 'AbortError' ? 'Replaced' : 'Error';
-
-    // Emit TurnAborted event (if eventEmitter is set)
-    if (this.eventEmitter) {
-      await this.eventEmitter({
-        type: 'Event',
-        payload: {
-          type: 'TurnAborted',
-          subId,
-          reason
-        }
-      } as Event);
-    }
-
-    // Also emit via old ActiveTurn path for backward compatibility
+    // Remove from ActiveTurn
     if (this.activeTurn) {
       const isEmpty = this.activeTurn.removeTask(subId);
       if (isEmpty) {
         this.activeTurn = null;
       }
+    }
+
+    // Determine abort reason from error
+    const reason: TurnAbortReason = error?.name === 'AbortError' ? 'user_interrupt' : 'error';
+
+    // Emit TurnAborted event (if eventEmitter is set)
+    if (this.eventEmitter) {
+      const event: Event = {
+        id: uuidv4(),
+        msg: {
+          type: 'TurnAborted',
+          data: {
+            reason,
+            submission_id: subId,
+            turn_count: 0,
+          }
+        }
+      };
+      await this.eventEmitter(event);
     }
   }
 }

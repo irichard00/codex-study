@@ -8,6 +8,7 @@
 
 import { TaskRunner } from './TaskRunner';
 import type { InputItem, ResponseItem } from '../protocol/types';
+import { getResponseItemContent } from '../protocol/types';
 import type { Session } from './Session';
 import type { TurnContext } from './TurnContext';
 import type { TurnManager } from './TurnManager';
@@ -59,7 +60,7 @@ export class AgentTask {
       submissionId,
       input.map(item => ({
         type: 'text' as const,
-        text: typeof item.content === 'string' ? item.content : JSON.stringify(item.content)
+        text: getResponseItemContent(item)
       })),
       { autoCompact: true }
     );
@@ -74,7 +75,7 @@ export class AgentTask {
 
       // Delegate actual task execution to TaskRunner
       // TaskRunner contains the main execution logic
-      await this.taskRunner.executeWithCoordination(
+      await this.taskRunner.run_task(
         this.submissionId,
         this.abortController.signal
       );
@@ -143,7 +144,7 @@ export class AgentTask {
     // Convert ResponseItem[] to InputItem[] format for TaskRunner
     const inputItems = input.map(item => ({
       type: 'text' as const,
-      text: typeof item.content === 'string' ? item.content : JSON.stringify(item.content)
+      text: getResponseItemContent(item)
     }));
     
     // For now, we'll need to extend TaskRunner to support input injection

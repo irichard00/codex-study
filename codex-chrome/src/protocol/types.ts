@@ -124,24 +124,157 @@ export type SandboxPolicy =
     };
 
 /**
- * Response item for conversation history and API responses
+ * Protocol model types ported from codex-rs/protocol/src/models.rs
+ * These types represent the structured data from API responses
  */
-export interface ResponseItem {
-  id?: string;
-  type?: 'message' | 'reasoning' | 'function_call' | 'function_call_output' | 'web_search_call' | 'custom_tool_call' | 'custom_tool_call_output' | 'other';
-  role?: 'assistant' | 'user' | 'system' | 'tool';
-  content?: string | ContentBlock[] | any[];
-  timestamp?: number; // Optional timestamp for compatibility with former HistoryEntry
-  metadata?: {
-    timestamp?: number;
-    model?: string;
-    [key: string]: any;
-  };
+
+/**
+ * Content item types from protocol messages
+ */
+export type ContentItem =
+  | { type: 'input_text'; text: string }
+  | { type: 'input_image'; image_url: string }
+  | { type: 'output_text'; text: string };
+
+/**
+ * Reasoning summary types
+ */
+export type ReasoningItemReasoningSummary = {
+  type: 'summary_text';
+  text: string;
+};
+
+/**
+ * Reasoning content types
+ */
+export type ReasoningItemContent =
+  | { type: 'reasoning_text'; text: string }
+  | { type: 'text'; text: string };
+
+/**
+ * Web search action types
+ */
+export type WebSearchAction =
+  | { type: 'search'; query: string }
+  | { type: 'other' };
+
+/**
+ * Local shell execution status
+ */
+export type LocalShellStatus = 'completed' | 'in_progress' | 'incomplete';
+
+/**
+ * Local shell action types
+ */
+export type LocalShellAction = {
+  type: 'exec';
+  command: string[];
+  timeout_ms?: number;
+  working_directory?: string;
+  env?: Record<string, string>;
+  user?: string;
+};
+
+/**
+ * Response item types from protocol - discriminated union matching Rust enum
+ */
+export type ResponseItem =
+  | {
+      type: 'message';
+      id?: string;
+      role: string;
+      content: ContentItem[];
+    }
+  | {
+      type: 'reasoning';
+      id?: string;
+      summary: ReasoningItemReasoningSummary[];
+      content?: ReasoningItemContent[];
+      encrypted_content?: string;
+    }
+  | {
+      type: 'web_search_call';
+      id?: string;
+      status?: string;
+      action: WebSearchAction;
+    }
+  | {
+      type: 'function_call';
+      id?: string;
+      name: string;
+      arguments: string;
+      call_id: string;
+    }
+  | {
+      type: 'function_call_output';
+      call_id: string;
+      output: string;
+    }
+  | {
+      type: 'local_shell_call';
+      id?: string;
+      call_id?: string;
+      status: LocalShellStatus;
+      action: LocalShellAction;
+    }
+  | {
+      type: 'custom_tool_call';
+      id?: string;
+      status?: string;
+      call_id: string;
+      name: string;
+      input: string;
+    }
+  | {
+      type: 'custom_tool_call_output';
+      call_id: string;
+      output: string;
+    }
+  | { type: 'other' };
+
+/**
+ * Helper function to extract text content from a ResponseItem
+ * Returns a string representation of the content, or empty string if not applicable
+ */
+export function getResponseItemContent(item: ResponseItem): string {
+  switch (item.type) {
+    case 'message':
+      // Handle both array (correct) and string (backwards compat/malformed data)
+      if (typeof item.content === 'string') {
+        console.warn('[getResponseItemContent] message.content is a string (should be ContentItem[]):', item);
+        return item.content;
+      }
+      if (!Array.isArray(item.content)) {
+        console.error('[getResponseItemContent] message.content is neither string nor array:', item);
+        return '';
+      }
+      return item.content.map(c => {
+        if (c.type === 'input_text' || c.type === 'output_text') {
+          return c.text;
+        }
+        return '';
+      }).join('');
+    case 'reasoning':
+      return item.summary.map(s => s.text).join('\n');
+    case 'function_call':
+      return item.arguments;
+    case 'function_call_output':
+      return item.output;
+    case 'custom_tool_call':
+      return item.input;
+    case 'custom_tool_call_output':
+      return item.output;
+    default:
+      return '';
+  }
 }
 
-export interface ContentBlock {
-  type: 'text' | 'output_text' | 'input_text' | 'error_text';
-  text: string;
+/**
+ * Helper function to get the role from a ResponseItem message
+ * Returns undefined if the item is not a message
+ */
+export function getResponseItemRole(item: ResponseItem): string | undefined {
+  return item.type === 'message' ? item.role : undefined;
 }
 
 /**

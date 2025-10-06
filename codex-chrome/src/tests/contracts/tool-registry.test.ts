@@ -5,7 +5,8 @@
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { EventCollector, createMockToolResult, assertRejects } from '../utils/test-helpers';
-import type { ToolDefinition, ToolParameterSchema, ParameterProperty } from '../../tools/BaseTool';
+import type { ToolDefinition, ParameterProperty } from '../../tools/BaseTool';
+import { createFunctionTool, createObjectSchema } from '../../tools/BaseTool';
 
 interface ToolExecutionRequest {
   toolName: string;

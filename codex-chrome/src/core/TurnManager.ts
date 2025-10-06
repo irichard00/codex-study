@@ -11,9 +11,12 @@ import { loadPrompt, loadUserInstructions } from './PromptLoader';
 import type { EventMsg, TokenUsage, StreamErrorEvent } from '../protocol/events';
 import type { Event, InputItem } from '../protocol/types';
 import type { ResponseEvent } from '../models/types/ResponseEvent';
+import type { Prompt as ModelPrompt } from '../models/types/ResponsesAPI';
 import { v4 as uuidv4 } from 'uuid';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import type { IToolsConfig } from '../config/types';
+import { mapResponseItemToEventMessages } from './events/EventMapping';
+import type { ResponseItem } from '../protocol/types';
 
 /**
  * Result of processing a single response item
@@ -109,10 +112,10 @@ export class TurnManager {
     // Build tools list from turn context
     const tools = await this.buildToolsFromContext();
 
-    const prompt: Prompt = {
+    const prompt: ModelPrompt = {
       input,
       tools,
-      baseInstructionsOverride: this.turnContext.getBaseInstructions(),
+      base_instructions_override: this.turnContext.getBaseInstructions(),
     };
 
     let retries = 0;
@@ -155,7 +158,7 @@ export class TurnManager {
   /**
    * Attempt to run a turn once (without retry logic)
    */
-  private async tryRunTurn(prompt: Prompt): Promise<TurnRunResult> {
+  private async tryRunTurn(prompt: ModelPrompt): Promise<TurnRunResult> {
     // Record turn context
     await this.recordTurnContext();
 
@@ -289,19 +292,28 @@ export class TurnManager {
 
     // Add browser tools from registry based on config
     for (const toolDef of registeredTools) {
+      // Extract tool name based on type
+      let toolName: string;
+      if (toolDef.type === 'function') {
+        toolName = toolDef.function.name;
+      } else if (toolDef.type === 'local_shell') {
+        toolName = 'local_shell';
+      } else if (toolDef.type === 'web_search') {
+        toolName = 'web_search';
+      } else if (toolDef.type === 'custom') {
+        toolName = toolDef.custom.name;
+      } else {
+        console.warn('[TurnManager] Unknown tool type, skipping:', toolDef);
+        continue;
+      }
+
       // Check if tool is explicitly disabled
-      const isDisabled = toolsConfig.disabled?.includes(toolDef.name);
+      const isDisabled = toolsConfig.disabled?.includes(toolName);
 
       if (!isDisabled) {
-        // Convert ToolRegistry definition to Session ToolDefinition format
-        tools.push({
-          type: 'function',
-          function: {
-            name: toolDef.name,
-            description: toolDef.description,
-            parameters: toolDef.parameters || {},
-          },
-        });
+        // Tools are already in the correct ToolDefinition format
+        // Just pass them through directly
+        tools.push(toolDef);
       }
     }
 
@@ -312,6 +324,7 @@ export class TurnManager {
         function: {
           name: 'web_search',
           description: 'Search the web for information',
+          strict: false,
           parameters: {
             type: 'object',
             properties: {
@@ -329,6 +342,7 @@ export class TurnManager {
       function: {
         name: 'update_plan',
         description: 'Update the current task plan',
+        strict: false,
         parameters: {
           type: 'object',
           properties: {
@@ -359,7 +373,8 @@ export class TurnManager {
         function: {
           name: tool.function.name,
           description: tool.function.description,
-          parameters: tool.function.parameters || {},
+          strict: tool.function.strict ?? false,
+          parameters: tool.function.parameters || { type: 'object' as const, properties: {} },
         },
       }));
       tools.push(...convertedMcpTools);
@@ -391,7 +406,7 @@ export class TurnManager {
   /**
    * Process missing call IDs and add synthetic aborted responses
    */
-  private processMissingCalls(prompt: Prompt): Prompt {
+  private processMissingCalls(prompt: ModelPrompt): ModelPrompt {
     const completedCallIds = new Set<string>();
     const pendingCallIds = new Set<string>();
 
@@ -429,7 +444,7 @@ export class TurnManager {
   /**
    * Build completion request for model client
    */
-  private async buildCompletionRequest(prompt: Prompt): Promise<CompletionRequest> {
+  private async buildCompletionRequest(prompt: ModelPrompt): Promise<CompletionRequest> {
     const model = this.turnContext.getModel();
     const request: CompletionRequest = {
       model,
@@ -451,7 +466,7 @@ export class TurnManager {
   /**
    * Convert prompt format to model client message format
    */
-  private async convertPromptToMessages(prompt: Prompt): Promise<any[]> {
+  private async convertPromptToMessages(prompt: ModelPrompt): Promise<any[]> {
     const messages: any[] = [];
 
     // Load and add the agent prompt as system message
@@ -468,10 +483,10 @@ export class TurnManager {
     }
 
     // Add base instructions if provided (as override)
-    if (prompt.baseInstructionsOverride) {
+    if (prompt.base_instructions_override) {
       messages.push({
         role: 'system',
-        content: prompt.baseInstructionsOverride,
+        content: prompt.base_instructions_override,
       });
     }
 
@@ -511,38 +526,45 @@ export class TurnManager {
           success: false,
         };
       }
-    } else if (item.type === 'message' && item.role === 'assistant') {
-      // Assistant message - emit event but no response needed
-      await this.emitEvent({
-        type: 'AgentMessage',
-        data: {
-          message: typeof item.content === 'string' ? item.content : JSON.stringify(item.content),
-        },
-      });
-      return undefined;
-    } else if (item.type === 'reasoning') {
-      // Reasoning item (for o1/o3 models) - no response needed
-      return undefined;
-    } else if (item.type === 'web_search_call') {
-      // Web search call - execute and return response
-      const { call_id, query } = item;
+    } else if (item.type === 'message' || item.type === 'reasoning' || item.type === 'web_search_call') {
+      // Use event mapping to convert ResponseItem to EventMsg(s)
+      // This matches the Rust logic in codex.rs line 2219-2235
+      const showRawReasoning = this.session.getShowRawAgentReasoning?.() ?? false;
+      const eventMsgs = mapResponseItemToEventMessages(item as ResponseItem, showRawReasoning);
 
-      try {
-        const result = await this.executeWebSearch(query);
-        return {
-          type: 'function_call_output',
-          call_id,
-          content: JSON.stringify(result),
-          success: true,
-        };
-      } catch (error) {
-        return {
-          type: 'function_call_output',
-          call_id,
-          content: `Error: ${error instanceof Error ? error.message : String(error)}`,
-          success: false,
-        };
+      // Emit all mapped events
+      for (const msg of eventMsgs) {
+        if (msg && msg.type && msg.data) {
+          await this.emitEvent(msg);
+        } else {
+          console.warn('Skipping malformed event from mapResponseItemToEventMessages:', msg);
+        }
       }
+
+      // Handle web search response if needed
+      if (item.type === 'web_search_call') {
+        const { call_id, action } = item;
+        if (action?.type === 'search') {
+          try {
+            const result = await this.executeWebSearch(action.query);
+            return {
+              type: 'function_call_output',
+              call_id,
+              content: JSON.stringify(result),
+              success: true,
+            };
+          } catch (error) {
+            return {
+              type: 'function_call_output',
+              call_id,
+              content: `Error: ${error instanceof Error ? error.message : String(error)}`,
+              success: false,
+            };
+          }
+        }
+      }
+
+      return undefined;
     }
 
     // Other item types don't require responses

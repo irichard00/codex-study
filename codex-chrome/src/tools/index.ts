@@ -64,18 +64,14 @@ export async function registerTools(registry: ToolRegistry, toolsConfig: IToolsC
     };
 
     // Helper function to register a tool with error handling
-    const registerTool = async (toolName: string, toolInstance: any, getDefinition: () => any) => {
+    const registerTool = async (toolName: string, toolInstance: any) => {
       if (!registry.getTool(toolName)) {
-        const definition = getDefinition();
+        const definition = toolInstance.getDefinition();
         console.log(`Registering ${toolName}...`);
 
-        if (definition && definition.name) {
-          await registry.register(definition, async (params, context) => {
-            return toolInstance.execute(params);
-          });
-        } else {
-          console.error(`${toolName} definition missing name`);
-        }
+        await registry.register(definition, async (params, context) => {
+          return toolInstance.execute(params);
+        });
       } else {
         console.log(`${toolName} already registered, skipping...`);
       }
@@ -84,30 +80,7 @@ export async function registerTools(registry: ToolRegistry, toolsConfig: IToolsC
     // Web Scraping Tool
     if (isToolEnabled('web_scraping')) {
       const webScrapingTool = new WebScrapingTool();
-      const webScrapingDefinition = webScrapingTool.getDefinition();
-
-      if (!webScrapingDefinition || !webScrapingDefinition.name) {
-        console.error('WebScrapingTool definition is missing name. Definition:', webScrapingDefinition);
-
-        // Try to create a fallback definition
-        const fallbackDefinition = {
-          name: 'web_scraping',
-          description: 'Extract structured data from web pages using patterns',
-          parameters: {
-            type: 'object' as const,
-            properties: {},
-            required: [],
-            additionalProperties: false
-          }
-        };
-
-        console.log('Using fallback definition for web_scraping');
-        await registry.register(fallbackDefinition, async (params, context) => {
-          return webScrapingTool.execute(params);
-        });
-      } else {
-        await registerTool('web_scraping', webScrapingTool, () => webScrapingTool.getDefinition());
-      }
+      await registerTool('web_scraping', webScrapingTool);
     } else {
       console.log('WebScrapingTool disabled in configuration, skipping...');
     }
@@ -115,7 +88,7 @@ export async function registerTools(registry: ToolRegistry, toolsConfig: IToolsC
     // Form Automation Tool
     if (isToolEnabled('form_automation')) {
       const formAutomationTool = new FormAutomationTool();
-      await registerTool('form_automation', formAutomationTool, () => formAutomationTool.getDefinition());
+      await registerTool('form_automation', formAutomationTool);
     } else {
       console.log('FormAutomationTool disabled in configuration, skipping...');
     }
@@ -123,7 +96,7 @@ export async function registerTools(registry: ToolRegistry, toolsConfig: IToolsC
     // Network Intercept Tool
     if (isToolEnabled('network_intercept')) {
       const networkInterceptTool = new NetworkInterceptTool();
-      await registerTool('network_intercept', networkInterceptTool, () => networkInterceptTool.getDefinition());
+      await registerTool('network_intercept', networkInterceptTool);
     } else {
       console.log('NetworkInterceptTool disabled in configuration, skipping...');
     }
@@ -131,7 +104,7 @@ export async function registerTools(registry: ToolRegistry, toolsConfig: IToolsC
     // Data Extraction Tool
     if (isToolEnabled('data_extraction')) {
       const dataExtractionTool = new DataExtractionTool();
-      await registerTool('data_extraction', dataExtractionTool, () => dataExtractionTool.getDefinition());
+      await registerTool('data_extraction', dataExtractionTool);
     } else {
       console.log('DataExtractionTool disabled in configuration, skipping...');
     }
@@ -139,7 +112,7 @@ export async function registerTools(registry: ToolRegistry, toolsConfig: IToolsC
     // DOM Tool
     if (isToolEnabled('dom_tool')) {
       const domTool = new DOMTool();
-      await registerTool('dom_tool', domTool, () => domTool.getDefinition());
+      await registerTool('dom_tool', domTool);
     } else {
       console.log('DOMTool disabled in configuration, skipping...');
     }
@@ -147,7 +120,7 @@ export async function registerTools(registry: ToolRegistry, toolsConfig: IToolsC
     // Navigation Tool
     if (isToolEnabled('navigation_tool')) {
       const navigationTool = new NavigationTool();
-      await registerTool('navigation_tool', navigationTool, () => navigationTool.getDefinition());
+      await registerTool('navigation_tool', navigationTool);
     } else {
       console.log('NavigationTool disabled in configuration, skipping...');
     }
@@ -155,7 +128,7 @@ export async function registerTools(registry: ToolRegistry, toolsConfig: IToolsC
     // Storage Tool
     if (isToolEnabled('storage_tool')) {
       const storageTool = new StorageTool();
-      await registerTool('storage_tool', storageTool, () => storageTool.getDefinition());
+      await registerTool('storage_tool', storageTool);
     } else {
       console.log('StorageTool disabled in configuration, skipping...');
     }
@@ -163,7 +136,7 @@ export async function registerTools(registry: ToolRegistry, toolsConfig: IToolsC
     // Tab Tool
     if (isToolEnabled('tab_tool')) {
       const tabTool = new TabTool();
-      await registerTool('tab_tool', tabTool, () => tabTool.getDefinition());
+      await registerTool('tab_tool', tabTool);
     } else {
       console.log('TabTool disabled in configuration, skipping...');
     }

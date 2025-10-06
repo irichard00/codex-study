@@ -9,8 +9,7 @@ import type { Event } from '../protocol/types';
 import { EventCollector } from '../tests/utils/test-helpers';
 import type {
   ToolDefinition,
-  ToolParameterSchema,
-  ParameterProperty,
+  JsonSchema,
   ToolExecutionRequest,
   ToolExecutionResponse,
   ToolError,
@@ -52,9 +51,12 @@ export class ToolRegistry {
     // Validate tool definition
     this.validateToolDefinition(tool);
 
+    // Extract tool name based on definition type
+    const toolName = this.getToolName(tool);
+
     // Check for duplicate registration
-    if (this.tools.has(tool.name)) {
-      throw new Error(`Tool '${tool.name}' is already registered`);
+    if (this.tools.has(toolName)) {
+      throw new Error(`Tool '${toolName}' is already registered`);
     }
 
     // Register the tool
@@ -64,17 +66,17 @@ export class ToolRegistry {
       registrationTime: Date.now(),
     };
 
-    this.tools.set(tool.name, entry);
+    this.tools.set(toolName, entry);
 
     // Emit registration event
     this.emitEvent({
-      id: `evt_register_${tool.name}`,
+      id: `evt_register_${toolName}`,
       msg: {
         type: 'ToolRegistered',
         data: {
-          tool_name: tool.name,
-          category: tool.category,
-          version: tool.version,
+          tool_name: toolName,
+          category: undefined, // ToolDefinition doesn't have category
+          version: undefined, // ToolDefinition doesn't have version
           registration_time: entry.registrationTime,
         },
       },
@@ -110,38 +112,21 @@ export class ToolRegistry {
   async discover(query?: ToolDiscoveryQuery): Promise<ToolDiscoveryResult> {
     let tools = Array.from(this.tools.values()).map(entry => entry.definition);
 
-    // Apply filters
-    if (query?.category) {
-      tools = tools.filter(tool => tool.category === query.category);
-    }
+    // Note: ToolDefinition doesn't have category, version, or metadata fields
+    // These filters won't work with the current ToolDefinition type
 
     if (query?.namePattern) {
       const regex = new RegExp(query.namePattern, 'i');
-      tools = tools.filter(tool => regex.test(tool.name));
+      tools = tools.filter(tool => regex.test(this.getToolName(tool)));
     }
 
-    if (query?.capabilities) {
-      // Filter by capabilities (metadata-based)
-      tools = tools.filter(tool => {
-        if (!tool.metadata?.capabilities) return false;
-        return query.capabilities!.every(cap =>
-          tool.metadata!.capabilities.includes(cap)
-        );
-      });
-    }
-
-    if (query?.version) {
-      tools = tools.filter(tool => tool.version === query.version);
-    }
-
-    // Get all unique categories
-    const allTools = Array.from(this.tools.values()).map(entry => entry.definition);
-    const categories = [...new Set(allTools.map(tool => tool.category || 'uncategorized'))];
+    // category, capabilities, and version filters are not supported
+    // with the current ToolDefinition structure
 
     return {
       tools,
       total: tools.length,
-      categories,
+      categories: [], // No category support in ToolDefinition
     };
   }
 
@@ -162,7 +147,12 @@ export class ToolRegistry {
     }
 
     const errors: ValidationError[] = [];
-    const schema = entry.definition.parameters;
+    const schema = this.getToolParameters(entry.definition);
+
+    // Only validate if we have an object schema with properties
+    if (schema.type !== 'object' || !schema.properties) {
+      return { valid: true, errors: [] };
+    }
 
     // Check required parameters
     if (schema.required) {
@@ -197,14 +187,8 @@ export class ToolRegistry {
         errors.push(typeError);
       }
 
-      // Enum validation
-      if (propSchema.enum && !propSchema.enum.includes(paramValue)) {
-        errors.push({
-          parameter: paramName,
-          message: `Value must be one of: ${propSchema.enum.join(', ')}`,
-          code: 'ENUM_VIOLATION',
-        });
-      }
+      // Note: JsonSchema doesn't support enum validation directly
+      // Enum constraints should be handled at the tool level
     }
 
     return {
@@ -265,7 +249,7 @@ export class ToolRegistry {
         sessionId: request.sessionId,
         turnId: request.turnId,
         toolName: request.toolName,
-        metadata: entry.definition.metadata,
+        metadata: undefined, // ToolDefinition doesn't have metadata field
       };
 
       // Execute with timeout (default 120 seconds if not specified)
@@ -326,7 +310,7 @@ export class ToolRegistry {
         success: true,
         data: result,
         duration: Date.now() - startTime,
-        metadata: entry.definition.metadata,
+        metadata: undefined, // ToolDefinition doesn't have metadata field
       };
 
     } catch (error: any) {
@@ -375,17 +359,15 @@ export class ToolRegistry {
    * Get registry statistics
    */
   getStats() {
-    const categories = new Set<string>();
     let totalTools = 0;
 
     for (const entry of this.tools.values()) {
       totalTools++;
-      categories.add(entry.definition.category || 'uncategorized');
     }
 
     return {
       totalTools,
-      categories: Array.from(categories),
+      categories: [], // ToolDefinition doesn't have category field
       registeredTools: Array.from(this.tools.keys()),
     };
   }
@@ -399,43 +381,103 @@ export class ToolRegistry {
 
 
   /**
+   * Extract tool name from ToolDefinition based on type
+   */
+  private getToolName(tool: ToolDefinition): string {
+    if (tool.type === 'function') {
+      return tool.function.name;
+    } else if (tool.type === 'custom') {
+      return tool.custom.name;
+    } else if (tool.type === 'local_shell') {
+      return 'local_shell';
+    } else if (tool.type === 'web_search') {
+      return 'web_search';
+    }
+    throw new Error(`Unknown tool type: ${(tool as any).type}`);
+  }
+
+  /**
+   * Extract tool description from ToolDefinition based on type
+   */
+  private getToolDescription(tool: ToolDefinition): string {
+    if (tool.type === 'function') {
+      return tool.function.description;
+    } else if (tool.type === 'custom') {
+      return tool.custom.description;
+    } else if (tool.type === 'local_shell') {
+      return 'Execute local shell commands';
+    } else if (tool.type === 'web_search') {
+      return 'Search the web';
+    }
+    throw new Error(`Unknown tool type: ${(tool as any).type}`);
+  }
+
+  /**
+   * Extract tool parameters from ToolDefinition based on type
+   */
+  private getToolParameters(tool: ToolDefinition): any {
+    if (tool.type === 'function') {
+      return tool.function.parameters;
+    }
+    // Other types don't have parameters in the same way
+    return {
+      type: 'object',
+      properties: {},
+      required: [],
+      additionalProperties: false
+    };
+  }
+
+  /**
    * Validate tool definition structure
    */
   private validateToolDefinition(tool: ToolDefinition): void {
-    if (!tool.name || typeof tool.name !== 'string' || tool.name.trim() === '') {
+    if (!tool || !tool.type) {
+      throw new Error('Tool definition missing type field');
+    }
+
+    const name = this.getToolName(tool);
+    const description = this.getToolDescription(tool);
+
+    if (!name || typeof name !== 'string' || name.trim() === '') {
       throw new Error('Tool definition missing required field: name');
     }
 
-    if (!tool.description || typeof tool.description !== 'string' || tool.description.trim() === '') {
+    if (!description || typeof description !== 'string' || description.trim() === '') {
       throw new Error('Tool definition missing required field: description');
     }
 
-    if (!tool.parameters || typeof tool.parameters !== 'object') {
-      throw new Error('Tool definition missing required field: parameters');
-    }
+    // Only validate parameters for function tools
+    if (tool.type === 'function') {
+      const parameters = tool.function.parameters;
 
-    if (tool.parameters.type !== 'object') {
-      throw new Error('Tool parameters must be of type "object"');
-    }
+      if (!parameters || typeof parameters !== 'object') {
+        throw new Error('Tool definition missing required field: parameters');
+      }
 
-    if (!tool.parameters.properties || typeof tool.parameters.properties !== 'object') {
-      throw new Error('Tool parameters must define properties');
+      if (parameters.type !== 'object') {
+        throw new Error('Tool parameters must be of type "object"');
+      }
+
+      if (!parameters.properties || typeof parameters.properties !== 'object') {
+        throw new Error('Tool parameters must define properties');
+      }
     }
   }
 
   /**
-   * Validate individual parameter type
+   * Validate individual parameter type using JsonSchema
    */
   private validateParameterType(
     paramName: string,
     value: any,
-    schema: ParameterProperty
+    schema: JsonSchema
   ): ValidationError | null {
     const actualType = Array.isArray(value) ? 'array' : typeof value;
 
     // Handle null/undefined values
     if (value == null) {
-      return schema.default !== undefined ? null : {
+      return {
         parameter: paramName,
         message: 'Parameter value is null or undefined',
         code: 'NULL_VALUE',
@@ -455,10 +497,18 @@ export class ToolRegistry {
         break;
 
       case 'number':
+      case 'integer':
         if (typeof value !== 'number' || isNaN(value)) {
           return {
             parameter: paramName,
-            message: 'Expected number type',
+            message: `Expected ${schema.type} type`,
+            code: 'TYPE_MISMATCH',
+          };
+        }
+        if (schema.type === 'integer' && !Number.isInteger(value)) {
+          return {
+            parameter: paramName,
+            message: 'Expected integer value',
             code: 'TYPE_MISMATCH',
           };
         }
@@ -483,7 +533,7 @@ export class ToolRegistry {
           };
         }
         // Validate array items if schema is provided
-        if (schema.items) {
+        if ('items' in schema && schema.items) {
           for (let i = 0; i < value.length; i++) {
             const itemError = this.validateParameterType(`${paramName}[${i}]`, value[i], schema.items);
             if (itemError) {
@@ -501,12 +551,23 @@ export class ToolRegistry {
             code: 'TYPE_MISMATCH',
           };
         }
+        // Validate nested properties if schema defines them
+        if ('properties' in schema && schema.properties) {
+          for (const [propKey, propSchema] of Object.entries(schema.properties)) {
+            if (propKey in value) {
+              const propError = this.validateParameterType(`${paramName}.${propKey}`, value[propKey], propSchema);
+              if (propError) {
+                return propError;
+              }
+            }
+          }
+        }
         break;
 
       default:
         return {
           parameter: paramName,
-          message: `Unknown type: ${schema.type}`,
+          message: `Unknown type: ${(schema as any).type}`,
           code: 'UNKNOWN_TYPE',
         };
     }

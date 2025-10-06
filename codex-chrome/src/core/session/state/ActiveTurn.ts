@@ -52,20 +52,28 @@ export class ActiveTurn {
   }
 
   /**
+   * Clear pending approvals and input
+   * Port of Rust's clear_pending (codex-rs/core/src/state/turn.rs:104-107)
+   */
+  clearPending(): void {
+    this.turnState.clearPendingApprovals();
+    this.turnState.clearPendingInput();
+  }
+
+  /**
    * Abort all running tasks and clear state
    */
   abort(): void {
     // Abort all tasks
     for (const [_, task] of this.tasks) {
-      task.handle.abort();
+      task.abortController.abort();
     }
 
     // Clear tasks
     this.tasks.clear();
 
     // Clear turn state
-    this.turnState.clearPendingApprovals();
-    this.turnState.clearPendingInput();
+    this.clearPending();
   }
 
   /**
@@ -76,6 +84,14 @@ export class ActiveTurn {
     const drained = new Map(this.tasks);
     this.tasks.clear();
     return drained;
+  }
+
+  /**
+   * Get snapshot of all tasks (non-destructive)
+   * @returns Copy of tasks map
+   */
+  getTasks(): Map<string, RunningTask> {
+    return new Map(this.tasks);
   }
 
   // ===== TurnState Delegation =====

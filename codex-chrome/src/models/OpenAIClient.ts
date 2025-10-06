@@ -164,8 +164,8 @@ export class OpenAIClient extends ModelClient {
     // Return minimal provider info for OpenAI Chat Completions API
     return {
       name: 'openai',
-      wireApi: 'Chat',
-      requiresOpenaiAuth: true,
+      wire_api: 'Chat',
+      requires_openai_auth: true,
     };
   }
 
@@ -175,10 +175,6 @@ export class OpenAIClient extends ModelClient {
 
   setModel(model: string): void {
     this.currentModel = model;
-  }
-
-  getContextWindow(): number | undefined {
-    return this.getModelContextWindow();
   }
 
   getModelContextWindow(): number | undefined {
@@ -244,10 +240,10 @@ export class OpenAIClient extends ModelClient {
     }
   }
 
-  protected async *attemptStreamResponses(
-    request: CompletionRequest,
-    attempt: number
-  ): AsyncGenerator<ResponseEvent, void, unknown> {
+  protected async attemptStreamResponses(
+    attempt: number,
+    payload: any
+  ): Promise<ResponseStream> {
     throw new ModelClientError('attemptStreamResponses not supported by Chat Completions API');
   }
 
@@ -277,8 +273,13 @@ export class OpenAIClient extends ModelClient {
    * Stream a model response using the new Prompt-based API
    *
    * This is a compatibility adapter that converts Prompt to CompletionRequest
+   * and uses the streamCompletion() method for proper event handling
    */
   async stream(prompt: Prompt): Promise<ResponseStream> {
+    console.log('[OpenAIClient.stream] Starting stream with prompt:', {
+      inputCount: prompt.input.length,
+      toolsCount: prompt.tools?.length || 0
+    });
 
     // Convert Prompt to CompletionRequest
     const messages = prompt.input.map(item => {
@@ -294,10 +295,11 @@ export class OpenAIClient extends ModelClient {
       };
     });
 
-    const request = {
+    const request: CompletionRequest = {
       model: this.currentModel,
       messages,
       tools: prompt.tools,
+      stream: true,
     };
 
     this.validateRequest(request);
@@ -305,73 +307,21 @@ export class OpenAIClient extends ModelClient {
     // Create ResponseStream to return immediately
     const stream = new ResponseStream();
 
-    // Start async processing
+    // Start async processing using streamCompletion for proper event handling
     (async () => {
       try {
-        const openaiRequest = this.convertToOpenAIRequest({ ...request, stream: true });
-
-        const response = await this.withRetry(
-          () => this.makeStreamRequest(openaiRequest),
-          (error) => this.isRetryableError(error)
-        );
-
-        if (!response.body) {
-          throw new ModelClientError('Stream response body is null');
+        console.log('[OpenAIClient.stream] Starting streamCompletion generator');
+        let eventCount = 0;
+        // Use streamCompletion which has the full Rust-aligned event logic
+        for await (const event of this.streamCompletion(request)) {
+          eventCount++;
+          console.log(`[OpenAIClient.stream] Event ${eventCount}:`, event.type);
+          stream.addEvent(event);
         }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        try {
-          while (true) {
-            const { done, value } = await reader.read();
-
-            if (done) {
-              break;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-
-            // Keep the last potentially incomplete line in the buffer
-            buffer = lines.pop() || '';
-
-            for (const line of lines) {
-              const trimmed = line.trim();
-
-              if (!trimmed || !trimmed.startsWith('data: ')) {
-                continue;
-              }
-
-              const data = trimmed.slice(6); // Remove 'data: ' prefix
-
-              if (data === '[DONE]') {
-                break;
-              }
-
-              try {
-                const chunk: OpenAIStreamChunk = JSON.parse(data);
-                const streamChunk = this.convertStreamChunk(chunk);
-
-                if (streamChunk && streamChunk.delta?.content) {
-                  stream.addEvent({
-                    type: 'OutputTextDelta',
-                    delta: streamChunk.delta.content,
-                  });
-                }
-              } catch (error) {
-                // Skip malformed chunks
-                console.warn('Failed to parse stream chunk:', error);
-              }
-            }
-          }
-
-          stream.complete();
-        } finally {
-          reader.releaseLock();
-        }
+        console.log(`[OpenAIClient.stream] StreamCompletion completed after ${eventCount} events`);
+        stream.complete();
       } catch (error) {
+        console.error('[OpenAIClient.stream] Error in stream:', error);
         stream.error(error as Error);
       }
     })();
@@ -453,17 +403,188 @@ export class OpenAIClient extends ModelClient {
   }
 
   private convertToOpenAIRequest(request: CompletionRequest): OpenAICompletionRequest {
+    let convertedTools: OpenAITool[] | undefined;
+
+    if (request.tools && request.tools.length > 0) {
+      convertedTools = this.convertToolsToOpenAIFormat(request.tools);
+
+      // Log tool conversion for debugging
+      console.log('[OpenAIClient] Converting tools:', {
+        inputCount: request.tools.length,
+        outputCount: convertedTools?.length || 0,
+        inputSample: request.tools[0],
+        outputSample: convertedTools?.[0]
+      });
+
+      // Validate converted tools
+      if (convertedTools && convertedTools.length > 0) {
+        for (let i = 0; i < convertedTools.length; i++) {
+          const tool = convertedTools[i];
+          if (!tool.function || !tool.function.name) {
+            console.error(`[OpenAIClient] Invalid tool at index ${i}:`, tool);
+            throw new ModelClientError(
+              `Tool at index ${i} is missing required field 'function.name'. Tool: ${JSON.stringify(tool)}`
+            );
+          }
+        }
+      }
+    }
+
     return {
       model: request.model,
       messages: request.messages.map(this.convertMessage),
       temperature: request.temperature,
       max_completion_tokens: request.maxTokens,
-      tools: request.tools?.map(tool => ({
-        type: tool.type,
-        function: tool.function,
-      })),
+      tools: convertedTools && convertedTools.length > 0 ? convertedTools : undefined,
       stream: request.stream,
     };
+  }
+
+  /**
+   * Convert ToolDefinition array to OpenAI API format
+   * Handles conversion of all tool types (function, local_shell, web_search, custom)
+   */
+  private convertToolsToOpenAIFormat(tools: any[]): OpenAITool[] {
+    if (!tools || !Array.isArray(tools)) {
+      console.warn('convertToolsToOpenAIFormat: tools is not an array', tools);
+      return [];
+    }
+
+    return tools
+      .map(tool => {
+        if (!tool || typeof tool !== 'object') {
+          console.warn('convertToolsToOpenAIFormat: invalid tool object', tool);
+          return null;
+        }
+
+        // Handle function tools (already in correct format)
+        if (tool.type === 'function') {
+          if (!tool.function || !tool.function.name || !tool.function.description) {
+            console.error('convertToolsToOpenAIFormat: function tool missing required fields', tool);
+            return null;
+          }
+          return {
+            type: 'function' as const,
+            function: {
+              name: tool.function.name,
+              description: tool.function.description,
+              parameters: this.convertJsonSchemaToOpenAI(tool.function.parameters || { type: 'object', properties: {} }),
+            },
+          };
+        }
+
+        // Handle local_shell tool
+        if (tool.type === 'local_shell') {
+          return {
+            type: 'function' as const,
+            function: {
+              name: 'local_shell',
+              description: 'Execute local shell commands in the browser environment',
+              parameters: {
+                type: 'object',
+                properties: {
+                  command: {
+                    type: 'string',
+                    description: 'The shell command to execute',
+                  },
+                },
+                required: ['command'],
+              },
+            },
+          };
+        }
+
+        // Handle web_search tool
+        if (tool.type === 'web_search') {
+          return {
+            type: 'function' as const,
+            function: {
+              name: 'web_search',
+              description: 'Search the web for information',
+              parameters: {
+                type: 'object',
+                properties: {
+                  query: {
+                    type: 'string',
+                    description: 'The search query',
+                  },
+                },
+                required: ['query'],
+              },
+            },
+          };
+        }
+
+        // Handle custom/freeform tools - convert to function format
+        if (tool.type === 'custom' && tool.custom) {
+          return {
+            type: 'function' as const,
+            function: {
+              name: tool.custom.name,
+              description: tool.custom.description,
+              parameters: {
+                type: 'object',
+                properties: {},
+                additionalProperties: true,
+              },
+            },
+          };
+        }
+
+        // Unknown tool type - skip it
+        console.warn(`Unknown tool type: ${tool.type}, skipping`);
+        return null;
+      })
+      .filter((tool): tool is OpenAITool => tool !== null);
+  }
+
+  /**
+   * Convert JsonSchema to OpenAI parameter schema format
+   * Recursively processes nested schemas to ensure OpenAI compatibility
+   */
+  private convertJsonSchemaToOpenAI(schema: any): any {
+    if (!schema || typeof schema !== 'object') {
+      return schema;
+    }
+
+    const converted: any = {
+      type: schema.type,
+    };
+
+    // Add description if present
+    if (schema.description) {
+      converted.description = schema.description;
+    }
+
+    // Handle object type
+    if (schema.type === 'object') {
+      if (schema.properties) {
+        converted.properties = {};
+        for (const [key, value] of Object.entries(schema.properties)) {
+          converted.properties[key] = this.convertJsonSchemaToOpenAI(value);
+        }
+      }
+
+      if (schema.required) {
+        converted.required = schema.required;
+      }
+
+      if (schema.additionalProperties !== undefined) {
+        converted.additionalProperties = schema.additionalProperties;
+      }
+    }
+
+    // Handle array type
+    if (schema.type === 'array' && schema.items) {
+      converted.items = this.convertJsonSchemaToOpenAI(schema.items);
+    }
+
+    // Handle enum values (if present in extended schema)
+    if (schema.enum) {
+      converted.enum = schema.enum;
+    }
+
+    return converted;
   }
 
   private convertMessage(message: Message): OpenAIMessage {
@@ -592,6 +713,14 @@ export class OpenAIClient extends ModelClient {
       headers['OpenAI-Organization'] = this.organization;
     }
 
+    // Log request for debugging
+    console.log('[OpenAIClient] makeStreamRequest:', {
+      model: request.model,
+      messages: request.messages.length,
+      tools: request.tools?.length || 0,
+      toolsSample: request.tools?.[0] ? JSON.stringify(request.tools[0], null, 2) : 'none'
+    });
+
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers,
@@ -612,6 +741,18 @@ export class OpenAIClient extends ModelClient {
           errorMessage = `OpenAI API error: ${errorText}`;
         }
       }
+
+      // Log the request that caused the error for debugging
+      console.error('[OpenAIClient] Request failed:', {
+        status: response.status,
+        error: errorMessage,
+        requestTools: request.tools?.map(t => ({
+          type: t.type,
+          name: t.function?.name,
+          hasDescription: !!t.function?.description,
+          hasParameters: !!t.function?.parameters,
+        }))
+      });
 
       throw new ModelClientError(
         errorMessage,
@@ -674,33 +815,39 @@ export class OpenAIClient extends ModelClient {
         const { done, value } = await reader.read();
 
         if (done) {
+          console.log('[streamCompletion] Stream ended (done=true), emitting final events');
           // Stream closed gracefully – emit Completed with dummy id (lines 394-402)
           if (assistantText) {
+            console.log('[streamCompletion] Emitting final OutputItemDone (message) - stream end');
             yield {
               type: 'OutputItemDone',
               item: {
                 type: 'message',
                 role: 'assistant',
-                content: assistantText,
+                content: [{ type: 'output_text', text: assistantText }],
               },
             };
           }
 
           if (reasoningText) {
+            console.log('[streamCompletion] Emitting final OutputItemDone (reasoning) - stream end');
             yield {
               type: 'OutputItemDone',
               item: {
                 type: 'reasoning',
-                content: reasoningText,
+                summary: [],
+                content: [{ type: 'reasoning_text', text: reasoningText }],
               },
             };
           }
 
+          console.log('[streamCompletion] Emitting Completed event - stream end');
           yield {
             type: 'Completed',
             responseId: '',
             tokenUsage: undefined,
           };
+          console.log('[streamCompletion] Returning after Completed - stream end');
           return;
         }
 
@@ -721,33 +868,39 @@ export class OpenAIClient extends ModelClient {
 
           // OpenAI Chat streaming sends "[DONE]" when finished (line 416)
           if (data === '[DONE]') {
+            console.log('[streamCompletion] Received [DONE], emitting final events');
             // Emit any finalized items before closing (lines 418-448)
             if (assistantText) {
+              console.log('[streamCompletion] Emitting final OutputItemDone (message)');
               yield {
                 type: 'OutputItemDone',
                 item: {
                   type: 'message',
                   role: 'assistant',
-                  content: assistantText,
+                  content: [{ type: 'output_text', text: assistantText }],
                 },
               };
             }
 
             if (reasoningText) {
+              console.log('[streamCompletion] Emitting final OutputItemDone (reasoning)');
               yield {
                 type: 'OutputItemDone',
                 item: {
                   type: 'reasoning',
-                  content: reasoningText,
+                  summary: [],
+                  content: [{ type: 'reasoning_text', text: reasoningText }],
                 },
               };
             }
 
+            console.log('[streamCompletion] Emitting Completed event');
             yield {
               type: 'Completed',
               responseId: '',
               tokenUsage: undefined,
             };
+            console.log('[streamCompletion] Returning after Completed');
             return;
           }
 

@@ -3,15 +3,12 @@
  * Preserves the SQ/EQ (Submission Queue/Event Queue) architecture
  */
 
-import type { Submission, Op, Event, ResponseItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig, ReviewDecision } from '../protocol/types';
+import type { Submission, Op, Event, InputItem, AskForApproval, SandboxPolicy, ReasoningEffortConfig, ReasoningSummaryConfig, ReviewDecision } from '../protocol/types';
 import type { EventMsg } from '../protocol/events';
 import type { IConfigChangeEvent } from '../config/types';
 import { AgentConfig } from '../config/AgentConfig';
 import { Session } from './Session';
-import { TaskRunner } from './TaskRunner';
-import { TurnManager } from './TurnManager';
 import { TurnContext } from './TurnContext';
-import { AgentTask } from './AgentTask';
 import { ApprovalManager } from './ApprovalManager';
 import { DiffTracker } from './DiffTracker';
 import { ToolRegistry } from '../tools/ToolRegistry';
@@ -19,6 +16,7 @@ import { ModelClientFactory } from '../models/ModelClientFactory';
 import { UserNotifier } from './UserNotifier';
 import { v4 as uuidv4 } from 'uuid';
 import { loadUserInstructions } from './PromptLoader';
+import { RegularTask } from './tasks/RegularTask';
 
 /**
  * Main agent class managing the submission and event queues
@@ -30,8 +28,6 @@ export class CodexAgent {
   private eventQueue: Event[] = [];
   private session: Session;
   private isProcessing: boolean = false;
-  // REMOVED (Feature 012): private activeTask: AgentTask | null = null;
-  // Task management now handled by Session.spawnTask() matching Rust pattern
   private config: AgentConfig;
   private approvalManager: ApprovalManager;
   private diffTracker: DiffTracker;
@@ -44,12 +40,16 @@ export class CodexAgent {
     this.config = config || AgentConfig.getInstance();
 
     // Initialize components with config
-    this.session = new Session(this.config);
     this.modelClientFactory = ModelClientFactory.getInstance();
     this.toolRegistry = new ToolRegistry();
     this.approvalManager = new ApprovalManager(this.config);
     this.diffTracker = new DiffTracker();
     this.userNotifier = new UserNotifier();
+
+    // Initialize session with config and toolRegistry
+    this.session = new Session(this.config, true, undefined, this.toolRegistry);
+    // Wire up session event emitter to CodexAgent's event queue
+    this.session.setEventEmitter(async (event: Event) => this.emitEvent(event.msg));
 
     // Setup event processing for notifications
     this.setupNotificationHandlers();
@@ -347,7 +347,6 @@ export class CodexAgent {
 
       // Create RegularTask instance (Feature 011 architecture)
       // RegularTask will delegate to AgentTask → TaskRunner
-      const { RegularTask } = await import('./tasks/RegularTask');
       const task = new RegularTask();
 
       // Generate submission ID

@@ -9,9 +9,10 @@ import type { SessionTask } from './SessionTask';
 import type { Session } from '../Session';
 import type { TurnContext } from '../TurnContext';
 import type { InputItem, ResponseItem } from '../../protocol/types';
-import type { TaskKind } from '../session/state/types';
+import { TaskKind } from '../session/state/types';
 import { AgentTask } from '../AgentTask';
 import { TurnManager } from '../TurnManager';
+import type { ToolRegistry } from '../../tools/ToolRegistry';
 
 /**
  * RegularTask implementation
@@ -24,7 +25,7 @@ export class RegularTask implements SessionTask {
    * Return task kind
    */
   kind(): TaskKind {
-    return 'Regular';
+    return TaskKind.Regular;
   }
 
   /**
@@ -42,7 +43,7 @@ export class RegularTask implements SessionTask {
     const turnManager = new TurnManager(
       session,
       context,
-      session.getToolRegistry?.() || null // Optional: get tool registry if available
+      session.getToolRegistry() as ToolRegistry // Tool registry is required
     );
 
     // Convert InputItem[] to ResponseItem[] for AgentTask
@@ -65,8 +66,16 @@ export class RegularTask implements SessionTask {
       // Extract final assistant message from session history
       const conversationHistory = session.getConversationHistory();
       const lastAgentMessage = conversationHistory.items
-        .filter(item => item.role === 'assistant')
-        .map(item => typeof item.content === 'string' ? item.content : JSON.stringify(item.content))
+        .filter((item): item is Extract<ResponseItem, { type: 'message' }> => 
+          item.type === 'message' && item.role === 'assistant')
+        .map(item => {
+          // Extract text content from ContentItem array
+          return item.content
+            .filter((content): content is Extract<typeof content, { type: 'output_text' }> => 
+              content.type === 'output_text')
+            .map(content => content.text)
+            .join('');
+        })
         .pop();
 
       return lastAgentMessage || null;
@@ -82,11 +91,26 @@ export class RegularTask implements SessionTask {
    * AgentTask expects ResponseItem[], but SessionTask.run() provides InputItem[]
    */
   private convertInput(input: InputItem[]): ResponseItem[] {
-    return input.map(item => ({
-      type: 'message' as const,
-      role: 'user' as const,
-      content: item.text || JSON.stringify(item)
-    }));
+    return input.map(item => {
+      // Handle different InputItem types
+      let text: string;
+      if (item.type === 'text') {
+        text = item.text;
+      } else if (item.type === 'image') {
+        text = `[Image: ${item.image_url}]`;
+      } else {
+        text = JSON.stringify(item);
+      }
+      
+      return {
+        type: 'message' as const,
+        role: 'user' as const,
+        content: [{
+          type: 'input_text' as const,
+          text: text
+        }]
+      };
+    });
   }
 
   /**

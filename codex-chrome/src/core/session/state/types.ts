@@ -3,7 +3,7 @@
  * Port of Rust state refactoring (commit 250b244ab)
  */
 
-import type { ReviewDecision } from '../../protocol/types';
+import type { ReviewDecision } from '../../../protocol/types';
 
 /**
  * Kind of task running in an active turn

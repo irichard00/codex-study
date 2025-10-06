@@ -201,7 +201,7 @@ export interface IExportData {
 // Event interfaces for config changes
 export interface IConfigChangeEvent {
   type: 'config-changed';
-  section: 'model' | 'provider' | 'profile' | 'preferences' | 'cache' | 'extension';
+  section: 'model' | 'provider' | 'profile' | 'preferences' | 'cache' | 'extension' | 'security';
   oldValue?: any;
   newValue: any;
   timestamp: number;

@@ -621,6 +621,12 @@ export class UserNotifier {
    * Process event and show notification if needed
    */
   async processEvent(event: Event): Promise<void> {
+    // Defensive check for event structure
+    if (!event || !event.msg) {
+      console.error('UserNotifier: Invalid event structure:', event);
+      return;
+    }
+
     const eventMsg = event.msg;
 
     switch (eventMsg.type) {
