@@ -239,6 +239,15 @@ export type ResponseItem =
 export function getResponseItemContent(item: ResponseItem): string {
   switch (item.type) {
     case 'message':
+      // Handle both array (correct) and string (backwards compat/malformed data)
+      if (typeof item.content === 'string') {
+        console.warn('[getResponseItemContent] message.content is a string (should be ContentItem[]):', item);
+        return item.content;
+      }
+      if (!Array.isArray(item.content)) {
+        console.error('[getResponseItemContent] message.content is neither string nor array:', item);
+        return '';
+      }
       return item.content.map(c => {
         if (c.type === 'input_text' || c.type === 'output_text') {
           return c.text;

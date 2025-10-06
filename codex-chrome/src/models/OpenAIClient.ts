@@ -276,6 +276,11 @@ export class OpenAIClient extends ModelClient {
    * and uses the streamCompletion() method for proper event handling
    */
   async stream(prompt: Prompt): Promise<ResponseStream> {
+    console.log('[OpenAIClient.stream] Starting stream with prompt:', {
+      inputCount: prompt.input.length,
+      toolsCount: prompt.tools?.length || 0
+    });
+
     // Convert Prompt to CompletionRequest
     const messages = prompt.input.map(item => {
       if (item.type === 'message') {
@@ -305,12 +310,18 @@ export class OpenAIClient extends ModelClient {
     // Start async processing using streamCompletion for proper event handling
     (async () => {
       try {
+        console.log('[OpenAIClient.stream] Starting streamCompletion generator');
+        let eventCount = 0;
         // Use streamCompletion which has the full Rust-aligned event logic
         for await (const event of this.streamCompletion(request)) {
+          eventCount++;
+          console.log(`[OpenAIClient.stream] Event ${eventCount}:`, event.type);
           stream.addEvent(event);
         }
+        console.log(`[OpenAIClient.stream] StreamCompletion completed after ${eventCount} events`);
         stream.complete();
       } catch (error) {
+        console.error('[OpenAIClient.stream] Error in stream:', error);
         stream.error(error as Error);
       }
     })();
@@ -804,33 +815,39 @@ export class OpenAIClient extends ModelClient {
         const { done, value } = await reader.read();
 
         if (done) {
+          console.log('[streamCompletion] Stream ended (done=true), emitting final events');
           // Stream closed gracefully – emit Completed with dummy id (lines 394-402)
           if (assistantText) {
+            console.log('[streamCompletion] Emitting final OutputItemDone (message) - stream end');
             yield {
               type: 'OutputItemDone',
               item: {
                 type: 'message',
                 role: 'assistant',
-                content: assistantText,
+                content: [{ type: 'output_text', text: assistantText }],
               },
             };
           }
 
           if (reasoningText) {
+            console.log('[streamCompletion] Emitting final OutputItemDone (reasoning) - stream end');
             yield {
               type: 'OutputItemDone',
               item: {
                 type: 'reasoning',
-                content: reasoningText,
+                summary: [],
+                content: [{ type: 'reasoning_text', text: reasoningText }],
               },
             };
           }
 
+          console.log('[streamCompletion] Emitting Completed event - stream end');
           yield {
             type: 'Completed',
             responseId: '',
             tokenUsage: undefined,
           };
+          console.log('[streamCompletion] Returning after Completed - stream end');
           return;
         }
 
@@ -851,33 +868,39 @@ export class OpenAIClient extends ModelClient {
 
           // OpenAI Chat streaming sends "[DONE]" when finished (line 416)
           if (data === '[DONE]') {
+            console.log('[streamCompletion] Received [DONE], emitting final events');
             // Emit any finalized items before closing (lines 418-448)
             if (assistantText) {
+              console.log('[streamCompletion] Emitting final OutputItemDone (message)');
               yield {
                 type: 'OutputItemDone',
                 item: {
                   type: 'message',
                   role: 'assistant',
-                  content: assistantText,
+                  content: [{ type: 'output_text', text: assistantText }],
                 },
               };
             }
 
             if (reasoningText) {
+              console.log('[streamCompletion] Emitting final OutputItemDone (reasoning)');
               yield {
                 type: 'OutputItemDone',
                 item: {
                   type: 'reasoning',
-                  content: reasoningText,
+                  summary: [],
+                  content: [{ type: 'reasoning_text', text: reasoningText }],
                 },
               };
             }
 
+            console.log('[streamCompletion] Emitting Completed event');
             yield {
               type: 'Completed',
               responseId: '',
               tokenUsage: undefined,
             };
+            console.log('[streamCompletion] Returning after Completed');
             return;
           }
 
