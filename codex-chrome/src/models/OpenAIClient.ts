@@ -240,10 +240,10 @@ export class OpenAIClient extends ModelClient {
     }
   }
 
-  protected async *attemptStreamResponses(
-    request: CompletionRequest,
-    attempt: number
-  ): AsyncGenerator<ResponseEvent, void, unknown> {
+  protected async attemptStreamResponses(
+    attempt: number,
+    payload: any
+  ): Promise<ResponseStream> {
     throw new ModelClientError('attemptStreamResponses not supported by Chat Completions API');
   }
 
