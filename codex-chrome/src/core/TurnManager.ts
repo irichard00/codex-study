@@ -292,19 +292,28 @@ export class TurnManager {
 
     // Add browser tools from registry based on config
     for (const toolDef of registeredTools) {
+      // Extract tool name based on type
+      let toolName: string;
+      if (toolDef.type === 'function') {
+        toolName = toolDef.function.name;
+      } else if (toolDef.type === 'local_shell') {
+        toolName = 'local_shell';
+      } else if (toolDef.type === 'web_search') {
+        toolName = 'web_search';
+      } else if (toolDef.type === 'custom') {
+        toolName = toolDef.custom.name;
+      } else {
+        console.warn('[TurnManager] Unknown tool type, skipping:', toolDef);
+        continue;
+      }
+
       // Check if tool is explicitly disabled
-      const isDisabled = toolsConfig.disabled?.includes(toolDef.name);
+      const isDisabled = toolsConfig.disabled?.includes(toolName);
 
       if (!isDisabled) {
-        // Convert ToolRegistry definition to Session ToolDefinition format
-        tools.push({
-          type: 'function',
-          function: {
-            name: toolDef.name,
-            description: toolDef.description,
-            parameters: toolDef.parameters || {},
-          },
-        });
+        // Tools are already in the correct ToolDefinition format
+        // Just pass them through directly
+        tools.push(toolDef);
       }
     }
 
@@ -315,6 +324,7 @@ export class TurnManager {
         function: {
           name: 'web_search',
           description: 'Search the web for information',
+          strict: false,
           parameters: {
             type: 'object',
             properties: {
@@ -332,6 +342,7 @@ export class TurnManager {
       function: {
         name: 'update_plan',
         description: 'Update the current task plan',
+        strict: false,
         parameters: {
           type: 'object',
           properties: {
@@ -362,7 +373,8 @@ export class TurnManager {
         function: {
           name: tool.function.name,
           description: tool.function.description,
-          parameters: tool.function.parameters || {},
+          strict: tool.function.strict ?? false,
+          parameters: tool.function.parameters || { type: 'object' as const, properties: {} },
         },
       }));
       tools.push(...convertedMcpTools);
