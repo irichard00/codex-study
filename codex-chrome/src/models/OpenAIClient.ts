@@ -1004,7 +1004,8 @@ export class OpenAIClient extends ModelClient {
                     type: 'OutputItemDone',
                     item: {
                       type: 'reasoning',
-                      content: reasoningText,
+                      summary: [],
+                      content: [{ type: 'reasoning_text', text: reasoningText }],
                     },
                   };
                   reasoningText = '';
@@ -1028,7 +1029,7 @@ export class OpenAIClient extends ModelClient {
                     item: {
                       type: 'message',
                       role: 'assistant',
-                      content: assistantText,
+                      content: [{ type: 'output_text', text: assistantText }],
                     },
                   };
                   assistantText = '';
@@ -1039,7 +1040,8 @@ export class OpenAIClient extends ModelClient {
                     type: 'OutputItemDone',
                     item: {
                       type: 'reasoning',
-                      content: reasoningText,
+                      summary: [],
+                      content: [{ type: 'reasoning_text', text: reasoningText }],
                     },
                   };
                   reasoningText = '';
