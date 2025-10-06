@@ -108,18 +108,9 @@
       isProcessing = false;
     }
 
-    // Keep legacy message handling for backward compatibility
+    // Keep legacy Error message handling for backward compatibility
+    // Note: AgentMessage case removed - agent messages are now handled by EventProcessor
     switch (msg.type) {
-      case 'AgentMessage':
-        if ('data' in msg && msg.data && 'message' in msg.data) {
-          messages = [...messages, {
-            type: 'agent',
-            content: msg.data.message,
-            timestamp: Date.now(),
-          }];
-        }
-        break;
-
       case 'Error':
         if ('data' in msg && msg.data && 'message' in msg.data) {
           messages = [...messages, {
