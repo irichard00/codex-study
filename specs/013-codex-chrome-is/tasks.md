@@ -431,29 +431,48 @@
   - ✅ No custom retry variations found
   - ✅ withRetry() method in ModelClient.ts uses standard backoff logic (verified in T044)
 
-## Phase 3.6: Edge Case Tests (5 tasks)
+## Phase 3.6: Edge Case Tests (5 tasks) ✅ Complete
 
-- [ ] **T056** [P] Edge case test: Invalid API key in `codex-chrome/tests/integration/edge-cases/invalid-api-key.test.ts`:
-  - Test throws on 401 without retry
-  - Verify matches quickstart edge case 1
+- [x] **T056** [P] Edge case test: Invalid API key in `codex-chrome/tests/integration/edge-cases/invalid-api-key.test.ts`:
+  - ✅ Tests 401 throws immediately without retry
+  - ✅ Tests 403 forbidden error (no retry on 4xx)
+  - ✅ Tests 429 rate limit with retry
+  - ✅ Matches quickstart edge case 1
+  - ✅ Verifies FR-033 (distinguish retryable from fatal errors)
 
-- [ ] **T057** [P] Edge case test: SSE stream timeout in `codex-chrome/tests/integration/edge-cases/stream-timeout.test.ts`:
-  - Test idle timeout detection
-  - Verify stream closes with error
-  - Verify matches quickstart edge case 2
+- [x] **T057** [P] Edge case test: SSE stream timeout in `codex-chrome/tests/integration/edge-cases/stream-timeout.test.ts`:
+  - ✅ Tests timeout when no events arrive
+  - ✅ Tests no timeout if events arrive before timeout
+  - ✅ Tests abort signal handling
+  - ✅ Tests timeout during long gaps between events
+  - ✅ Matches quickstart edge case 2
+  - ✅ Tests ResponseStream.ts Lines 229-270 (waitForEvent timeout)
 
-- [ ] **T058** [P] Edge case test: Missing rate limit headers in `codex-chrome/tests/integration/edge-cases/missing-headers.test.ts`:
-  - Test parseRateLimitSnapshot returns undefined
-  - Test partial headers handled correctly
-  - Verify matches quickstart edge case 3
+- [x] **T058** [P] Edge case test: Missing rate limit headers in `codex-chrome/tests/integration/edge-cases/missing-headers.test.ts`:
+  - ✅ Tests parseRateLimitSnapshot returns undefined for missing headers
+  - ✅ Tests partial headers (primary only, secondary only)
+  - ✅ Tests both primary and secondary headers
+  - ✅ Tests invalid header values gracefully
+  - ✅ Tests zero values and 100% used edge cases
+  - ✅ Matches quickstart edge case 3
+  - ✅ Verifies FR-006 (parseRateLimitSnapshot from headers)
 
-- [ ] **T059** [P] Edge case test: response.failed event in `codex-chrome/tests/integration/edge-cases/response-failed.test.ts`:
-  - Test error message parsed and thrown
-  - Verify matches quickstart edge case 4
+- [x] **T059** [P] Edge case test: response.failed event in `codex-chrome/tests/integration/edge-cases/response-failed.test.ts`:
+  - ✅ Tests error message parsed and thrown
+  - ✅ Tests error code parsing
+  - ✅ Tests minimal error info handling
+  - ✅ Tests no events yielded after response.failed
+  - ✅ Matches quickstart edge case 4
+  - ✅ Verifies FR-012 (parse error.message from response.failed)
 
-- [ ] **T060** [P] Edge case test: Azure endpoint detection in `codex-chrome/tests/integration/edge-cases/azure-workaround.test.ts`:
-  - Test store: true applied when baseUrl contains 'azure'
-  - Verify matches quickstart edge case 5
+- [x] **T060** [P] Edge case test: Azure endpoint detection in `codex-chrome/tests/integration/edge-cases/azure-workaround.test.ts`:
+  - ✅ Tests store: true applied when baseUrl contains 'azure'
+  - ✅ Tests no store: true for non-Azure endpoints
+  - ✅ Tests various Azure URL formats
+  - ✅ Tests case-insensitive detection
+  - ✅ Tests Azure with reasoning enabled
+  - ✅ Matches quickstart edge case 5
+  - ✅ Verifies FR-030 (detect Azure endpoints and set store: true)
 
 ## Phase 3.7: Polish & Validation (10 tasks)
 
