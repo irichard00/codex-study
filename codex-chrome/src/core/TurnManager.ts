@@ -11,6 +11,7 @@ import { loadPrompt, loadUserInstructions } from './PromptLoader';
 import type { EventMsg, TokenUsage, StreamErrorEvent } from '../protocol/events';
 import type { Event, InputItem } from '../protocol/types';
 import type { ResponseEvent } from '../models/types/ResponseEvent';
+import type { Prompt as ModelPrompt } from '../models/types/ResponsesAPI';
 import { v4 as uuidv4 } from 'uuid';
 import { ToolRegistry } from '../tools/ToolRegistry';
 import type { IToolsConfig } from '../config/types';
@@ -111,10 +112,10 @@ export class TurnManager {
     // Build tools list from turn context
     const tools = await this.buildToolsFromContext();
 
-    const prompt: Prompt = {
+    const prompt: ModelPrompt = {
       input,
       tools,
-      baseInstructionsOverride: this.turnContext.getBaseInstructions(),
+      base_instructions_override: this.turnContext.getBaseInstructions(),
     };
 
     let retries = 0;
@@ -157,7 +158,7 @@ export class TurnManager {
   /**
    * Attempt to run a turn once (without retry logic)
    */
-  private async tryRunTurn(prompt: Prompt): Promise<TurnRunResult> {
+  private async tryRunTurn(prompt: ModelPrompt): Promise<TurnRunResult> {
     // Record turn context
     await this.recordTurnContext();
 
@@ -393,7 +394,7 @@ export class TurnManager {
   /**
    * Process missing call IDs and add synthetic aborted responses
    */
-  private processMissingCalls(prompt: Prompt): Prompt {
+  private processMissingCalls(prompt: ModelPrompt): ModelPrompt {
     const completedCallIds = new Set<string>();
     const pendingCallIds = new Set<string>();
 
@@ -431,7 +432,7 @@ export class TurnManager {
   /**
    * Build completion request for model client
    */
-  private async buildCompletionRequest(prompt: Prompt): Promise<CompletionRequest> {
+  private async buildCompletionRequest(prompt: ModelPrompt): Promise<CompletionRequest> {
     const model = this.turnContext.getModel();
     const request: CompletionRequest = {
       model,
@@ -453,7 +454,7 @@ export class TurnManager {
   /**
    * Convert prompt format to model client message format
    */
-  private async convertPromptToMessages(prompt: Prompt): Promise<any[]> {
+  private async convertPromptToMessages(prompt: ModelPrompt): Promise<any[]> {
     const messages: any[] = [];
 
     // Load and add the agent prompt as system message
@@ -470,10 +471,10 @@ export class TurnManager {
     }
 
     // Add base instructions if provided (as override)
-    if (prompt.baseInstructionsOverride) {
+    if (prompt.base_instructions_override) {
       messages.push({
         role: 'system',
-        content: prompt.baseInstructionsOverride,
+        content: prompt.base_instructions_override,
       });
     }
 

@@ -41,8 +41,8 @@ export interface ResponsesApiRequest {
  * **Field Name Convention**:
  * - input: Matches Rust exactly
  * - tools: Matches Rust exactly
- * - baseInstructionsOverride: camelCase (Rust: base_instructions_override)
- * - outputSchema: camelCase (Rust: output_schema)
+ * - base_instructions_override: snake_case (Rust: base_instructions_override)
+ * - output_schema: snake_case (Rust: output_schema)
  *
  * @example
  * ```typescript
@@ -59,9 +59,9 @@ export interface Prompt {
   /** Tools available to the model */
   tools: any[];  // Rust: tools: Vec<OpenAiTool>
   /** Optional override for base instructions */
-  baseInstructionsOverride?: string;  // Rust: base_instructions_override: Option<String>
+  base_instructions_override?: string;  // Rust: base_instructions_override: Option<String>
   /** Optional output schema for the model's response */
-  outputSchema?: any;  // Rust: output_schema: Option<serde_json::Value>
+  output_schema?: any;  // Rust: output_schema: Option<serde_json::Value>
 }
 
 /**
@@ -123,9 +123,9 @@ export type ReasoningSummaryConfig = boolean | { enabled: boolean };
  */
 export interface ModelFamily {
   family: string;
-  baseInstructions: string;
-  supportsReasoningSummaries: boolean;
-  needsSpecialApplyPatchInstructions: boolean;
+  base_instructions: string;
+  supports_reasoning_summaries: boolean;
+  needs_special_apply_patch_instructions: boolean;
 }
 
 /**
@@ -134,17 +134,17 @@ export interface ModelFamily {
  */
 export interface ModelProviderInfo {
   name: string;
-  baseUrl?: string;
-  envKey?: string;
-  envKeyInstructions?: string;
-  wireApi: WireApi;
-  queryParams?: Record<string, string>;
-  httpHeaders?: Record<string, string>;
-  envHttpHeaders?: Record<string, string>;
-  requestMaxRetries?: number;
-  streamMaxRetries?: number;
-  streamIdleTimeoutMs?: number;
-  requiresOpenaiAuth: boolean;
+  base_url?: string;
+  env_key?: string;
+  env_key_instructions?: string;
+  wire_api: WireApi;
+  query_params?: Record<string, string>;
+  http_headers?: Record<string, string>;
+  env_http_headers?: Record<string, string>;
+  request_max_retries?: number;
+  stream_max_retries?: number;
+  stream_idle_timeout_ms?: number;
+  requires_openai_auth: boolean;
 }
 
 /**

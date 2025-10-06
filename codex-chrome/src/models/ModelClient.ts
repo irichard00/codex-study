@@ -239,14 +239,6 @@ export abstract class ModelClient {
   abstract setModel(model: string): void;
 
   /**
-   * Get context window size for current model
-   * Rust Reference: codex-rs/core/src/client.rs Lines 109-113
-   *
-   * Note: Should be renamed to getModelContextWindow() for Rust alignment
-   */
-  abstract getContextWindow(): number | undefined;
-
-  /**
    * Get model context window size (Rust-aligned name)
    * Rust Reference: codex-rs/core/src/client.rs Lines 109-113
    */

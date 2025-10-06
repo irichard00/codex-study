@@ -156,10 +156,6 @@ export class OpenAIResponsesClient extends ModelClient {
     this.currentModel = model;
   }
 
-  getContextWindow(): number | undefined {
-    return this.getModelContextWindow();
-  }
-
   getModelContextWindow(): number | undefined {
     // Return context window sizes for known OpenAI models
     const contextWindows: Record<string, number> = {
@@ -232,10 +228,10 @@ export class OpenAIResponsesClient extends ModelClient {
     const fullInstructions = this.getFullInstructions(prompt);
     const toolsJson = this.createToolsJsonForResponsesApi(prompt.tools);
     const reasoning = this.createReasoningParam();
-    const textControls = this.createTextParam(prompt.outputSchema);
+    const textControls = this.createTextParam(prompt.output_schema);
 
     const include: string[] = reasoning ? ['reasoning.encrypted_content'] : [];
-    const azureWorkaround = (this.provider.baseUrl && this.provider.baseUrl.indexOf('azure') !== -1) || false;
+    const azureWorkaround = (this.provider.base_url && this.provider.base_url.indexOf('azure') !== -1) || false;
 
     const payload: ResponsesApiRequest = {
       model: this.currentModel,
@@ -253,7 +249,7 @@ export class OpenAIResponsesClient extends ModelClient {
     };
 
     // Retry logic with exponential backoff
-    const maxRetries = this.provider.requestMaxRetries ?? 3;
+    const maxRetries = this.provider.request_max_retries ?? 3;
     let attempt = 0;
     let lastError: any;
 
@@ -382,12 +378,12 @@ export class OpenAIResponsesClient extends ModelClient {
     const fullInstructions = this.getFullInstructions(prompt);
     const toolsJson = this.createToolsJsonForResponsesApi(prompt.tools);
     const reasoning = this.createReasoningParam();
-    const textControls = this.createTextParam(prompt.outputSchema);
+    const textControls = this.createTextParam(prompt.output_schema);
 
     const include: string[] = reasoning ? ['reasoning.encrypted_content'] : [];
 
     // Determine store setting (Azure workaround logic from Rust implementation)
-    const azureWorkaround = (this.provider.baseUrl && this.provider.baseUrl.indexOf('azure') !== -1) || false;
+    const azureWorkaround = (this.provider.base_url && this.provider.base_url.indexOf('azure') !== -1) || false;
 
     const payload: ResponsesApiRequest = {
       model: this.currentModel,
@@ -405,7 +401,7 @@ export class OpenAIResponsesClient extends ModelClient {
     };
 
     // Retry logic with exponential backoff
-    const maxRetries = this.provider.requestMaxRetries ?? 3;
+    const maxRetries = this.provider.request_max_retries ?? 3;
     let attempt = 0;
 
     while (attempt <= maxRetries) {
@@ -778,13 +774,13 @@ export class OpenAIResponsesClient extends ModelClient {
    * Get full instructions including base instructions and overrides
    */
   private getFullInstructions(prompt: Prompt): string {
-    const base = prompt.baseInstructionsOverride || this.modelFamily.baseInstructions;
+    const base = prompt.base_instructions_override || this.modelFamily.base_instructions;
 
     // Add apply_patch tool instructions if needed (simplified version of Rust logic)
-    const needsApplyPatchInstructions = this.modelFamily.needsSpecialApplyPatchInstructions;
+    const needsApplyPatchInstructions = this.modelFamily.needs_special_apply_patch_instructions;
     const hasApplyPatchTool = prompt.tools.some(tool => tool.name === 'apply_patch');
 
-    if (needsApplyPatchInstructions && !hasApplyPatchTool && !prompt.baseInstructionsOverride) {
+    if (needsApplyPatchInstructions && !hasApplyPatchTool && !prompt.base_instructions_override) {
       return `${base}\n\n<!-- Apply patch tool instructions would go here -->`;
     }
 
@@ -809,7 +805,7 @@ export class OpenAIResponsesClient extends ModelClient {
    * Create reasoning parameter for request
    */
   private createReasoningParam(): Reasoning | undefined {
-    if (!this.modelFamily.supportsReasoningSummaries) {
+    if (!this.modelFamily.supports_reasoning_summaries) {
       return undefined;
     }
 
