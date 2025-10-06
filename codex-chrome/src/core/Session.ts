@@ -1136,21 +1136,6 @@ export class Session {
         this.activeTurn = null;
       }
     }
-
-    // Emit TaskComplete event (matches Rust lines 114-118)
-    const event: Event = {
-      id: subId,
-      msg: {
-        type: 'TaskComplete',
-        data: {
-          last_agent_message: lastAgentMessage ?? undefined,
-        }
-      }
-    };
-
-    if (this.eventEmitter) {
-      await this.eventEmitter(event);
-    }
   }
 
   /**

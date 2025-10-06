@@ -51,7 +51,7 @@ export class AgentTask {
     this.submissionId = submissionId;
     this.input = input;
     this.abortController = new AbortController();
-    
+
     // Create TaskRunner instance - AgentTask owns its TaskRunner
     this.taskRunner = new TaskRunner(
       session,

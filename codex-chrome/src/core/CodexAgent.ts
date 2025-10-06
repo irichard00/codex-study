@@ -243,22 +243,6 @@ export class CodexAgent {
             },
           });
       }
-
-      // Emit TaskComplete event with turn metadata if available
-      const conversationHistory = this.session.getConversationHistory();
-      const lastAgentMessage = conversationHistory.items
-        .filter(item => item.role === 'assistant')
-        .map(item => typeof item.content === 'string' ? item.content : JSON.stringify(item.content))
-        .pop();
-
-      this.emitEvent({
-        type: 'TaskComplete',
-        data: {
-          last_agent_message: lastAgentMessage,
-          turn_id: submission.id,
-          input_messages: [], // Will be populated by specific handlers
-        },
-      });
     } catch (error) {
       // Emit TurnAborted event on error
       this.emitEvent({

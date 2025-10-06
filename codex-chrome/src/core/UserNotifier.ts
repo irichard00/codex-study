@@ -656,22 +656,6 @@ export class UserNotifier {
         }
         break;
 
-      case 'TaskComplete':
-        // Enhanced to match Rust implementation
-        const data = eventMsg.data as any;
-        if (data?.turn_id && data?.input_messages) {
-          // Use agent turn complete notification for compatibility
-          await this.notifyAgentTurnComplete(
-            data.turn_id,
-            data.input_messages,
-            data.last_agent_message
-          );
-        } else {
-          // Fallback to simple success notification
-          await this.notifySuccess('Task Completed', 'Task completed successfully');
-        }
-        break;
-
       case 'TaskFailed':
         if (eventMsg.data?.reason) {
           await this.notifyError('Task Failed', eventMsg.data.reason);
