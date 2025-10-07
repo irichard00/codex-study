@@ -37,6 +37,7 @@ import {
 // ============================================================================
 
 const DB_NAME = 'CodexRollouts';
+const DB_VERSION = 2;
 const STORE_ROLLOUTS = 'rollouts';
 const STORE_ROLLOUT_ITEMS = 'rollout_items';
 
@@ -245,10 +246,37 @@ export class RolloutRecorder {
 
   /**
    * Open IndexedDB database.
+   * Creates schema on first run or version upgrade.
    */
   private static openDatabase(): Promise<IDBDatabase> {
     return new Promise((resolve, reject) => {
-      const request = indexedDB.open(DB_NAME);
+      const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+      request.onupgradeneeded = (event) => {
+        const db = (event.target as IDBOpenDBRequest).result;
+
+        // Create rollouts object store (metadata)
+        if (!db.objectStoreNames.contains(STORE_ROLLOUTS)) {
+          const rolloutsStore = db.createObjectStore(STORE_ROLLOUTS, { keyPath: 'id' });
+          rolloutsStore.createIndex('created', 'created', { unique: false });
+          rolloutsStore.createIndex('updated', 'updated', { unique: false });
+          rolloutsStore.createIndex('expiresAt', 'expiresAt', { unique: false });
+        }
+
+        // Create rollout_items object store (conversation data)
+        if (!db.objectStoreNames.contains(STORE_ROLLOUT_ITEMS)) {
+          const itemsStore = db.createObjectStore(STORE_ROLLOUT_ITEMS, {
+            keyPath: 'id',
+            autoIncrement: true,
+          });
+          itemsStore.createIndex('rolloutId', 'rolloutId', { unique: false });
+          itemsStore.createIndex('rolloutId_sequence', ['rolloutId', 'sequence'], {
+            unique: true,
+          });
+          itemsStore.createIndex('timestamp', 'timestamp', { unique: false });
+        }
+      };
+
       request.onsuccess = () => resolve(request.result);
       request.onerror = () =>
         reject(createDatabaseError('open', request.error?.message || 'unknown error'));

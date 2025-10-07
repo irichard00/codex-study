@@ -160,6 +160,13 @@ export class Session {
   }
 
   /**
+   * Set the turn context (replaces the existing context)
+   */
+  setTurnContext(context: TurnContext): void {
+    this.turnContext = context;
+  }
+
+  /**
    * Update turn context with new values
    */
   updateTurnContext(updates: any): void {

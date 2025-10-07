@@ -116,6 +116,7 @@ export class TurnManager {
       input,
       tools,
       base_instructions_override: this.turnContext.getBaseInstructions(),
+      user_instructions: this.turnContext.getUserInstructions(),
     };
 
     let retries = 0;
