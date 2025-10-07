@@ -60,6 +60,8 @@ export interface Prompt {
   tools: any[];  // Rust: tools: Vec<OpenAiTool>
   /** Optional override for base instructions */
   base_instructions_override?: string;  // Rust: base_instructions_override: Option<String>
+  /** Optional user instructions (development guidelines) */
+  user_instructions?: string;
   /** Optional output schema for the model's response */
   output_schema?: any;  // Rust: output_schema: Option<serde_json::Value>
 }
