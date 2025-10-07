@@ -291,6 +291,14 @@ export class OpenAIClient extends ModelClient {
       };
     });
 
+    // Add system prompt from base_instructions_override if present
+    if (prompt.base_instructions_override) {
+      messages.unshift({
+        role: 'system',
+        content: prompt.base_instructions_override,
+      });
+    }
+
     const request: CompletionRequest = {
       model: this.currentModel,
       messages,
