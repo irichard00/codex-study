@@ -53,7 +53,13 @@ export class Session {
   private errorHistory: Array<{timestamp: number, error: string, context?: any}> = [];
   private interruptRequested: boolean = false;
 
-  constructor(configOrIsPersistent?: AgentConfig | boolean, isPersistent?: boolean, services?: SessionServices, toolRegistry?: ToolRegistry) {
+  constructor(
+    configOrIsPersistent?: AgentConfig | boolean,
+    isPersistent?: boolean,
+    services?: SessionServices,
+    toolRegistry?: ToolRegistry,
+    initialHistory?: InitialHistory
+  ) {
     this.conversationId = `conv_${uuidv4()}`;
 
     // Handle both new and old signatures for backward compatibility
@@ -62,7 +68,7 @@ export class Session {
       this.isPersistent = configOrIsPersistent;
       this.config = undefined;
     } else {
-      // New signature: Session(config?: AgentConfig, isPersistent?: boolean, services?: SessionServices, toolRegistry?: ToolRegistry)
+      // New signature: Session(config?: AgentConfig, isPersistent?: boolean, services?: SessionServices, toolRegistry?: ToolRegistry, initialHistory?: InitialHistory)
       this.config = configOrIsPersistent;
       this.isPersistent = isPersistent ?? true;
     }
@@ -87,7 +93,31 @@ export class Session {
 
     this.activeTurn = new ActiveTurn();
 
-    // Persistence is now handled by RolloutRecorder via initializeSession()
+    // Handle initial history
+    const historyMode = initialHistory ?? { mode: 'new' as const };
+
+ 
+    // For 'new' mode, SessionState is already initialized with empty history
+    // Initialize session with RolloutRecorder based on history mode (asynchronous)
+    // Note: We call initializeSession without await since constructor must be synchronous
+    // The initialization happens in the background
+    if (historyMode.mode === 'new' || historyMode.mode === 'forked') {
+      // Create new rollout
+      this.initializeSession('create', this.conversationId, this.config).then(() => {
+        // For forked mode, persist the forked history after rollout is created
+        if (historyMode.mode === 'forked') {
+          const history = this.sessionState.historySnapshot();
+          return this.persistRolloutResponseItems(history);
+        }
+      }).catch(err => {
+        console.error('Failed to initialize session:', err);
+      });
+    } else if (historyMode.mode === 'resumed') {
+      // Resume from existing rollout (note: initializeSession will also reconstruct history)
+      this.initializeSession('resume', this.conversationId, this.config).catch(err => {
+        console.error('Failed to resume session:', err);
+      });
+    }
   }
 
 
@@ -262,7 +292,9 @@ export class Session {
       messageCount: number;
     };
   }, services?: SessionServices, toolRegistry?: ToolRegistry): Session {
-    const session = new Session(undefined, true, services, toolRegistry);
+    // Create session with resumed history mode (no rollout items since we're importing directly)
+    const initialHistory: InitialHistory = { mode: 'new' }; // Use 'new' mode since we're setting state directly
+    const session = new Session(undefined, true, services, toolRegistry, initialHistory);
 
     // Import SessionState
     session.sessionState = SessionState.import(data.state);

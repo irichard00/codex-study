@@ -67,9 +67,6 @@ export class CodexAgent {
     // Initialize model client factory with config
     await this.modelClientFactory.initialize(this.config);
 
-    // Initialize session
-    await this.session.initialize();
-
     // Load user instructions and set in session's turn context
     const userInstructions = await loadUserInstructions();
     this.session.updateTurnContext({ userInstructions });
