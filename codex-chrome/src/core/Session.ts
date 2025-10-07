@@ -69,28 +69,27 @@ export class Session {
 
     // Initialize session state
     this.sessionState = new SessionState(); // Pure data state
-    this.services = services ?? null; // Will be created in initialize()
     this.toolRegistry = toolRegistry ?? null; // Tool registry from CodexAgent
 
+    // Initialize services (merged from initialize() method)
+    if (services) {
+      this.services = services;
+    } else {
+      // Services will be created asynchronously if needed
+      // For synchronous construction, set to null and create on-demand
+      this.services = null;
+    }
+
     // Initialize with default turn context, using config values if available
-    // Note: TurnContext requires a ModelClient, which will be set during initialize()
+    // Note: TurnContext requires a ModelClient, which will be set later
     // For now, create a minimal context that will be replaced
     this.turnContext = {} as TurnContext;
 
     this.activeTurn = new ActiveTurn();
-  }
-
-  /**
-   * Initialize session with storage and services
-   */
-  async initialize(): Promise<void> {
-    // Create services if not provided
-    if (!this.services) {
-      this.services = await createSessionServices({}, false);
-    }
 
     // Persistence is now handled by RolloutRecorder via initializeSession()
   }
+
 
   /**
    * Get or create a conversation in storage using RolloutRecorder
