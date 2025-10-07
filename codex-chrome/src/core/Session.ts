@@ -156,7 +156,7 @@ export class Session {
     const responseItem: ResponseItem = {
       type: 'message',
       role: entry.type === 'user' ? 'user' : entry.type === 'system' ? 'system' : 'assistant',
-      content: [{ type: 'input_text', text: entry.text }],
+      content: [{ type: 'text', text: entry.text }],
     };
     this.sessionState.recordItems([responseItem]);
 
@@ -461,12 +461,8 @@ export class Session {
    */
   async buildTurnInputWithHistory(newItems: any[]): Promise<any[]> {
     const conversationHistory = this.sessionState.getConversationHistory();
-    const historyItems = conversationHistory.items.map((item: any) => ({
-      role: item.role,
-      content: typeof item.content === 'string'
-        ? [{ type: 'text', text: item.content }]
-        : item.content,
-    }));
+    // Items are already in ResponseItem format, no conversion needed
+    const historyItems = conversationHistory.items;
 
     return [...historyItems, ...newItems];
   }
@@ -1270,7 +1266,7 @@ export class Session {
       type: 'message',
       role: 'user',
       content: [{
-        type: 'input_text',
+        type: 'text',
         text: typeof item === 'string' ? item : JSON.stringify(item)
       }]
     }));

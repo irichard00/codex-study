@@ -132,7 +132,7 @@ export type SandboxPolicy =
  * Content item types from protocol messages
  */
 export type ContentItem =
-  | { type: 'input_text'; text: string }
+  | { type: 'text'; text: string }
   | { type: 'input_image'; image_url: string }
   | { type: 'output_text'; text: string };
 
@@ -249,7 +249,7 @@ export function getResponseItemContent(item: ResponseItem): string {
         return '';
       }
       return item.content.map(c => {
-        if (c.type === 'input_text' || c.type === 'output_text') {
+        if (c.type === 'text' || c.type === 'output_text') {
           return c.text;
         }
         return '';

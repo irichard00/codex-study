@@ -31,7 +31,7 @@ export function mapResponseItemToEventMessages(
 
       for (const contentItem of content) {
         switch (contentItem.type) {
-          case 'input_text': {
+          case 'text': {
             if (kind === null) {
               const trimmed = contentItem.text.trimStart();
               if (trimmed.startsWith('<environment_context>')) {

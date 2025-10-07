@@ -71,7 +71,7 @@ describe('Stream Initialization Performance', () => {
       {
         type: 'message',
         role: 'user',
-        content: [{ type: 'input_text', text: 'Hello' }],
+        content: [{ type: 'text', text: 'Hello' }],
       },
     ],
     tools: [],
