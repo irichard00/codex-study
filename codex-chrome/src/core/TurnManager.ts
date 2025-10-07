@@ -365,7 +365,11 @@ export class TurnManager {
     });
 
     // Add MCP tools if enabled and available
-    if (enableAllTools || toolsConfig.mcpTools !== false) {
+    // Guard MCP calls with capability check to prevent "is not a function" errors
+    if (
+      (enableAllTools || toolsConfig.mcpTools === true) &&
+      typeof this.session.getMcpTools === 'function'
+    ) {
       const mcpTools = await this.session.getMcpTools();
       // Convert MCP tools to ModelClient format
       const convertedMcpTools = mcpTools.map(tool => ({
@@ -592,7 +596,27 @@ export class TurnManager {
           break;
 
         default:
-          // Try MCP tools
+          // Check ToolRegistry for browser tools BEFORE falling back to MCP
+          const browserTool = this.toolRegistry.getTool(toolName);
+          if (browserTool) {
+            result = await this.executeBrowserTool(browserTool, parameters);
+            break;
+          }
+
+          // Guard MCP execution with capability + config checks
+          const toolsConfig = this.turnContext.getToolsConfig();
+          const mcpEnabled = toolsConfig.mcpTools === true;
+          const mcpSupported = typeof this.session.executeMcpTool === 'function';
+
+          if (!mcpSupported) {
+            throw new Error(`MCP tools not supported in browser extension. Tool '${toolName}' not found.`);
+          }
+
+          if (!mcpEnabled) {
+            throw new Error(`Tool '${toolName}' not available (mcpTools disabled in config)`);
+          }
+
+          // Only reach here if MCP is supported AND enabled
           result = await this.executeMcpTool(toolName, parameters);
           break;
       }
@@ -746,6 +770,75 @@ export class TurnManager {
       });
       throw error;
     }
+  }
+
+  /**
+   * Execute a browser tool from ToolRegistry
+   */
+  private async executeBrowserTool(tool: any, parameters: any): Promise<any> {
+    // Emit browser tool execution event
+    const toolName = this.getToolNameFromDefinition(tool);
+
+    await this.emitEvent({
+      type: 'ToolExecutionStart',
+      data: {
+        tool_name: toolName,
+        session_id: this.session.getSessionId(),
+      },
+    });
+
+    try {
+      // Execute tool via ToolRegistry
+      const request = {
+        toolName,
+        parameters,
+        sessionId: this.session.getSessionId(),
+        turnId: `turn_${Date.now()}`,
+      };
+
+      const response = await this.toolRegistry.execute(request);
+
+      if (!response.success) {
+        throw new Error(response.error?.message || 'Tool execution failed');
+      }
+
+      await this.emitEvent({
+        type: 'ToolExecutionEnd',
+        data: {
+          tool_name: toolName,
+          session_id: this.session.getSessionId(),
+          success: true,
+        },
+      });
+
+      return response.data;
+    } catch (error) {
+      await this.emitEvent({
+        type: 'ToolExecutionError',
+        data: {
+          tool_name: toolName,
+          session_id: this.session.getSessionId(),
+          error: error instanceof Error ? error.message : String(error),
+        },
+      });
+      throw error;
+    }
+  }
+
+  /**
+   * Extract tool name from ToolDefinition
+   */
+  private getToolNameFromDefinition(tool: any): string {
+    if (tool.type === 'function') {
+      return tool.function.name;
+    } else if (tool.type === 'custom') {
+      return tool.custom.name;
+    } else if (tool.type === 'local_shell') {
+      return 'local_shell';
+    } else if (tool.type === 'web_search') {
+      return 'web_search';
+    }
+    return 'unknown_tool';
   }
 
   /**
