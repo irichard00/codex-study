@@ -310,21 +310,13 @@ export class CodexAgent {
         text: item.type === 'text' ? item.text || '' : undefined,
       }));
 
-      // Create TurnContext for this task
-      let taskContext: TurnContext;
-
+      // Apply context overrides to session's turn context if provided
       if (contextOverrides) {
-        // Create fresh context with overrides for this turn
-        const modelClient = await this.modelClientFactory.createClientForModel(contextOverrides.model || 'default');
-        taskContext = new TurnContext(modelClient, contextOverrides);
-
-        // Update session turn context with overrides
         this.session.updateTurnContext(contextOverrides);
-      } else {
-        // Create a new context for this turn
-        const modelClient = await this.modelClientFactory.createClientForModel('default');
-        taskContext = new TurnContext(modelClient, {});
       }
+
+      // Use the session's existing turn context
+      const taskContext = this.session.getTurnContext();
 
       // Create RegularTask instance (Feature 011 architecture)
       // RegularTask will delegate to AgentTask → TaskRunner
