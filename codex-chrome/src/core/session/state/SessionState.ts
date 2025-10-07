@@ -3,7 +3,7 @@
  * Port of Rust SessionState struct (commit 250b244ab)
  */
 
-import type { ResponseItem, ConversationHistory } from '../../protocol/types';
+import type { ResponseItem, ConversationHistory } from '../../../protocol/types';
 import type { TokenUsageInfo, RateLimitSnapshot } from './types';
 
 /**

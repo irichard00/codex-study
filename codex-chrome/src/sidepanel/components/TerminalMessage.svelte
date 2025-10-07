@@ -6,7 +6,7 @@
     default: 'text-term-green',
     warning: 'text-term-yellow',
     error: 'text-term-red',
-    input: 'text-term-bright-green',
+    input: 'text-term-blue',
     system: 'text-term-dim-green'
   };
 

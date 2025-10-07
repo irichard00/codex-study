@@ -53,7 +53,13 @@ export class Session {
   private errorHistory: Array<{timestamp: number, error: string, context?: any}> = [];
   private interruptRequested: boolean = false;
 
-  constructor(configOrIsPersistent?: AgentConfig | boolean, isPersistent?: boolean, services?: SessionServices, toolRegistry?: ToolRegistry) {
+  constructor(
+    configOrIsPersistent?: AgentConfig | boolean,
+    isPersistent?: boolean,
+    services?: SessionServices,
+    toolRegistry?: ToolRegistry,
+    initialHistory?: InitialHistory
+  ) {
     this.conversationId = `conv_${uuidv4()}`;
 
     // Handle both new and old signatures for backward compatibility
@@ -62,35 +68,58 @@ export class Session {
       this.isPersistent = configOrIsPersistent;
       this.config = undefined;
     } else {
-      // New signature: Session(config?: AgentConfig, isPersistent?: boolean, services?: SessionServices, toolRegistry?: ToolRegistry)
+      // New signature: Session(config?: AgentConfig, isPersistent?: boolean, services?: SessionServices, toolRegistry?: ToolRegistry, initialHistory?: InitialHistory)
       this.config = configOrIsPersistent;
       this.isPersistent = isPersistent ?? true;
     }
 
     // Initialize session state
     this.sessionState = new SessionState(); // Pure data state
-    this.services = services ?? null; // Will be created in initialize()
     this.toolRegistry = toolRegistry ?? null; // Tool registry from CodexAgent
 
+    // Initialize services (merged from initialize() method)
+    if (services) {
+      this.services = services;
+    } else {
+      // Services will be created asynchronously if needed
+      // For synchronous construction, set to null and create on-demand
+      this.services = null;
+    }
+
     // Initialize with default turn context, using config values if available
-    // Note: TurnContext requires a ModelClient, which will be set during initialize()
+    // Note: TurnContext requires a ModelClient, which will be set later
     // For now, create a minimal context that will be replaced
     this.turnContext = {} as TurnContext;
 
     this.activeTurn = new ActiveTurn();
-  }
 
-  /**
-   * Initialize session with storage and services
-   */
-  async initialize(): Promise<void> {
-    // Create services if not provided
-    if (!this.services) {
-      this.services = await createSessionServices({}, false);
+    // Handle initial history
+    const historyMode = initialHistory ?? { mode: 'new' as const };
+
+ 
+    // For 'new' mode, SessionState is already initialized with empty history
+    // Initialize session with RolloutRecorder based on history mode (asynchronous)
+    // Note: We call initializeSession without await since constructor must be synchronous
+    // The initialization happens in the background
+    if (historyMode.mode === 'new' || historyMode.mode === 'forked') {
+      // Create new rollout
+      this.initializeSession('create', this.conversationId, this.config).then(() => {
+        // For forked mode, persist the forked history after rollout is created
+        if (historyMode.mode === 'forked') {
+          const history = this.sessionState.historySnapshot();
+          return this.persistRolloutResponseItems(history);
+        }
+      }).catch(err => {
+        console.error('Failed to initialize session:', err);
+      });
+    } else if (historyMode.mode === 'resumed') {
+      // Resume from existing rollout (note: initializeSession will also reconstruct history)
+      this.initializeSession('resume', this.conversationId, this.config).catch(err => {
+        console.error('Failed to resume session:', err);
+      });
     }
-
-    // Persistence is now handled by RolloutRecorder via initializeSession()
   }
+
 
   /**
    * Get or create a conversation in storage using RolloutRecorder
@@ -156,7 +185,7 @@ export class Session {
     const responseItem: ResponseItem = {
       type: 'message',
       role: entry.type === 'user' ? 'user' : entry.type === 'system' ? 'system' : 'assistant',
-      content: [{ type: 'input_text', text: entry.text }],
+      content: [{ type: 'text', text: entry.text }],
     };
     this.sessionState.recordItems([responseItem]);
 
@@ -263,7 +292,9 @@ export class Session {
       messageCount: number;
     };
   }, services?: SessionServices, toolRegistry?: ToolRegistry): Session {
-    const session = new Session(undefined, true, services, toolRegistry);
+    // Create session with resumed history mode (no rollout items since we're importing directly)
+    const initialHistory: InitialHistory = { mode: 'new' }; // Use 'new' mode since we're setting state directly
+    const session = new Session(undefined, true, services, toolRegistry, initialHistory);
 
     // Import SessionState
     session.sessionState = SessionState.import(data.state);
@@ -461,12 +492,8 @@ export class Session {
    */
   async buildTurnInputWithHistory(newItems: any[]): Promise<any[]> {
     const conversationHistory = this.sessionState.getConversationHistory();
-    const historyItems = conversationHistory.items.map((item: any) => ({
-      role: item.role,
-      content: typeof item.content === 'string'
-        ? [{ type: 'text', text: item.content }]
-        : item.content,
-    }));
+    // Items are already in ResponseItem format, no conversion needed
+    const historyItems = conversationHistory.items;
 
     return [...historyItems, ...newItems];
   }
@@ -1136,21 +1163,6 @@ export class Session {
         this.activeTurn = null;
       }
     }
-
-    // Emit TaskComplete event (matches Rust lines 114-118)
-    const event: Event = {
-      id: subId,
-      msg: {
-        type: 'TaskComplete',
-        data: {
-          last_agent_message: lastAgentMessage ?? undefined,
-        }
-      }
-    };
-
-    if (this.eventEmitter) {
-      await this.eventEmitter(event);
-    }
   }
 
   /**
@@ -1285,7 +1297,7 @@ export class Session {
       type: 'message',
       role: 'user',
       content: [{
-        type: 'input_text',
+        type: 'text',
         text: typeof item === 'string' ? item : JSON.stringify(item)
       }]
     }));

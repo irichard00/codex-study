@@ -502,12 +502,7 @@ async function initializeStorage(): Promise<void> {
     }
   }
 
-  // Wire storage to agent session if agent is initialized
-  if (agent) {
-    const session = agent.getSession();
-    await session.initialize();
-  }
-
+  // Storage layer initialized - session initialization now happens in constructor
   console.log('Storage layer initialized');
 }
 

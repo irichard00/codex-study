@@ -106,7 +106,7 @@ export class RegularTask implements SessionTask {
         type: 'message' as const,
         role: 'user' as const,
         content: [{
-          type: 'input_text' as const,
+          type: 'text' as const,
           text: text
         }]
       };

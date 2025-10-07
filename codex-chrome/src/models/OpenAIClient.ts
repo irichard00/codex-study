@@ -276,10 +276,6 @@ export class OpenAIClient extends ModelClient {
    * and uses the streamCompletion() method for proper event handling
    */
   async stream(prompt: Prompt): Promise<ResponseStream> {
-    console.log('[OpenAIClient.stream] Starting stream with prompt:', {
-      inputCount: prompt.input.length,
-      toolsCount: prompt.tools?.length || 0
-    });
 
     // Convert Prompt to CompletionRequest
     const messages = prompt.input.map(item => {
@@ -294,6 +290,14 @@ export class OpenAIClient extends ModelClient {
         content: JSON.stringify(item),
       };
     });
+
+    // Add system prompt from base_instructions_override if present
+    if (prompt.base_instructions_override) {
+      messages.unshift({
+        role: 'system',
+        content: prompt.base_instructions_override,
+      });
+    }
 
     const request: CompletionRequest = {
       model: this.currentModel,
@@ -310,15 +314,10 @@ export class OpenAIClient extends ModelClient {
     // Start async processing using streamCompletion for proper event handling
     (async () => {
       try {
-        console.log('[OpenAIClient.stream] Starting streamCompletion generator');
-        let eventCount = 0;
         // Use streamCompletion which has the full Rust-aligned event logic
         for await (const event of this.streamCompletion(request)) {
-          eventCount++;
-          console.log(`[OpenAIClient.stream] Event ${eventCount}:`, event.type);
           stream.addEvent(event);
         }
-        console.log(`[OpenAIClient.stream] StreamCompletion completed after ${eventCount} events`);
         stream.complete();
       } catch (error) {
         console.error('[OpenAIClient.stream] Error in stream:', error);
@@ -407,14 +406,6 @@ export class OpenAIClient extends ModelClient {
 
     if (request.tools && request.tools.length > 0) {
       convertedTools = this.convertToolsToOpenAIFormat(request.tools);
-
-      // Log tool conversion for debugging
-      console.log('[OpenAIClient] Converting tools:', {
-        inputCount: request.tools.length,
-        outputCount: convertedTools?.length || 0,
-        inputSample: request.tools[0],
-        outputSample: convertedTools?.[0]
-      });
 
       // Validate converted tools
       if (convertedTools && convertedTools.length > 0) {
@@ -713,14 +704,6 @@ export class OpenAIClient extends ModelClient {
       headers['OpenAI-Organization'] = this.organization;
     }
 
-    // Log request for debugging
-    console.log('[OpenAIClient] makeStreamRequest:', {
-      model: request.model,
-      messages: request.messages.length,
-      tools: request.tools?.length || 0,
-      toolsSample: request.tools?.[0] ? JSON.stringify(request.tools[0], null, 2) : 'none'
-    });
-
     const response = await fetch(`${this.baseUrl}/chat/completions`, {
       method: 'POST',
       headers,
@@ -1004,7 +987,8 @@ export class OpenAIClient extends ModelClient {
                     type: 'OutputItemDone',
                     item: {
                       type: 'reasoning',
-                      content: reasoningText,
+                      summary: [],
+                      content: [{ type: 'reasoning_text', text: reasoningText }],
                     },
                   };
                   reasoningText = '';
@@ -1028,7 +1012,7 @@ export class OpenAIClient extends ModelClient {
                     item: {
                       type: 'message',
                       role: 'assistant',
-                      content: assistantText,
+                      content: [{ type: 'output_text', text: assistantText }],
                     },
                   };
                   assistantText = '';
@@ -1039,7 +1023,8 @@ export class OpenAIClient extends ModelClient {
                     type: 'OutputItemDone',
                     item: {
                       type: 'reasoning',
-                      content: reasoningText,
+                      summary: [],
+                      content: [{ type: 'reasoning_text', text: reasoningText }],
                     },
                   };
                   reasoningText = '';

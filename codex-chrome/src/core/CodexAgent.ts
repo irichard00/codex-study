@@ -67,9 +67,6 @@ export class CodexAgent {
     // Initialize model client factory with config
     await this.modelClientFactory.initialize(this.config);
 
-    // Initialize session
-    await this.session.initialize();
-
     // Load user instructions and set in session's turn context
     const userInstructions = await loadUserInstructions();
     this.session.updateTurnContext({ userInstructions });
@@ -243,22 +240,6 @@ export class CodexAgent {
             },
           });
       }
-
-      // Emit TaskComplete event with turn metadata if available
-      const conversationHistory = this.session.getConversationHistory();
-      const lastAgentMessage = conversationHistory.items
-        .filter(item => item.role === 'assistant')
-        .map(item => typeof item.content === 'string' ? item.content : JSON.stringify(item.content))
-        .pop();
-
-      this.emitEvent({
-        type: 'TaskComplete',
-        data: {
-          last_agent_message: lastAgentMessage,
-          turn_id: submission.id,
-          input_messages: [], // Will be populated by specific handlers
-        },
-      });
     } catch (error) {
       // Emit TurnAborted event on error
       this.emitEvent({

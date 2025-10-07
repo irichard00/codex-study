@@ -84,7 +84,7 @@ describe('ResponseEvent Types and Guards', () => {
         id: 'item-1',
         type: 'message',
         role: 'assistant',
-        content: [{ type: 'input_text', text: 'Hello world' }],
+        content: [{ type: 'text', text: 'Hello world' }],
       };
 
       const rateLimitSnapshot: RateLimitSnapshot = {
@@ -136,7 +136,7 @@ describe('ResponseEvent Types and Guards', () => {
 
     it('should support ContentItem arrays in messages', () => {
       const contentItems: ContentItem[] = [
-        { type: 'input_text', text: 'Hello' },
+        { type: 'text', text: 'Hello' },
         { type: 'output_text', text: 'World' },
       ];
 
