@@ -801,12 +801,17 @@ export class Session {
     config?: AgentConfig
   ): Promise<void> {
     try {
+      // Strip conv_ prefix if present - RolloutRecorder expects plain UUID
+      const uuid = conversationId.startsWith('conv_')
+        ? conversationId.slice(5)
+        : conversationId;
+
       if (mode === 'create') {
         // Create new rollout
         const rollout = await RolloutRecorder.create(
           {
             type: 'create',
-            conversationId,
+            conversationId: uuid,
           },
           config as any
         );
@@ -819,7 +824,7 @@ export class Session {
         const rollout = await RolloutRecorder.create(
           {
             type: 'resume',
-            rolloutId: conversationId,
+            rolloutId: uuid,
           },
           config as any
         );
@@ -829,7 +834,7 @@ export class Session {
         }
 
         // Reconstruct history from rollout
-        const initialHistory = await RolloutRecorder.getRolloutHistory(conversationId);
+        const initialHistory = await RolloutRecorder.getRolloutHistory(uuid);
         if (initialHistory.type === 'resumed' && initialHistory.payload.history) {
           this.reconstructHistoryFromRollout(initialHistory.payload.history);
         }
