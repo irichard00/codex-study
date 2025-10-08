@@ -1108,7 +1108,7 @@ export class OpenAIClient extends ModelClient {
    */
   async cleanup(): Promise<void> {
     if (this.streamProcessor) {
-      this.streamProcessor.stop();
+      this.streamProcessor.abort();
       this.streamProcessor = null;
     }
   }
