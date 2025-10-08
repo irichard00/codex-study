@@ -581,26 +581,36 @@ export class TurnManager {
    */
   private async executeToolCall(toolName: string, parameters: any, callId: string): Promise<any> {
     try {
+      // Parse parameters if they're a JSON string (common with OpenAI API)
+      let parsedParams = parameters;
+      if (typeof parameters === 'string') {
+        try {
+          parsedParams = JSON.parse(parameters);
+        } catch (error) {
+          throw new Error(`Failed to parse tool parameters: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
       let result: any;
 
       switch (toolName) {
         case 'exec_command':
-          result = await this.executeCommand(parameters.command, parameters.cwd);
+          result = await this.executeCommand(parsedParams.command, parsedParams.cwd);
           break;
 
         case 'web_search':
-          result = await this.executeWebSearch(parameters.query);
+          result = await this.executeWebSearch(parsedParams.query);
           break;
 
         case 'update_plan':
-          result = await this.updatePlan(parameters.tasks);
+          result = await this.updatePlan(parsedParams.tasks);
           break;
 
         default:
           // Check ToolRegistry for browser tools BEFORE falling back to MCP
           const browserTool = this.toolRegistry.getTool(toolName);
           if (browserTool) {
-            result = await this.executeBrowserTool(browserTool, parameters);
+            result = await this.executeBrowserTool(browserTool, parsedParams);
             break;
           }
 
@@ -618,7 +628,7 @@ export class TurnManager {
           }
 
           // Only reach here if MCP is supported AND enabled
-          result = await this.executeMcpTool(toolName, parameters);
+          result = await this.executeMcpTool(toolName, parsedParams);
           break;
       }
 
