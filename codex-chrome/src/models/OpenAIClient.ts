@@ -345,21 +345,9 @@ export class OpenAIClient extends ModelClient {
       });
     }
 
-    // Convert input items to messages
-    // TODO: add more item types handling
+    // Push input items as-is without conversion
     for (const item of prompt.input) {
-      if (item.type === 'message') {
-        messages.push({
-          role: item.role,
-          content: item.content || '',
-        });
-      } else {
-        // Fallback for other item types
-        messages.push({
-          role: 'user' as const,
-          content: JSON.stringify(item),
-        });
-      }
+      messages.push(item as any);
     }
 
     return messages;
@@ -636,7 +624,7 @@ export class OpenAIClient extends ModelClient {
         index: choice.index,
         message: {
           role: choice.message.role,
-          content: choice.message.content,
+          content: choice.message.content ?? null,
           toolCalls: choice.message.tool_calls?.map(toolCall => ({
             id: toolCall.id,
             type: toolCall.type,

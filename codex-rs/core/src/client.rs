@@ -238,6 +238,10 @@ impl ModelClient {
         };
 
         let mut payload_json = serde_json::to_value(&payload)?;
+        // test >>
+        let input_json = serde_json::to_value(&input_with_instructions)?;
+        let input_json_str = serde_json::to_string_pretty(&input_json)?;
+        // test <<
         if azure_workaround {
             attach_item_ids(&mut payload_json, &input_with_instructions);
         }
