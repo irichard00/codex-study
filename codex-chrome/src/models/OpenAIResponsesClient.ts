@@ -230,9 +230,6 @@ export class OpenAIResponsesClient extends ModelClient {
 
     const toolsJson = this.createToolsJsonForResponsesApi(prompt.tools);
 
-    // Debug: Log converted tools
-    console.log('[OpenAIResponsesClient] Converted toolsJson:', JSON.stringify(toolsJson, null, 2));
-
     const reasoning = this.createReasoningParam();
     const textControls = this.createTextParam(prompt.output_schema);
 
