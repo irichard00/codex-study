@@ -227,7 +227,15 @@ export class OpenAIResponsesClient extends ModelClient {
 
     // Build request payload
     const fullInstructions = this.getFullInstructions(prompt);
+
+    // Debug: Log incoming tools
+    console.log('[OpenAIResponsesClient] Incoming prompt.tools:', JSON.stringify(prompt.tools, null, 2));
+
     const toolsJson = this.createToolsJsonForResponsesApi(prompt.tools);
+
+    // Debug: Log converted tools
+    console.log('[OpenAIResponsesClient] Converted toolsJson:', JSON.stringify(toolsJson, null, 2));
+
     const reasoning = this.createReasoningParam();
     const textControls = this.createTextParam(prompt.output_schema);
 
@@ -781,16 +789,70 @@ export class OpenAIResponsesClient extends ModelClient {
 
   /**
    * Create tools JSON for Responses API
+   * Converts ToolSpec format to Responses API format
+   * Handles: function, local_shell, web_search, custom tool types
    */
   private createToolsJsonForResponsesApi(tools: any[]): any[] {
-    return tools.map(tool => ({
-      type: 'function',
-      function: {
-        name: tool.name || tool.function?.name,
-        description: tool.description || tool.function?.description,
-        parameters: tool.parameters || tool.function?.parameters,
-      },
-    }));
+    if (!tools || !Array.isArray(tools)) {
+      return [];
+    }
+
+    return tools
+      .map(tool => {
+        if (!tool || typeof tool !== 'object') {
+          console.warn('[OpenAIResponsesClient] Invalid tool object:', tool);
+          return null;
+        }
+
+        // Handle function tools (ToolSpec format: { type: 'function', function: {...} })
+        // Responses API expects FLAT structure, not nested under 'function' key
+        if (tool.type === 'function') {
+          if (!tool.function || !tool.function.name || !tool.function.description) {
+            console.error('[OpenAIResponsesClient] Function tool missing required fields:', tool);
+            return null;
+          }
+          return {
+            type: 'function',
+            name: tool.function.name,
+            description: tool.function.description,
+            strict: tool.function.strict || false,
+            parameters: tool.function.parameters || { type: 'object', properties: {} },
+          };
+        }
+
+        // Handle local_shell tools
+        if (tool.type === 'local_shell') {
+          return { type: 'local_shell' };
+        }
+
+        // Handle web_search tools
+        if (tool.type === 'web_search') {
+          return { type: 'web_search' };
+        }
+
+        // Handle custom/freeform tools - convert to function format
+        if (tool.type === 'custom' && tool.custom) {
+          return {
+            type: 'function',
+            function: {
+              name: tool.custom.name,
+              description: tool.custom.description,
+              strict: false,
+              parameters: {
+                type: 'object',
+                properties: {
+                  input: { type: 'string', description: 'Tool input' },
+                },
+                required: ['input'],
+              },
+            },
+          };
+        }
+
+        console.warn('[OpenAIResponsesClient] Unknown tool type:', tool);
+        return null;
+      })
+      .filter((tool): tool is NonNullable<typeof tool> => tool !== null);
   }
 
   /**

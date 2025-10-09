@@ -358,9 +358,37 @@ export class ModelClientFactory {
   private instantiateClient(config: ModelClientConfig): ModelClient {
     switch (config.provider) {
       case 'openai':
-        return new OpenAIClient(config.apiKey, {
-          baseUrl: config.options?.baseUrl,
-          organization: config.options?.organization,
+        // Use the experimental OpenAI Responses API client by default
+        // Construct minimal provider and model family configs aligned with codex-rs
+        const baseUrl = config.options?.baseUrl;
+        const organization = config.options?.organization;
+
+        const provider = {
+          name: 'openai',
+          base_url: baseUrl,
+          wire_api: 'Responses' as const,
+          requires_openai_auth: true,
+        };
+
+        const modelFamily = {
+          family: 'gpt-5',
+          base_instructions: 'You are a helpful coding assistant.',
+          supports_reasoning_summaries: true,
+          needs_special_apply_patch_instructions: false,
+        };
+
+        // Generate a conversation ID for prompt_cache_key usage
+        const conversationId = (typeof crypto !== 'undefined' && typeof (crypto as any).randomUUID === 'function')
+          ? (crypto as any).randomUUID()
+          : `conv_${Math.random().toString(36).slice(2)}`;
+
+        return new OpenAIResponsesClient({
+          apiKey: config.apiKey,
+          baseUrl,
+          organization,
+          conversationId,
+          modelFamily,
+          provider,
         });
 
       default:
