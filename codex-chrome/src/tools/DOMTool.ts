@@ -932,7 +932,9 @@ export class DOMTool extends BaseTool {
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
         const response = await chrome.tabs.sendMessage(tabId, { type: MessageType.PING });
-        if (response && response.type === MessageType.PONG) {
+        // MessageRouter wraps responses in { success: true, data: ... }
+        const pongData = response?.success ? response.data : response;
+        if (pongData && pongData.type === MessageType.PONG) {
           this.log('debug', `Content script already loaded in tab ${tabId} (attempt ${attempt + 1})`);
           return; // Content script is already loaded and responsive
         }

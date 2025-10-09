@@ -425,6 +425,43 @@ This is a single Chrome Extension project:
 
 ---
 
+## Phase 3.6: MessageRouter Response Format Fix
+
+**Goal**: Fix PING/PONG timeout caused by MessageRouter response wrapping
+
+**Context**: After implementing the file path fix (T001-T019), a new runtime error was discovered:
+`"Operation timed out: Content script failed to respond after 5 attempts"`
+
+**Root Cause**: DOMTool sends raw PING message but MessageRouter wraps responses in `{ success: true, data: ... }`. DOMTool checked `response.type === MessageType.PONG` but actually received `{ success: true, data: { type: 'PONG', ... } }`.
+
+- [x] **T020** Fix PING/PONG response unwrapping in DOMTool
+  - **File**: `codex-chrome/src/tools/DOMTool.ts`
+  - **Action**: Update lines 934-940 in `ensureContentScriptInjected()` method:
+    ```typescript
+    const response = await chrome.tabs.sendMessage(tabId, { type: MessageType.PING });
+    // MessageRouter wraps responses in { success: true, data: ... }
+    const pongData = response?.success ? response.data : response;
+    if (pongData && pongData.type === MessageType.PONG) {
+      this.log('debug', `Content script already loaded in tab ${tabId} (attempt ${attempt + 1})`);
+      return;
+    }
+    ```
+  - **Rationale**: MessageRouter.ts wraps all responses in `{ success: true, data: actualData }` format
+  - **Backward Compatibility**: Handles both wrapped and direct response formats
+  - **Reference**: MessageRouter.ts lines 94-147 (handleMessage method)
+  - **Status**: ✅ Complete - Response unwrapping logic added (lines 936-937)
+
+- [x] **T021** Rebuild and verify MessageRouter fix
+  - **Command**: `cd codex-chrome && npm run build`
+  - **Verify**:
+    1. Build completes without errors
+    2. Fix is included in `dist/background.js`
+    3. PING/PONG exchange should succeed (no timeout after 5 attempts)
+  - **Dependencies**: Requires T020 complete
+  - **Status**: ✅ Complete - Build successful, fix verified in background.js
+
+---
+
 ## Dependencies
 
 ### Sequential Dependencies
@@ -532,8 +569,11 @@ Recommended commits:
 This feature is complete when:
 - ✅ No "Could not load file: '/content/content-script.js'" errors
 - ✅ Content script injects successfully on test pages
-- ✅ PING/PONG message exchange works
+- ✅ PING/PONG message exchange works (MessageRouter response unwrapping fixed)
+- ✅ No "Operation timed out: Content script failed to respond" errors
 - ✅ DOM operations return expected results
 - ✅ All tests pass
 - ✅ Quickstart scenario completes without errors
 - ✅ File path contract is compliant (contracts/file-paths.md)
+
+**Total Tasks Completed**: 21/21 (19 original + 2 MessageRouter fix)
