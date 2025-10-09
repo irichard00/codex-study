@@ -9,7 +9,7 @@ import { TurnManager } from './TurnManager';
 import { TurnContext } from './TurnContext';
 import type { ProcessedResponseItem, TurnRunResult } from './TurnManager';
 import type { InputItem, Event, ResponseItem } from '../protocol/types';
-import { getResponseItemContent, getResponseItemRole } from '../protocol/types';
+import { getResponseItemRole } from '../protocol/types';
 import type {
   EventMsg,
   TaskCompleteEvent,
@@ -530,6 +530,7 @@ export class TaskRunner {
 
   /**
    * Process the results of a turn execution
+   * Ports logic from codex-rs/core/src/codex.rs lines 1707-1808
    */
   private async processTurnResult(
     turnResult: TurnRunResult
@@ -541,17 +542,15 @@ export class TaskRunner {
     const { processedItems, totalTokenUsage } = turnResult;
 
     let taskComplete = true;
-    let lastAgentMessage: string | undefined;
     const itemsToRecord: ResponseItem[] = [];
 
-    // Process each response item
+    // Process each response item (matches Rust logic lines 1709-1798)
     for (const processedItem of processedItems) {
       const { item, response } = processedItem as ProcessedResponseItem;
       const messageItem = item as ResponseItem;
 
       // Check if this is an assistant message (task completion indicator)
       if (getResponseItemRole(messageItem) === 'assistant' && !response) {
-        lastAgentMessage = getResponseItemContent(messageItem);
         itemsToRecord.push(messageItem);
       }
       // Check if this is a tool call that needs response (task continues)
@@ -564,8 +563,14 @@ export class TaskRunner {
       }
     }
 
-    // Record processed items in conversation history
-    await this.session.recordConversationItems(itemsToRecord);
+    // Record processed items in conversation history (matches Rust lines 1801-1808)
+    // Use recordConversationItemsDual to record both in-memory and persistent storage
+    if (itemsToRecord.length > 0) {
+      await this.session.recordConversationItemsDual(itemsToRecord);
+    }
+
+    // Extract last assistant message from recorded items (matches Rust line 1836-1838)
+    const lastAgentMessage = this.getLastAssistantMessageFromTurn(itemsToRecord);
 
     // Check token limits
     const contextWindow = this.turnContext.getModelContextWindow();
@@ -580,6 +585,27 @@ export class TaskRunner {
       tokenLimitReached,
       lastAgentMessage,
     };
+  }
+
+  /**
+   * Extract last assistant message text from response items
+   * Ports get_last_assistant_message_from_turn from codex-rs/core/src/codex.rs lines 2275-2293
+   */
+  private getLastAssistantMessageFromTurn(responses: ResponseItem[]): string | undefined {
+    // Iterate in reverse to find the last assistant message
+    for (let i = responses.length - 1; i >= 0; i--) {
+      const item = responses[i];
+      if (item.type === 'message' && item.role === 'assistant') {
+        // Look for output_text content in reverse order
+        for (let j = item.content.length - 1; j >= 0; j--) {
+          const contentItem = item.content[j];
+          if (contentItem.type === 'output_text') {
+            return contentItem.text;
+          }
+        }
+      }
+    }
+    return undefined;
   }
 
 

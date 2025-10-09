@@ -276,35 +276,8 @@ export class OpenAIClient extends ModelClient {
    * and uses the streamCompletion() method for proper event handling
    */
   async stream(prompt: Prompt): Promise<ResponseStream> {
-
-    // Convert Prompt to CompletionRequest
-    const messages = prompt.input.map(item => {
-      if (item.type === 'message') {
-        return {
-          role: item.role,
-          content: item.content || '',
-        };
-      }
-      return {
-        role: 'user' as const,
-        content: JSON.stringify(item),
-      };
-    });
-
-    // Add system prompt from base_instructions_override if present
-    if (prompt.base_instructions_override) {
-      messages.unshift({
-        role: 'system',
-        content: prompt.base_instructions_override,
-      });
-    }
-
-    const request: CompletionRequest = {
-      model: this.currentModel,
-      messages,
-      tools: prompt.tools,
-      stream: true,
-    };
+    // Build completion request from prompt
+    const request = await this.buildCompletionRequest(prompt);
 
     this.validateRequest(request);
 
@@ -326,6 +299,58 @@ export class OpenAIClient extends ModelClient {
     })();
 
     return stream;
+  }
+
+  /**
+   * Build completion request from Prompt
+   * Port of buildCompletionRequest from TurnManager
+   */
+  private async buildCompletionRequest(prompt: Prompt): Promise<CompletionRequest> {
+    const messages = await this.convertPromptToMessages(prompt);
+
+    const request: CompletionRequest = {
+      model: this.currentModel,
+      messages,
+      tools: prompt.tools,
+      stream: true,
+      maxTokens: 4096,
+    };
+
+    // For gpt-5, temperature must be 1 (default) or omitted
+    // For other models, use 0.7
+    if (this.currentModel !== 'gpt-5') {
+      request.temperature = 0.7;
+    }
+
+    return request;
+  }
+
+  /**
+   * Convert prompt format to model client message format
+   * Port of convertPromptToMessages from TurnManager
+   */
+  private async convertPromptToMessages(prompt: Prompt): Promise<any[]> {
+    const messages: any[] = [];
+
+    // Load and add the agent prompt as system message
+    if (prompt.base_instructions_override) {
+      messages.push({ role: 'system', content: prompt.base_instructions_override });
+    }
+
+    // Add user instructions (development guidelines from user_instruction.md)
+    if (prompt.user_instructions) {
+      messages.push({
+        role: 'system',
+        content: `<user_instructions>\n${prompt.user_instructions}\n</user_instructions>`,
+      });
+    }
+
+    // Push input items as-is without conversion
+    for (const item of prompt.input) {
+      messages.push(item as any);
+    }
+
+    return messages;
   }
 
   private async *streamLegacy(request: CompletionRequest): AsyncGenerator<StreamChunk> {
@@ -599,7 +624,7 @@ export class OpenAIClient extends ModelClient {
         index: choice.index,
         message: {
           role: choice.message.role,
-          content: choice.message.content,
+          content: choice.message.content ?? null,
           toolCalls: choice.message.tool_calls?.map(toolCall => ({
             id: toolCall.id,
             type: toolCall.type,
@@ -1083,7 +1108,7 @@ export class OpenAIClient extends ModelClient {
    */
   async cleanup(): Promise<void> {
     if (this.streamProcessor) {
-      this.streamProcessor.stop();
+      this.streamProcessor.abort();
       this.streamProcessor = null;
     }
   }

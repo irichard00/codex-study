@@ -15,7 +15,7 @@ import { ToolRegistry } from '../tools/ToolRegistry';
 import { ModelClientFactory } from '../models/ModelClientFactory';
 import { UserNotifier } from './UserNotifier';
 import { v4 as uuidv4 } from 'uuid';
-import { loadUserInstructions } from './PromptLoader';
+import { loadPrompt, loadUserInstructions } from './PromptLoader';
 import { RegularTask } from './tasks/RegularTask';
 
 /**
@@ -67,9 +67,19 @@ export class CodexAgent {
     // Initialize model client factory with config
     await this.modelClientFactory.initialize(this.config);
 
-    // Load user instructions and set in session's turn context
+    // Create model client for the session
+    const modelClient = await this.modelClientFactory.createClientForModel('default');
+
+    // Create TurnContext with ModelClient
+    const turnContext = new TurnContext(modelClient, {});
+
     const userInstructions = await loadUserInstructions();
-    this.session.updateTurnContext({ userInstructions });
+    turnContext.setUserInstructions(userInstructions);
+    const baseInstructions = await loadPrompt();
+    turnContext.setBaseInstructions(baseInstructions);
+
+    // Set the turn context on the session
+    this.session.setTurnContext(turnContext);
   }
 
   /**
@@ -310,9 +320,10 @@ export class CodexAgent {
         text: item.type === 'text' ? item.text || '' : undefined,
       }));
 
-      // Create TurnContext for this task
-      let taskContext: TurnContext;
+      // Use the session's existing turn context
+      let taskContext = this.session.getTurnContext();
 
+      // Apply context overrides to session's turn context if provided
       if (contextOverrides) {
         // Create fresh context with overrides for this turn
         const modelClient = await this.modelClientFactory.createClientForModel(contextOverrides.model || 'default');
@@ -320,10 +331,6 @@ export class CodexAgent {
 
         // Update session turn context with overrides
         this.session.updateTurnContext(contextOverrides);
-      } else {
-        // Create a new context for this turn
-        const modelClient = await this.modelClientFactory.createClientForModel('default');
-        taskContext = new TurnContext(modelClient, {});
       }
 
       // Create RegularTask instance (Feature 011 architecture)

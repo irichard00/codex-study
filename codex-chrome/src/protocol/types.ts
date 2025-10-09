@@ -130,11 +130,14 @@ export type SandboxPolicy =
 
 /**
  * Content item types from protocol messages
+ * Supports both legacy 'text' type and Responses API 'input_text'/'output_text'
  */
 export type ContentItem =
-  | { type: 'text'; text: string }
-  | { type: 'input_image'; image_url: string }
-  | { type: 'output_text'; text: string };
+  | { type: 'text'; text: string }  // Legacy format (backward compatibility)
+  | { type: 'input_text'; text: string }  // Responses API user input
+  | { type: 'input_image'; image_url: string }  // Responses API image input
+  | { type: 'output_text'; text: string }  // Responses API assistant output
+  | { type: 'refusal'; refusal: string };  // Responses API refusal
 
 /**
  * Reasoning summary types
@@ -249,8 +252,11 @@ export function getResponseItemContent(item: ResponseItem): string {
         return '';
       }
       return item.content.map(c => {
-        if (c.type === 'text' || c.type === 'output_text') {
+        if (c.type === 'text' || c.type === 'input_text' || c.type === 'output_text') {
           return c.text;
+        }
+        if (c.type === 'refusal') {
+          return c.refusal;
         }
         return '';
       }).join('');

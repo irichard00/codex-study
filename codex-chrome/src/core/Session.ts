@@ -160,6 +160,13 @@ export class Session {
   }
 
   /**
+   * Set the turn context (replaces the existing context)
+   */
+  setTurnContext(context: TurnContext): void {
+    this.turnContext = context;
+  }
+
+  /**
    * Update turn context with new values
    */
   updateTurnContext(updates: any): void {
@@ -185,7 +192,10 @@ export class Session {
     const responseItem: ResponseItem = {
       type: 'message',
       role: entry.type === 'user' ? 'user' : entry.type === 'system' ? 'system' : 'assistant',
-      content: [{ type: 'text', text: entry.text }],
+      content: [{
+        type: entry.type === 'user' || entry.type === 'system' ? 'input_text' : 'output_text',
+        text: entry.text
+      }],
     };
     this.sessionState.recordItems([responseItem]);
 
@@ -420,7 +430,7 @@ export class Session {
 
     if (Array.isArray(item.content)) {
       return item.content
-        .filter((c: any) => c.type === 'text')
+        .filter((c: any) => c.type === 'text' || c.type === 'input_text' || c.type === 'output_text')
         .map((c: any) => c.text)
         .join(' ');
     }
@@ -462,27 +472,27 @@ export class Session {
       case 'text':
         return {
           role: 'user',
-          content: [{ type: 'text', text: item.text }],
+          content: [{ type: 'input_text', text: item.text }],
         };
       case 'image':
         return {
           role: 'user',
-          content: [{ type: 'image', image_url: item.image_url }],
+          content: [{ type: 'input_image', image_url: item.image_url }],
         };
       case 'clipboard':
         return {
           role: 'user',
-          content: [{ type: 'text', text: item.content || '[clipboard]' }],
+          content: [{ type: 'input_text', text: item.content || '[clipboard]' }],
         };
       case 'context':
         return {
           role: 'user',
-          content: [{ type: 'text', text: `[context: ${item.path || 'unknown'}]` }],
+          content: [{ type: 'input_text', text: `[context: ${item.path || 'unknown'}]` }],
         };
       default:
         return {
           role: 'user',
-          content: [{ type: 'text', text: '[unknown]' }],
+          content: [{ type: 'input_text', text: '[unknown]' }],
         };
     }
   }
@@ -529,7 +539,7 @@ export class Session {
         role: 'system',
         content: [
           {
-            type: 'text',
+            type: 'input_text',
             text: `Working directory: ${turnContext?.cwd || '/'}`,
           },
         ],
@@ -801,12 +811,17 @@ export class Session {
     config?: AgentConfig
   ): Promise<void> {
     try {
+      // Strip conv_ prefix if present - RolloutRecorder expects plain UUID
+      const uuid = conversationId.startsWith('conv_')
+        ? conversationId.slice(5)
+        : conversationId;
+
       if (mode === 'create') {
         // Create new rollout
         const rollout = await RolloutRecorder.create(
           {
             type: 'create',
-            conversationId,
+            conversationId: uuid,
           },
           config as any
         );
@@ -819,7 +834,7 @@ export class Session {
         const rollout = await RolloutRecorder.create(
           {
             type: 'resume',
-            rolloutId: conversationId,
+            rolloutId: uuid,
           },
           config as any
         );
@@ -829,7 +844,7 @@ export class Session {
         }
 
         // Reconstruct history from rollout
-        const initialHistory = await RolloutRecorder.getRolloutHistory(conversationId);
+        const initialHistory = await RolloutRecorder.getRolloutHistory(uuid);
         if (initialHistory.type === 'resumed' && initialHistory.payload.history) {
           this.reconstructHistoryFromRollout(initialHistory.payload.history);
         }
@@ -1297,7 +1312,7 @@ export class Session {
       type: 'message',
       role: 'user',
       content: [{
-        type: 'text',
+        type: 'input_text',
         text: typeof item === 'string' ? item : JSON.stringify(item)
       }]
     }));
