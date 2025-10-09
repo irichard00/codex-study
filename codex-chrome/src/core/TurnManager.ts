@@ -436,8 +436,7 @@ export class TurnManager {
     const syntheticResponses = missingCallIds.map(callId => ({
       type: 'function_call_output',
       call_id: callId,
-      content: 'aborted',
-      success: false,
+      output: 'aborted',
     }));
 
     return {
@@ -527,8 +526,7 @@ export class TurnManager {
         return {
           type: 'function_call_output',
           call_id,
-          content: `Error: ${error instanceof Error ? error.message : String(error)}`,
-          success: false,
+          output: `Error: ${error instanceof Error ? error.message : String(error)}`,
         };
       }
     } else if (item.type === 'message' || item.type === 'reasoning' || item.type === 'web_search_call') {
@@ -555,15 +553,13 @@ export class TurnManager {
             return {
               type: 'function_call_output',
               call_id,
-              content: JSON.stringify(result),
-              success: true,
+              output: JSON.stringify(result),
             };
           } catch (error) {
             return {
               type: 'function_call_output',
               call_id,
-              content: `Error: ${error instanceof Error ? error.message : String(error)}`,
-              success: false,
+              output: `Error: ${error instanceof Error ? error.message : String(error)}`,
             };
           }
         }
@@ -635,16 +631,14 @@ export class TurnManager {
       return {
         type: 'function_call_output',
         call_id: callId,
-        content: JSON.stringify(result),
-        success: true,
+        output: JSON.stringify(result),
       };
 
     } catch (error) {
       return {
         type: 'function_call_output',
         call_id: callId,
-        content: `Error: ${error instanceof Error ? error.message : String(error)}`,
-        success: false,
+        output: `Error: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
   }

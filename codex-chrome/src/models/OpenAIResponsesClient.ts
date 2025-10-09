@@ -228,9 +228,6 @@ export class OpenAIResponsesClient extends ModelClient {
     // Build request payload
     const fullInstructions = this.getFullInstructions(prompt);
 
-    // Debug: Log incoming tools
-    console.log('[OpenAIResponsesClient] Incoming prompt.tools:', JSON.stringify(prompt.tools, null, 2));
-
     const toolsJson = this.createToolsJsonForResponsesApi(prompt.tools);
 
     // Debug: Log converted tools
