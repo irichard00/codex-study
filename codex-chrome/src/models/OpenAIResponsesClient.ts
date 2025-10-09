@@ -31,6 +31,7 @@ import type { RateLimitSnapshot } from './types/RateLimits';
 import type { TokenUsage } from './types/TokenUsage';
 import { SSEEventParser } from './SSEEventParser';
 import { RequestQueue, RequestPriority, type QueuedRequest } from './RequestQueue';
+import { get_full_instructions, get_formatted_input } from './PromptHelpers';
 
 /**
  * SSE Event structure from OpenAI Responses API
@@ -236,7 +237,7 @@ export class OpenAIResponsesClient extends ModelClient {
     const payload: ResponsesApiRequest = {
       model: this.currentModel,
       instructions: fullInstructions,
-      input: prompt.input,
+      input: get_formatted_input(prompt),
       tools: toolsJson,
       tool_choice: 'auto',
       parallel_tool_calls: false,
@@ -388,7 +389,7 @@ export class OpenAIResponsesClient extends ModelClient {
     const payload: ResponsesApiRequest = {
       model: this.currentModel,
       instructions: fullInstructions,
-      input: prompt.input,
+      input: get_formatted_input(prompt),
       tools: toolsJson,
       tool_choice: 'auto',
       parallel_tool_calls: false,
@@ -772,19 +773,10 @@ export class OpenAIResponsesClient extends ModelClient {
 
   /**
    * Get full instructions including base instructions and overrides
+   * Uses PromptHelpers to match Rust implementation
    */
   private getFullInstructions(prompt: Prompt): string {
-    const base = prompt.base_instructions_override || this.modelFamily.base_instructions;
-
-    // Add apply_patch tool instructions if needed (simplified version of Rust logic)
-    const needsApplyPatchInstructions = this.modelFamily.needs_special_apply_patch_instructions;
-    const hasApplyPatchTool = prompt.tools.some(tool => tool.name === 'apply_patch');
-
-    if (needsApplyPatchInstructions && !hasApplyPatchTool && !prompt.base_instructions_override) {
-      return `${base}\n\n<!-- Apply patch tool instructions would go here -->`;
-    }
-
-    return base;
+    return get_full_instructions(prompt, this.modelFamily);
   }
 
   /**

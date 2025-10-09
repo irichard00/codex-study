@@ -8,17 +8,22 @@ export type { ResponseEvent } from './ResponseEvent';
 /**
  * API request payload for Responses API
  * Based on Rust's ResponsesApiRequest struct
+ *
+ * **Rust Reference**: `codex-rs/core/src/client_common.rs:141-161`
  */
 export interface ResponsesApiRequest {
   model: string;
   instructions: string;
   input: ResponseItem[];
   tools: any[];
-  tool_choice: string;
-  parallel_tool_calls: boolean;
+  /** Tool selection mode - always "auto" (literal type enforced) */
+  tool_choice: "auto";
+  /** Whether to allow parallel tool calls - always false (literal type enforced) */
+  parallel_tool_calls: false;
   reasoning?: Reasoning;
   store: boolean;
-  stream: boolean;
+  /** Whether to stream the response - always true (literal type enforced) */
+  stream: true;
   include: string[];
   prompt_cache_key?: string;
   text?: TextControls;
@@ -57,7 +62,7 @@ export interface Prompt {
   /** Conversation context input items */
   input: ResponseItem[];  // Rust: input: Vec<ResponseItem>
   /** Tools available to the model */
-  tools: any[];  // Rust: tools: Vec<OpenAiTool>
+  tools: ToolSpec[];  // Rust: tools: Vec<OpenAiTool>
   /** Optional override for base instructions */
   base_instructions_override?: string;  // Rust: base_instructions_override: Option<String>
   /** Optional user instructions (development guidelines) */
@@ -154,6 +159,49 @@ export interface ModelProviderInfo {
  * Based on Rust's WireApi enum
  */
 export type WireApi = 'Responses' | 'Chat';
+
+/**
+ * Tool specification discriminated union
+ * Matches Rust's ToolSpec enum from client_common.rs
+ *
+ * **Rust Reference**: `codex-rs/core/src/client_common.rs:163-209`
+ */
+export type ToolSpec =
+  | { type: 'function'; function: ResponsesApiTool }
+  | { type: 'local_shell' }
+  | { type: 'web_search' }
+  | { type: 'custom'; custom: FreeformTool };
+
+/**
+ * Function tool definition for Responses API
+ * Based on Rust's ResponsesApiTool struct
+ */
+export interface ResponsesApiTool {
+  name: string;
+  description: string;
+  strict: boolean;
+  parameters: any; // JSON Schema
+}
+
+/**
+ * Freeform tool definition for custom tools
+ * Based on Rust's FreeformTool struct
+ */
+export interface FreeformTool {
+  name: string;
+  description: string;
+  format: FreeformToolFormat;
+}
+
+/**
+ * Format specification for freeform tools
+ * Based on Rust's FreeformToolFormat struct
+ */
+export interface FreeformToolFormat {
+  type: string;
+  syntax: string;
+  definition: string;
+}
 
 // Type guards for ResponseEvent variants
 export function isResponseEvent(obj: any): obj is ResponseEvent {
