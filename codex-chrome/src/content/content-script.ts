@@ -58,7 +58,14 @@ function setupMessageHandlers(): void {
 
   // Handle ping (for checking if content script is loaded)
   router.on(MessageType.PING, () => {
-    return { type: MessageType.PONG, timestamp: Date.now() };
+    return {
+      type: MessageType.PONG,
+      timestamp: Date.now(),
+      initLevel: getInitLevel(),
+      readyState: document.readyState,
+      version: '1.0.0',
+      capabilities: ['dom', 'events', 'forms', 'accessibility'],
+    };
   });
 
   // Handle tab commands
@@ -67,10 +74,28 @@ function setupMessageHandlers(): void {
     return executeCommand(command, args);
   });
 
-  // Handle tool execution for DOM tools
+  // Handle tool execution for DOM tools (legacy)
   router.on(MessageType.TOOL_EXECUTE, async (message) => {
     const { toolName, args } = message.payload;
     return executeDOMTool(toolName, args);
+  });
+
+  // Handle DOM operations (new unified handler)
+  router.on(MessageType.DOM_ACTION, async (message) => {
+    try {
+      const result = await executeDOMAction(message);
+      return {
+        success: true,
+        data: result,
+        requestId: message.id,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+        requestId: message.id,
+      };
+    }
   });
 
   // Handle DOM queries
@@ -567,6 +592,294 @@ function getElementSelector(element: Element): string {
 }
 
 /**
+ * Execute DOM action (new unified handler for all 25 operations)
+ */
+async function executeDOMAction(message: any): Promise<any> {
+  const { action, selector, xpath, text, attribute, property, value, formData, formSelector, sequence, options } = message;
+
+  switch (action) {
+    // Element query operations
+    case 'query':
+      if (!selector) throw new Error('Selector is required for query action');
+      return {
+        elements: selectElements(selector),
+        count: selectElements(selector).length,
+      };
+
+    case 'findByXPath':
+      if (!xpath) throw new Error('XPath is required for findByXPath action');
+      return {
+        elements: queryDOM({ xpath }),
+        count: queryDOM({ xpath }).length,
+      };
+
+    // Element interaction operations
+    case 'click':
+      if (!selector) throw new Error('Selector is required for click action');
+      const clicked = clickElement(selector);
+      return {
+        success: clicked,
+        element: clicked ? selectElements(selector)[0] : null,
+      };
+
+    case 'hover':
+      if (!selector) throw new Error('Selector is required for hover action');
+      const element = document.querySelector(selector) as HTMLElement;
+      if (!element) throw new Error(`Element not found: ${selector}`);
+
+      // Dispatch mouse events for hover
+      element.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, cancelable: true }));
+      element.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+
+      return {
+        success: true,
+        element: selectElements(selector)[0],
+      };
+
+    case 'type':
+      if (!selector) throw new Error('Selector is required for type action');
+      if (!text) throw new Error('Text is required for type action');
+      const typed = typeInElement(selector, text);
+      const typedElement = document.querySelector(selector) as HTMLInputElement;
+      return {
+        success: typed,
+        element: typed ? selectElements(selector)[0] : null,
+        finalValue: typedElement?.value,
+      };
+
+    case 'focus':
+      if (!selector) throw new Error('Selector is required for focus action');
+      const focusElement = document.querySelector(selector) as HTMLElement;
+      if (!focusElement) throw new Error(`Element not found: ${selector}`);
+      focusElement.focus();
+      return {
+        success: true,
+        element: selectElements(selector)[0],
+      };
+
+    case 'scroll':
+      if (!selector) throw new Error('Selector is required for scroll action');
+      const scrolled = scrollToElement(selector);
+      return {
+        success: scrolled,
+        element: scrolled ? selectElements(selector)[0] : null,
+      };
+
+    // Attribute operations
+    case 'getAttribute':
+      if (!selector) throw new Error('Selector is required for getAttribute action');
+      if (!attribute) throw new Error('Attribute name is required for getAttribute action');
+      const attrElement = document.querySelector(selector);
+      if (!attrElement) throw new Error(`Element not found: ${selector}`);
+      return {
+        value: attrElement.getAttribute(attribute),
+        element: selectElements(selector)[0],
+      };
+
+    case 'setAttribute':
+      if (!selector) throw new Error('Selector is required for setAttribute action');
+      if (!attribute) throw new Error('Attribute name is required for setAttribute action');
+      if (value === undefined) throw new Error('Value is required for setAttribute action');
+      const setAttrElement = document.querySelector(selector);
+      if (!setAttrElement) throw new Error(`Element not found: ${selector}`);
+      setAttrElement.setAttribute(attribute, value);
+      return {
+        success: true,
+        element: selectElements(selector)[0],
+      };
+
+    case 'getProperty':
+      if (!selector) throw new Error('Selector is required for getProperty action');
+      if (!property) throw new Error('Property name is required for getProperty action');
+      const getPropElement = document.querySelector(selector) as any;
+      if (!getPropElement) throw new Error(`Element not found: ${selector}`);
+      return {
+        value: getPropElement[property],
+        element: selectElements(selector)[0],
+      };
+
+    case 'setProperty':
+      if (!selector) throw new Error('Selector is required for setProperty action');
+      if (!property) throw new Error('Property name is required for setProperty action');
+      if (value === undefined) throw new Error('Value is required for setProperty action');
+      const setPropElement = document.querySelector(selector) as any;
+      if (!setPropElement) throw new Error(`Element not found: ${selector}`);
+      setPropElement[property] = value;
+      return {
+        success: true,
+        element: selectElements(selector)[0],
+      };
+
+    // Content operations
+    case 'getText':
+      if (!selector) throw new Error('Selector is required for getText action');
+      const textElement = document.querySelector(selector) as HTMLElement;
+      if (!textElement) throw new Error(`Element not found: ${selector}`);
+      return {
+        text: textElement.innerText || textElement.textContent,
+        element: selectElements(selector)[0],
+      };
+
+    case 'getHtml':
+      if (!selector) throw new Error('Selector is required for getHtml action');
+      const htmlElement = document.querySelector(selector) as HTMLElement;
+      if (!htmlElement) throw new Error(`Element not found: ${selector}`);
+      return {
+        html: htmlElement.innerHTML,
+        element: selectElements(selector)[0],
+      };
+
+    case 'extractLinks':
+      const linkSelector = selector || 'a[href]';
+      const links = Array.from(document.querySelectorAll(linkSelector)).map(link => ({
+        text: (link as HTMLElement).innerText,
+        href: link.getAttribute('href') || '',
+        title: link.getAttribute('title') || undefined,
+      }));
+      return {
+        links,
+        count: links.length,
+      };
+
+    // Form operations
+    case 'fillForm':
+      if (!formData) throw new Error('Form data is required for fillForm action');
+      const filled = fillForm(formSelector || 'form', formData);
+      return {
+        success: filled,
+        fieldsSet: Object.keys(formData).length,
+        errors: [],
+      };
+
+    case 'submit':
+    case 'submitForm':
+      if (!selector) throw new Error('Selector is required for submit action');
+      const submitElement = document.querySelector(selector) as HTMLFormElement;
+      if (!submitElement) throw new Error(`Form not found: ${selector}`);
+      submitElement.submit();
+      return {
+        success: true,
+        element: selectElements(selector)[0],
+      };
+
+    // Advanced operations
+    case 'captureSnapshot':
+      // Return serialized DOM tree
+      return {
+        snapshot: {
+          html: document.documentElement.outerHTML,
+          url: window.location.href,
+          title: document.title,
+        },
+      };
+
+    case 'getAccessibilityTree':
+      // Build simplified accessibility tree
+      const buildA11yTree = (element: Element): any => {
+        return {
+          role: element.getAttribute('role') || element.tagName.toLowerCase(),
+          name: element.getAttribute('aria-label') || (element as HTMLElement).innerText?.substring(0, 50),
+          children: Array.from(element.children).slice(0, 10).map(buildA11yTree),
+        };
+      };
+      return {
+        tree: [buildA11yTree(document.body)],
+        count: 1,
+      };
+
+    case 'getPaintOrder':
+      // Return elements in paint order (simplified)
+      const allElements = Array.from(document.querySelectorAll('*'));
+      const paintOrder = allElements.slice(0, 100).map(el => ({
+        tagName: el.tagName.toLowerCase(),
+        id: el.id || undefined,
+        className: el.className || undefined,
+        zIndex: window.getComputedStyle(el as Element).zIndex,
+      }));
+      return {
+        order: paintOrder,
+        count: paintOrder.length,
+      };
+
+    case 'detectClickable':
+      // Detect clickable elements
+      const clickableSelectors = 'a, button, input[type="button"], input[type="submit"], [onclick], [role="button"]';
+      const clickableElements = Array.from(document.querySelectorAll(clickableSelectors)).map(el => ({
+        tagName: el.tagName.toLowerCase(),
+        id: el.id || undefined,
+        className: el.className || undefined,
+        text: (el as HTMLElement).innerText?.substring(0, 50),
+      }));
+      return {
+        clickable: clickableElements,
+        count: clickableElements.length,
+      };
+
+    case 'waitForElement':
+      if (!selector) throw new Error('Selector is required for waitForElement action');
+      const timeout = options?.timeout || 5000;
+      const startTime = Date.now();
+
+      while (Date.now() - startTime < timeout) {
+        const waitElement = document.querySelector(selector);
+        if (waitElement) {
+          return {
+            success: true,
+            element: selectElements(selector)[0],
+          };
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      throw new Error(`Element not found within ${timeout}ms: ${selector}`);
+
+    case 'checkVisibility':
+      if (!selector) throw new Error('Selector is required for checkVisibility action');
+      const visElement = document.querySelector(selector) as HTMLElement;
+      if (!visElement) throw new Error(`Element not found: ${selector}`);
+
+      const rect = visElement.getBoundingClientRect();
+      const isVisible = rect.width > 0 && rect.height > 0 &&
+                       window.getComputedStyle(visElement).display !== 'none' &&
+                       window.getComputedStyle(visElement).visibility !== 'hidden';
+
+      return {
+        visible: isVisible,
+        element: selectElements(selector)[0],
+      };
+
+    case 'executeSequence':
+      if (!sequence || !Array.isArray(sequence)) {
+        throw new Error('Sequence array is required for executeSequence action');
+      }
+
+      const results = [];
+      for (const op of sequence) {
+        try {
+          const result = await executeDOMAction({ ...op, id: message.id });
+          results.push(result);
+        } catch (error) {
+          results.push({
+            success: false,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+          if (options?.force !== true) {
+            break;
+          }
+        }
+      }
+
+      return {
+        sequence: results,
+        count: results.length,
+      };
+
+    default:
+      throw new Error(`Unknown DOM action: ${action}`);
+  }
+}
+
+/**
  * Execute DOM tool
  */
 async function executeDOMTool(toolName: string, args: any): Promise<any> {
@@ -770,6 +1083,22 @@ function injectEnhancementScripts(): void {
 
 // Inject enhancement scripts
 injectEnhancementScripts();
+
+/**
+ * Get content script initialization level
+ */
+function getInitLevel(): number {
+  // 0: NOT_INJECTED (shouldn't happen if this code is running)
+  // 1: INJECTED (script loaded but not initialized)
+  // 2: HANDLERS_READY (message handlers registered)
+  // 3: DOM_READY (DOM is ready for manipulation)
+  // 4: FULLY_READY (all features initialized)
+
+  if (!router) return 1;
+  if (document.readyState === 'loading') return 2;
+  if (document.readyState === 'interactive') return 3;
+  return 4; // complete
+}
 
 // Export for testing
 export { getPageContext, selectElements, executeCommand, executeDOMTool };

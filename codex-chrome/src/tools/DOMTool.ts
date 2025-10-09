@@ -8,6 +8,7 @@
 
 import { BaseTool, createToolDefinition, type BaseToolRequest, type BaseToolOptions, type ToolDefinition } from './BaseTool';
 import { DomService } from './dom/service';
+import { MessageType } from '../core/MessageRouter';
 import {
   DOMOperationRequest,
   DOMOperationResponse,
@@ -140,7 +141,7 @@ export interface DOMToolResponse {
  * Content script message
  */
 interface ContentScriptMessage {
-  type: 'DOM_ACTION';
+  type: MessageType.DOM_ACTION;
   action: string;
   data: any;
   requestId: string;
@@ -870,7 +871,7 @@ export class DOMTool extends BaseTool {
   private async sendContentScriptMessage(tabId: number, action: string, data: any): Promise<any> {
     const requestId = this.generateRequestId();
     const message: ContentScriptMessage = {
-      type: 'DOM_ACTION',
+      type: MessageType.DOM_ACTION,
       action,
       data,
       requestId,
@@ -916,37 +917,56 @@ export class DOMTool extends BaseTool {
   }
 
   /**
-   * Ensure content script is injected into the tab
+   * Ensure content script is injected into the tab with exponential backoff retry
    */
   private async ensureContentScriptInjected(tabId: number): Promise<void> {
-    try {
-      // Check if content script is already available
-      const response = await chrome.tabs.sendMessage(tabId, { type: 'PING' });
-      if (response && response.type === 'PONG') {
-        return; // Content script is already loaded
+    const maxRetries = 5;
+    const baseDelay = 100;
+
+    // First, try to ping existing content script
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        const response = await chrome.tabs.sendMessage(tabId, { type: MessageType.PING });
+        if (response && response.type === MessageType.PONG) {
+          this.log('debug', `Content script already loaded in tab ${tabId} (attempt ${attempt + 1})`);
+          return; // Content script is already loaded and responsive
+        }
+      } catch (error) {
+        // Content script not responsive, continue to injection
+        this.log('debug', `PING failed on attempt ${attempt + 1}: ${error}`);
       }
-    } catch (error) {
-      // Content script not loaded, inject it
+
+      // If first attempt failed, try injecting the script
+      if (attempt === 0) {
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            files: ['/content/content-script.js'],
+          });
+          this.log('info', `Content script injected into tab ${tabId}`);
+        } catch (injectionError) {
+          // Injection failed, could be permissions issue
+          throw this.createDOMError(
+            ErrorCode.SCRIPT_INJECTION_FAILED,
+            `Failed to inject content script: ${injectionError}`,
+            undefined,
+            { tabId, originalError: injectionError }
+          );
+        }
+      }
+
+      // Wait with exponential backoff before next retry
+      const delay = baseDelay * Math.pow(2, attempt);
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
 
-    try {
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        files: ['/content/content-script.js'],
-      });
-
-      // Wait a moment for the script to initialize
-      await new Promise(resolve => setTimeout(resolve, 100));
-
-      this.log('info', `Content script injected into tab ${tabId}`);
-    } catch (error) {
-      throw this.createDOMError(
-        ErrorCode.SCRIPT_INJECTION_FAILED,
-        `Failed to inject content script: ${error}`,
-        undefined,
-        { tabId }
-      );
-    }
+    // If we get here, all retries failed
+    throw this.createDOMError(
+      ErrorCode.TIMEOUT,
+      `Content script failed to respond after ${maxRetries} attempts`,
+      undefined,
+      { tabId }
+    );
   }
 
   /**
