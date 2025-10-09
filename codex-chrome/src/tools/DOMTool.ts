@@ -37,6 +37,11 @@ import {
   getViewportInfo
 } from './dom/chrome/contentScript';
 
+// Content script file path - MUST match manifest.json content_scripts.js reference
+// Vite builds src/content/content-script.ts → dist/content.js (uses input key name)
+// See specs/018-inspect-the-domtool/contracts/file-paths.md for contract details
+const CONTENT_SCRIPT_PATH = '/content.js';
+
 /**
  * DOM tool request interface - Extended to support all 25 operations
  */
@@ -939,9 +944,12 @@ export class DOMTool extends BaseTool {
       // If first attempt failed, try injecting the script
       if (attempt === 0) {
         try {
+          // IMPORTANT: File path must match manifest.json content_scripts.js reference
+          // Vite builds src/content/content-script.ts → dist/content.js (uses input key name)
+          // See specs/018-inspect-the-domtool/contracts/file-paths.md for contract
           await chrome.scripting.executeScript({
             target: { tabId },
-            files: ['/content/content-script.js'],
+            files: [CONTENT_SCRIPT_PATH],
           });
           this.log('info', `Content script injected into tab ${tabId}`);
         } catch (injectionError) {
