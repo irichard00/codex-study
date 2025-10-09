@@ -4,7 +4,6 @@
  */
 
 import { ModelClient, ModelClientError, type RetryConfig } from './ModelClient';
-import { OpenAIClient } from './OpenAIClient';
 import { OpenAIResponsesClient } from './OpenAIResponsesClient';
 import { chromeAuthManager } from './ChromeAuthManager';
 import type { AgentConfig } from '../config/AgentConfig';

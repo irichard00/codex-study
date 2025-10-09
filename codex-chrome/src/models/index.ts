@@ -22,7 +22,7 @@ export type { ToolDefinition } from '../tools/BaseTool';
 
 // Provider implementations
 // Note: AnthropicClient removed - not supported in Rust codex-rs implementation
-export { OpenAIClient } from './OpenAIClient';
+// Note: OpenAIClient removed - replaced by OpenAIResponsesClient (Responses API)
 export { OpenAIResponsesClient, type OpenAIResponsesConfig } from './OpenAIResponsesClient';
 
 // Factory and utilities
