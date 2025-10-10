@@ -36,6 +36,9 @@ export class DOMTreeSerializer {
 		containment_threshold: number | null = null,
 		paint_order_filtering: boolean = true
 	) {
+		if (!root_node) {
+			throw new TypeError('DOMTreeSerializer requires a root_node parameter');
+		}
 		this.root_node = root_node;
 		this._previous_cached_selector_map = previous_cached_state?.selector_map;
 		this.enable_bbox_filtering = enable_bbox_filtering;
