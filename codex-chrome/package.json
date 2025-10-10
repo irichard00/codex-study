@@ -7,6 +7,7 @@
     "vite:build": "vite build",
     "build": "node scripts/build.js",
     "build:watch": "vite build --watch",
+    "build:testtool": "vite build --config tests/tools/e2e/vite.config.ts",
     "test": "vitest",
     "type-check": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.svelte",
