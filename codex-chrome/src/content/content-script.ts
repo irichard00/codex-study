@@ -32,20 +32,20 @@ interface PageContext {
  * Initialize content script
  */
 function initialize(): void {
-  console.log('Codex content script initialized');
-  
+  console.log('[Codex] Content script initialized');
+
   // Create message router
   router = new MessageRouter('content');
-  
+
   // Setup message handlers
   setupMessageHandlers();
-  
+
   // Setup DOM observers
   setupDOMObservers();
-  
+
   // Setup interaction handlers
   setupInteractionHandlers();
-  
+
   // Announce presence to background
   announcePresence();
 }
