@@ -549,18 +549,71 @@ export class TaskRunner {
       const { item, response } = processedItem as ProcessedResponseItem;
       const messageItem = item as ResponseItem;
 
-      // Check if this is an assistant message (task completion indicator)
-      if (getResponseItemRole(messageItem) === 'assistant' && !response) {
+      // Match the Rust implementation's pattern matching logic
+      // Lines 1711-1798 in codex.rs
+
+      // Case 1: Assistant message without response (task complete indicator)
+      // Rust: (ResponseItem::Message { role, .. }, None) if role == "assistant"
+      if (messageItem.type === 'message' && messageItem.role === 'assistant' && !response) {
         itemsToRecord.push(messageItem);
       }
-      // Check if this is a tool call that needs response (task continues)
-      else if (response) {
+      // Case 2: LocalShellCall with FunctionCallOutput response
+      // Rust lines 1717-1727
+      else if (
+        messageItem.type === 'local_shell_call' &&
+        response?.type === 'function_call_output'
+      ) {
         taskComplete = false;
         itemsToRecord.push(messageItem);
-        if (response.role === 'tool') {
+        itemsToRecord.push(response as ResponseItem);
+      }
+      // Case 3: FunctionCall with FunctionCallOutput response
+      // Rust lines 1729-1739
+      else if (
+        messageItem.type === 'function_call' &&
+        response?.type === 'function_call_output'
+      ) {
+        taskComplete = false;
+        itemsToRecord.push(messageItem);
+        itemsToRecord.push(response as ResponseItem);
+      }
+      // Case 4: CustomToolCall with CustomToolCallOutput response
+      // Rust lines 1741-1750
+      else if (
+        messageItem.type === 'custom_tool_call' &&
+        response?.type === 'custom_tool_call_output'
+      ) {
+        taskComplete = false;
+        itemsToRecord.push(messageItem);
+        itemsToRecord.push(response as ResponseItem);
+      }
+      // Case 5: FunctionCall with McpToolCallOutput response
+      // Rust lines 1752-1773
+      // Note: In TypeScript, MCP tool outputs are converted to FunctionCallOutput
+      // in the handleResponseItem method, so they follow the same pattern as Case 3
+
+      // Case 6: Reasoning item without response
+      // Rust lines 1776-1790
+      else if (messageItem.type === 'reasoning' && !response) {
+        itemsToRecord.push(messageItem);
+      }
+      // Case 7: Unexpected combinations (warning)
+      // Rust lines 1791-1793
+      else if (response) {
+        console.warn(
+          `Unexpected response item: ${JSON.stringify(messageItem)} with response: ${JSON.stringify(response)}`
+        );
+        // Still record them to avoid losing data
+        taskComplete = false;
+        itemsToRecord.push(messageItem);
+        // Add response if it looks like a valid ResponseItem
+        if (response.type) {
           itemsToRecord.push(response as ResponseItem);
         }
       }
+
+      // Collect responses for next turn (Rust lines 1795-1797)
+      // In TypeScript, responses are handled inline above
     }
 
     // Record processed items in conversation history (matches Rust lines 1801-1808)

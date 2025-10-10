@@ -70,8 +70,8 @@ interface ResponseCompletedUsage {
  * Authentication configuration for OpenAI Responses API
  */
 export interface OpenAIResponsesConfig {
-  /** OpenAI API key */
-  apiKey: string;
+  /** OpenAI API key (can be null - validation happens at request time) */
+  apiKey: string | null;
   /** Base URL for API (defaults to OpenAI's endpoint) */
   baseUrl?: string;
   /** Organization ID */
@@ -94,7 +94,7 @@ export interface OpenAIResponsesConfig {
  * OpenAI Responses API client implementing experimental /v1/responses endpoint
  */
 export class OpenAIResponsesClient extends ModelClient {
-  private readonly apiKey: string;
+  private readonly apiKey: string | null;
   private readonly baseUrl: string;
   private readonly organization?: string;
   private readonly conversationId: string;
@@ -113,9 +113,8 @@ export class OpenAIResponsesClient extends ModelClient {
   constructor(config: OpenAIResponsesConfig, retryConfig?: Partial<RetryConfig>) {
     super(retryConfig);
 
-    if (!config.apiKey?.trim()) {
-      throw new ModelClientError('OpenAI API key is required');
-    }
+    // Don't validate API key in constructor - validation happens when making requests
+    // This allows the model client to be created before API key is configured
 
     this.apiKey = config.apiKey;
     this.baseUrl = config.baseUrl || 'https://api.openai.com/v1';
@@ -228,13 +227,7 @@ export class OpenAIResponsesClient extends ModelClient {
     // Build request payload
     const fullInstructions = this.getFullInstructions(prompt);
 
-    // Debug: Log incoming tools
-    console.log('[OpenAIResponsesClient] Incoming prompt.tools:', JSON.stringify(prompt.tools, null, 2));
-
     const toolsJson = this.createToolsJsonForResponsesApi(prompt.tools);
-
-    // Debug: Log converted tools
-    console.log('[OpenAIResponsesClient] Converted toolsJson:', JSON.stringify(toolsJson, null, 2));
 
     const reasoning = this.createReasoningParam();
     const textControls = this.createTextParam(prompt.output_schema);
@@ -729,6 +722,11 @@ export class OpenAIResponsesClient extends ModelClient {
    * Make HTTP request to OpenAI Responses API endpoint
    */
   private async makeResponsesApiRequest(payload: ResponsesApiRequest): Promise<Response> {
+    // Validate API key before making request
+    if (!this.apiKey || !this.apiKey.trim()) {
+      throw new ModelClientError('No API key configured for provider: openai');
+    }
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${this.apiKey}`,

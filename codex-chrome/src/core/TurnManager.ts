@@ -436,8 +436,7 @@ export class TurnManager {
     const syntheticResponses = missingCallIds.map(callId => ({
       type: 'function_call_output',
       call_id: callId,
-      content: 'aborted',
-      success: false,
+      output: 'aborted',
     }));
 
     return {
@@ -527,19 +526,18 @@ export class TurnManager {
         return {
           type: 'function_call_output',
           call_id,
-          content: `Error: ${error instanceof Error ? error.message : String(error)}`,
-          success: false,
+          output: `Error: ${error instanceof Error ? error.message : String(error)}`,
         };
       }
     } else if (item.type === 'message' || item.type === 'reasoning' || item.type === 'web_search_call') {
       // Use event mapping to convert ResponseItem to EventMsg(s)
       // This matches the Rust logic in codex.rs line 2219-2235
-      const showRawReasoning = this.session.getShowRawAgentReasoning?.() ?? false;
+      const showRawReasoning = this.session.showRawAgentReasoning() ?? false;
       const eventMsgs = mapResponseItemToEventMessages(item as ResponseItem, showRawReasoning);
 
       // Emit all mapped events
       for (const msg of eventMsgs) {
-        if (msg && msg.type && msg.data) {
+        if (msg && 'type' in msg) {
           await this.emitEvent(msg);
         } else {
           console.warn('Skipping malformed event from mapResponseItemToEventMessages:', msg);
@@ -555,15 +553,13 @@ export class TurnManager {
             return {
               type: 'function_call_output',
               call_id,
-              content: JSON.stringify(result),
-              success: true,
+              output: JSON.stringify(result),
             };
           } catch (error) {
             return {
               type: 'function_call_output',
               call_id,
-              content: `Error: ${error instanceof Error ? error.message : String(error)}`,
-              success: false,
+              output: `Error: ${error instanceof Error ? error.message : String(error)}`,
             };
           }
         }
@@ -594,10 +590,6 @@ export class TurnManager {
       let result: any;
 
       switch (toolName) {
-        case 'exec_command':
-          result = await this.executeCommand(parsedParams.command, parsedParams.cwd);
-          break;
-
         case 'web_search':
           result = await this.executeWebSearch(parsedParams.query);
           break;
@@ -617,11 +609,6 @@ export class TurnManager {
           // Guard MCP execution with capability + config checks
           const toolsConfig = this.turnContext.getToolsConfig();
           const mcpEnabled = toolsConfig.mcpTools === true;
-          const mcpSupported = typeof this.session.executeMcpTool === 'function';
-
-          if (!mcpSupported) {
-            throw new Error(`MCP tools not supported in browser extension. Tool '${toolName}' not found.`);
-          }
 
           if (!mcpEnabled) {
             throw new Error(`Tool '${toolName}' not available (mcpTools disabled in config)`);
@@ -635,16 +622,14 @@ export class TurnManager {
       return {
         type: 'function_call_output',
         call_id: callId,
-        content: JSON.stringify(result),
-        success: true,
+        output: JSON.stringify(result),
       };
 
     } catch (error) {
       return {
         type: 'function_call_output',
         call_id: callId,
-        content: `Error: ${error instanceof Error ? error.message : String(error)}`,
-        success: false,
+        output: `Error: ${error instanceof Error ? error.message : String(error)}`,
       };
     }
   }

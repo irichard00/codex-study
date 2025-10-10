@@ -44,6 +44,10 @@ export enum MessageType {
   TOOL_RESULT = 'TOOL_RESULT',
   TOOL_ERROR = 'TOOL_ERROR',
 
+  // DOM operation messages
+  DOM_ACTION = 'DOM_ACTION',
+  DOM_RESPONSE = 'DOM_RESPONSE',
+
   // Approval messages
   APPROVAL_REQUEST = 'APPROVAL_REQUEST',
   APPROVAL_RESPONSE = 'APPROVAL_RESPONSE',

@@ -60,6 +60,7 @@ export class CodexAgent {
 
   /**
    * Initialize the agent (ensures config is loaded)
+   * Creates model client during initialization with nullable API key
    */
   async initialize(): Promise<void> {
     await this.config.initialize();
@@ -67,19 +68,24 @@ export class CodexAgent {
     // Initialize model client factory with config
     await this.modelClientFactory.initialize(this.config);
 
-    // Create model client for the session
-    const modelClient = await this.modelClientFactory.createClientForModel('default');
+    // Create model client and turn context during initialization
+    // API key can be null - validation happens when making API requests
+    const modelName = this.config.getModelConfig().selected || 'default';
+    const modelClient = await this.modelClientFactory.createClientForModel(modelName);
 
-    // Create TurnContext with ModelClient
-    const turnContext = new TurnContext(modelClient, {});
+    // Create initial TurnContext with the model client
+    const taskContext = new TurnContext(modelClient, {});
 
+    // Load and set instructions
     const userInstructions = await loadUserInstructions();
-    turnContext.setUserInstructions(userInstructions);
+    taskContext.setUserInstructions(userInstructions);
     const baseInstructions = await loadPrompt();
-    turnContext.setBaseInstructions(baseInstructions);
+    taskContext.setBaseInstructions(baseInstructions);
 
     // Set the turn context on the session
-    this.session.setTurnContext(turnContext);
+    this.session.setTurnContext(taskContext);
+
+    console.log('Agent initialized successfully with model client');
   }
 
   /**
@@ -320,17 +326,32 @@ export class CodexAgent {
         text: item.type === 'text' ? item.text || '' : undefined,
       }));
 
-      // Use the session's existing turn context
+      // Get existing turn context (created during initialize())
       let taskContext = this.session.getTurnContext();
 
-      // Apply context overrides to session's turn context if provided
+      // If context overrides are provided, update the turn context
       if (contextOverrides) {
-        // Create fresh context with overrides for this turn
-        const modelClient = await this.modelClientFactory.createClientForModel(contextOverrides.model || 'default');
-        taskContext = new TurnContext(modelClient, contextOverrides);
+        // If model changed, create new model client and context
+        if (contextOverrides.model && contextOverrides.model !== taskContext?.getModel()) {
+          const modelClient = await this.modelClientFactory.createClientForModel(contextOverrides.model);
+          taskContext = new TurnContext(modelClient, contextOverrides);
 
-        // Update session turn context with overrides
-        this.session.updateTurnContext(contextOverrides);
+          // Load and set instructions
+          const userInstructions = await loadUserInstructions();
+          taskContext.setUserInstructions(userInstructions);
+          const baseInstructions = await loadPrompt();
+          taskContext.setBaseInstructions(baseInstructions);
+
+          // Set the new turn context on the session
+          this.session.setTurnContext(taskContext);
+        } else if (taskContext) {
+          // Update existing context with overrides
+          this.session.updateTurnContext(contextOverrides);
+        }
+      }
+
+      if (!taskContext) {
+        throw new Error('Turn context not initialized');
       }
 
       // Create RegularTask instance (Feature 011 architecture)
@@ -351,10 +372,15 @@ export class CodexAgent {
     } catch (error) {
       console.error('Error processing user input:', error);
 
+      // Check if this is an API key error and emit appropriate event
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred during task execution';
+      const isApiKeyError = errorMessage.includes('No API key configured');
+
       this.emitEvent({
         type: 'Error',
         data: {
-          message: error instanceof Error ? error.message : 'Unknown error occurred during task execution',
+          message: isApiKeyError ? `Cannot execute task: ${errorMessage}` : errorMessage,
+          code: isApiKeyError ? 'API_KEY_REQUIRED' : undefined,
         },
       });
 

@@ -65,3 +65,94 @@ If you don’t have the tool:
 ### Test assertions
 
 - Tests should use pretty_assertions::assert_eq for clearer diffs. Import this at the top of the test module if it isn't already.
+
+---
+
+# TypeScript/codex-chrome
+
+In the codex-chrome folder where the Chrome Extension code lives:
+
+## Technology Stack
+- **Language**: TypeScript 5.x
+- **Platform**: Chrome Extension Manifest V3
+- **APIs**: Chrome Extension APIs (tabs, scripting, runtime messaging), Chrome DevTools Protocol
+- **Architecture**: Background service worker + Content scripts + Side panel
+- **Communication**: Message passing between background ↔ content script contexts
+
+## Message Passing Architecture
+
+### Core Pattern
+- **Background Script** (DOMTool): Runs in extension context, sends DOM operation requests
+- **Content Script**: Runs in page context, executes DOM operations, returns results
+- **Message Types**: Must use `MessageType.DOM_ACTION` for DOM operations (not 'DOM_ACTION' string or TOOL_EXECUTE)
+
+### Critical Requirements
+- Message type must match between sender and receiver
+- All 25 DOM operations must be mapped in content script
+- Errors must be classified (PERMISSION_DENIED vs CONTENT_SCRIPT_NOT_LOADED vs ELEMENT_NOT_FOUND)
+- PING/PONG protocol verifies content script ready before operations
+
+## File Structure
+```
+codex-chrome/
+├── src/
+│   ├── tools/
+│   │   ├── DOMTool.ts              # Background: DOM operation orchestration
+│   │   └── dom/                    # DOM service library
+│   │       └── chrome/
+│   │           └── contentScript.ts # DOM manipulation helpers
+│   ├── content/
+│   │   └── content-script.ts       # Content script: message handlers
+│   ├── models/
+│   │   └── OpenAIResponsesClient.ts # LLM client (GPT-5)
+│   └── core/
+│       └── MessageRouter.ts        # Message routing infrastructure
+└── tests/
+    ├── unit/
+    └── integration/
+```
+
+## Build & Test
+```bash
+cd codex-chrome
+npm run build        # Build extension
+npm test            # Run tests
+npm run lint        # Lint TypeScript
+```
+
+## Common Patterns
+
+### Sending DOM Operations
+```typescript
+// DOMTool (background)
+await chrome.tabs.sendMessage(tabId, {
+  type: MessageType.DOM_ACTION,  // Must match content script handler
+  action: 'query',
+  selector: '.headline',
+  requestId: generateId(),
+  timestamp: Date.now()
+});
+```
+
+### Handling in Content Script
+```typescript
+// content-script.ts
+router.on(MessageType.DOM_ACTION, async (message) => {
+  const { action, selector } = message;
+  const result = await executeDOMOperation(action, selector);
+  return { success: true, data: result, requestId: message.requestId };
+});
+```
+
+### Error Handling
+- Always classify errors using ErrorCode enum
+- Distinguish permission errors from communication failures
+- Include suggestedAction in error responses for LLM context
+
+## Recent Changes
+- 017-fix-domtool-content-script-communication: Fixed message type mismatch between DOMTool and content script, aligned to use MessageType.DOM_ACTION consistently, completed 25 operation mapping
+
+## Testing
+- Unit tests: Test individual message handlers
+- Integration tests: Test full message flow background → content → background
+- Always test error scenarios: element not found, timeout, permission denied

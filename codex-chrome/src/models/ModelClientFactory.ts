@@ -4,7 +4,6 @@
  */
 
 import { ModelClient, ModelClientError, type RetryConfig } from './ModelClient';
-import { OpenAIClient } from './OpenAIClient';
 import { OpenAIResponsesClient } from './OpenAIResponsesClient';
 import { chromeAuthManager } from './ChromeAuthManager';
 import type { AgentConfig } from '../config/AgentConfig';
@@ -21,8 +20,8 @@ export type ModelProvider = 'openai';
 export interface ModelClientConfig {
   /** Provider to use */
   provider: ModelProvider;
-  /** API key for the provider */
-  apiKey: string;
+  /** API key for the provider (can be null - validation happens at request time) */
+  apiKey: string | null;
   /** Additional provider-specific options */
   options?: {
     /** Base URL for API requests (optional) */
@@ -308,17 +307,17 @@ export class ModelClientFactory {
    * Load configuration for a provider from Chrome storage
    * @param provider The provider
    * @returns Promise resolving to the client configuration
+   * Note: API key can be null - validation happens when making API requests
    */
   private async loadConfigForProvider(provider: ModelProvider): Promise<ModelClientConfig> {
     const apiKey = await this.loadApiKey(provider);
 
-    if (!apiKey) {
-      throw new ModelClientError(`No API key configured for provider: ${provider}`);
-    }
+    // Don't throw error if API key is missing - allow model client to be created
+    // The error will be thrown when actually trying to make an API request
 
     const config: ModelClientConfig = {
       provider,
-      apiKey,
+      apiKey: apiKey || null,
       options: {},
     };
 
