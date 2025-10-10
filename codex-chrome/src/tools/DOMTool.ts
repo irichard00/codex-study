@@ -935,11 +935,17 @@ export class DOMTool extends BaseTool {
         // MessageRouter wraps responses in { success: true, data: ... }
         const pongData = response?.success ? response.data : response;
         if (pongData && pongData.type === MessageType.PONG) {
-          this.log('debug', `Content script already loaded in tab ${tabId} (attempt ${attempt + 1})`);
-          return; // Content script is already loaded and responsive
+          // Verify content script is sufficiently initialized
+          if (pongData.initLevel && pongData.initLevel < 2) {
+            this.log('warn', `Content script not fully ready (initLevel: ${pongData.initLevel}), retrying...`);
+            // Treat as failure and retry
+            throw new Error(`Content script initializing (initLevel: ${pongData.initLevel})`);
+          }
+          this.log('debug', `Content script ready in tab ${tabId} (initLevel: ${pongData.initLevel}, attempt ${attempt + 1})`);
+          return; // Content script is loaded, responsive, and ready
         }
       } catch (error) {
-        // Content script not responsive, continue to injection
+        // Content script not responsive or not ready, continue to injection
         this.log('debug', `PING failed on attempt ${attempt + 1}: ${error}`);
       }
 
@@ -954,6 +960,9 @@ export class DOMTool extends BaseTool {
             files: [CONTENT_SCRIPT_PATH],
           });
           this.log('info', `Content script injected into tab ${tabId}`);
+          // Give content script time to initialize before first PING retry
+          // Content script needs time to register message listener and handlers
+          await new Promise(resolve => setTimeout(resolve, 300));
         } catch (injectionError) {
           // Injection failed, could be permissions issue
           throw this.createDOMError(

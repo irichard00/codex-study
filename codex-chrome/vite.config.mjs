@@ -5,26 +5,27 @@ import { fileURLToPath } from 'url';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
+// Main build config - excludes content script (built separately with vite.config.content.mjs)
 export default defineConfig({
   plugins: [svelte()],
   build: {
     rollupOptions: {
       input: {
         background: resolve(__dirname, 'src/background/service-worker.ts'),
-        content: resolve(__dirname, 'src/content/content-script.ts'),
         sidepanel: resolve(__dirname, 'src/sidepanel/sidepanel.html'),
         welcome: resolve(__dirname, 'src/welcome/welcome.html')
       },
       output: {
         entryFileNames: '[name].js',
         chunkFileNames: 'chunks/[name]-[hash].js',
-        assetFileNames: 'assets/[name]-[hash][extname]'
+        assetFileNames: 'assets/[name]-[hash][extname]',
+        format: 'es'
       }
     },
     outDir: 'dist',
     emptyOutDir: true,
-    sourcemap: true,  // Always enable source maps for debugging
-    minify: true  // Always minify for consistency
+    sourcemap: true,
+    minify: true
   },
   resolve: {
     alias: {

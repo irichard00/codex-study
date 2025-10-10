@@ -32,9 +32,13 @@ function build() {
     }
     fs.mkdirSync(distPath, { recursive: true });
     
-    // Run Vite build
-    log('\n📦 Building with Vite...', colors.yellow);
+    // Run Vite build for main scripts
+    log('\n📦 Building main scripts with Vite...', colors.yellow);
     execSync('npm run vite:build', { stdio: 'inherit' });
+
+    // Build content script separately (must be IIFE)
+    log('\n📦 Building content script (IIFE)...', colors.yellow);
+    execSync('vite build --config vite.config.content.mjs', { stdio: 'inherit' });
     
     // Copy manifest
     log('\n📄 Copying manifest...', colors.yellow);

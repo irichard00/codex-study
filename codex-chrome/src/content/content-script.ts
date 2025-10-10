@@ -32,20 +32,20 @@ interface PageContext {
  * Initialize content script
  */
 function initialize(): void {
-  console.log('Codex content script initialized');
-  
+  console.log('[Codex] Content script initialized');
+
   // Create message router
   router = new MessageRouter('content');
-  
+
   // Setup message handlers
   setupMessageHandlers();
-  
+
   // Setup DOM observers
   setupDOMObservers();
-  
+
   // Setup interaction handlers
   setupInteractionHandlers();
-  
+
   // Announce presence to background
   announcePresence();
 }
@@ -932,29 +932,13 @@ async function executeDOMTool(toolName: string, args: any): Promise<any> {
 
 /**
  * Setup page isolation
+ * NOTE: Disabled due to CSP violations in Chrome extensions
+ * Inline script injection is blocked by Content Security Policy
  */
 function setupPageIsolation(args: any): boolean {
-  try {
-    // Create isolated execution context
-    const isolatedScript = document.createElement('script');
-    isolatedScript.textContent = `
-      (function() {
-        // Isolated context for Codex operations
-        window.__codexIsolated = {
-          execute: ${args.code || 'function() { return null; }'},
-          context: ${JSON.stringify(args.context || {})}
-        };
-      })();
-    `;
-
-    document.head.appendChild(isolatedScript);
-    document.head.removeChild(isolatedScript);
-
-    return true;
-  } catch (error) {
-    console.error('Failed to setup page isolation:', error);
-    return false;
-  }
+  console.warn('[Codex] setupPageIsolation is disabled due to CSP restrictions');
+  console.warn('[Codex] Alternative: Use window.postMessage for page context communication');
+  return false;
 }
 
 /**
@@ -1023,66 +1007,20 @@ window.addEventListener('unload', () => {
 // Initialize content script
 initialize();
 
-// Inject necessary scripts for enhanced functionality
-function injectEnhancementScripts(): void {
-  // Inject script for page interaction enhancement
-  const enhancementScript = document.createElement('script');
-  enhancementScript.textContent = `
-    // Enhanced page interaction utilities
-    window.__codexUtils = {
-      // Utility functions for better DOM interaction
-      getElementPath: function(element) {
-        const path = [];
-        let current = element;
-        while (current && current !== document.body) {
-          let selector = current.tagName.toLowerCase();
-          if (current.id) {
-            selector += '#' + current.id;
-          } else if (current.className) {
-            selector += '.' + Array.from(current.classList).join('.');
-          }
-          path.unshift(selector);
-          current = current.parentElement;
-        }
-        return path.join(' > ');
-      },
-
-      // Enhanced element selection
-      smartSelect: function(query) {
-        // Try multiple selection strategies
-        let elements = [];
-
-        // CSS selector
-        try {
-          elements = Array.from(document.querySelectorAll(query));
-          if (elements.length > 0) return elements;
-        } catch (e) {}
-
-        // XPath
-        try {
-          const result = document.evaluate(query, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
-          for (let i = 0; i < result.snapshotLength; i++) {
-            elements.push(result.snapshotItem(i));
-          }
-          if (elements.length > 0) return elements;
-        } catch (e) {}
-
-        // Text content search
-        const allElements = document.querySelectorAll('*');
-        elements = Array.from(allElements).filter(el =>
-          el.textContent && el.textContent.includes(query)
-        );
-
-        return elements;
-      }
-    };
-  `;
-
-  document.head.appendChild(enhancementScript);
-}
-
-// Inject enhancement scripts
-injectEnhancementScripts();
+// NOTE: Enhancement script injection is DISABLED due to CSP violations
+// Content Security Policy blocks inline script execution in Chrome extensions
+//
+// If page-context utilities are needed, use one of these alternatives:
+// 1. Use window.postMessage to communicate with injected scripts
+// 2. Create a separate .js file and inject via chrome.scripting.executeScript
+// 3. Implement utilities directly in content script context (preferred)
+//
+// function injectEnhancementScripts(): void {
+//   const enhancementScript = document.createElement('script');
+//   enhancementScript.textContent = `...`;  // ← BLOCKED BY CSP
+//   document.head.appendChild(enhancementScript);
+// }
+// injectEnhancementScripts();  // ← DISABLED
 
 /**
  * Get content script initialization level

@@ -129,11 +129,14 @@ export class MessageRouter {
           return true;
         }
       );
+      console.log('[MessageRouter] Listener registered successfully');
 
       // Setup connection listeners for persistent connections
       chrome.runtime.onConnect.addListener((port) => {
         this.handleConnection(port);
       });
+    } else {
+      console.error('[MessageRouter] Cannot register listener - chrome.runtime not available!');
     }
   }
 
