@@ -4,6 +4,8 @@
  */
 
 import { MessageRouter, MessageType } from '../core/MessageRouter';
+import { handleDOMCaptureRequest } from './domCaptureHandler';
+import type { DOMCaptureRequestMessage, DOMCaptureResponseMessage } from '../types/domMessages';
 
 // Router instance
 let router: MessageRouter | null = null;
@@ -109,6 +111,44 @@ function setupMessageHandlers(): void {
   router.on(MessageType.TAB_COMMAND, async (message) => {
     if (message.payload.command === 'isolate') {
       return setupPageIsolation(message.payload.args);
+    }
+  });
+
+  // Handle DOM Capture requests (v2.0)
+  router.on(MessageType.DOM_CAPTURE_REQUEST, async (message) => {
+    try {
+      const requestMessage = message.payload as DOMCaptureRequestMessage;
+
+      // Call DOM capture handler
+      const captureResult = handleDOMCaptureRequest(requestMessage.options);
+
+      // Build response message
+      const response: DOMCaptureResponseMessage = {
+        type: 'DOM_CAPTURE_RESPONSE',
+        request_id: requestMessage.request_id,
+        success: true,
+        snapshot: captureResult.snapshot,
+        viewport: captureResult.viewport,
+        timing: captureResult.timing,
+      };
+
+      return response;
+    } catch (error) {
+      // Build error response
+      const errorResponse: DOMCaptureResponseMessage = {
+        type: 'DOM_CAPTURE_RESPONSE',
+        request_id: (message.payload as DOMCaptureRequestMessage).request_id,
+        success: false,
+        error: {
+          code: 'CAPTURE_FAILED',
+          message: error instanceof Error ? error.message : 'Unknown error during DOM capture',
+          details: {
+            stack: error instanceof Error ? error.stack : undefined,
+          },
+        },
+      };
+
+      return errorResponse;
     }
   });
 }

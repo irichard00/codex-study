@@ -16,6 +16,32 @@ import {
 import { DOMTreeSerializer } from './serializer/serializer';
 import { build_snapshot_lookup } from './enhancedSnapshot';
 
+/**
+ * DOM Service error codes
+ */
+export enum DOMServiceErrorCode {
+	TAB_NOT_FOUND = 'TAB_NOT_FOUND',
+	CONTENT_SCRIPT_NOT_LOADED = 'CONTENT_SCRIPT_NOT_LOADED',
+	TIMEOUT = 'TIMEOUT',
+	PERMISSION_DENIED = 'PERMISSION_DENIED',
+	INVALID_RESPONSE = 'INVALID_RESPONSE',
+	UNKNOWN_ERROR = 'UNKNOWN_ERROR'
+}
+
+/**
+ * DOM Service error
+ */
+export class DOMServiceError extends Error {
+	constructor(
+		public code: DOMServiceErrorCode,
+		message: string,
+		public details?: any
+	) {
+		super(message);
+		this.name = 'DOMServiceError';
+	}
+}
+
 // Browser session interface - to be provided by host extension
 interface BrowserSession {
 	tab_id?: number;
@@ -61,26 +87,75 @@ export class DomService {
 	 * Uses chrome.tabs and chrome.webNavigation APIs
 	 */
 	async _get_targets_for_page(target_id: string): Promise<CurrentPageTargets> {
-		// Implementation will use chrome.tabs.query() and chrome.webNavigation.getAllFrames()
-		// For now, return a placeholder
-		const page_session: TargetInfo = {
-			targetId: target_id,
-			type: 'page',
-			title: '',
-			url: '',
-			attached: true
-		};
+		// Get main tab info
+		const tab_id = this.browser_session.tab_id;
+		if (!tab_id) {
+			throw new DOMServiceError(
+				DOMServiceErrorCode.TAB_NOT_FOUND,
+				'Tab ID is required to get targets',
+				{ target_id }
+			);
+		}
 
-		const iframe_sessions: TargetInfo[] = [];
+		try {
+			// Get main tab information
+			const tab = await chrome.tabs.get(tab_id);
 
-		// TODO: Implement chrome.webNavigation.getAllFrames() call
-		// const frames = await chrome.webNavigation.getAllFrames({ tabId: this.browser_session.tab_id });
-		// Convert frames to TargetInfo format
+			const page_session: TargetInfo = {
+				targetId: target_id,
+				type: 'page',
+				title: tab.title || '',
+				url: tab.url || '',
+				attached: true
+			};
 
-		return {
-			page_session,
-			iframe_sessions
-		};
+			// Get all frames in the tab
+			const iframe_sessions: TargetInfo[] = [];
+
+			try {
+				const frames = await chrome.webNavigation.getAllFrames({ tabId: tab_id });
+
+				if (frames) {
+					// Filter out main frame (frameId === 0)
+					const iframes = frames.filter(frame => frame.frameId !== 0);
+
+					for (const frame of iframes) {
+						iframe_sessions.push({
+							targetId: `frame-${frame.frameId}`,
+							type: 'iframe',
+							title: '',
+							url: frame.url,
+							attached: true
+						});
+					}
+				}
+			} catch (frameError) {
+				// webNavigation permission might not be available
+				this.logger?.warn('Failed to get frames: ' + (frameError as Error).message);
+			}
+
+			return {
+				page_session,
+				iframe_sessions
+			};
+		} catch (error) {
+			this.logger?.error('Failed to get targets for page: ' + (error as Error).message);
+
+			// Check if it's a permission error
+			if ((error as Error).message.includes('permission')) {
+				throw new DOMServiceError(
+					DOMServiceErrorCode.PERMISSION_DENIED,
+					`Permission denied to access tab ${tab_id}`,
+					{ tab_id, original_error: (error as Error).message }
+				);
+			}
+
+			throw new DOMServiceError(
+				DOMServiceErrorCode.TAB_NOT_FOUND,
+				`Tab ${tab_id} not found or not accessible`,
+				{ tab_id, original_error: (error as Error).message }
+			);
+		}
 	}
 
 	/**
@@ -113,9 +188,29 @@ export class DomService {
 	 * Uses content script to get devicePixelRatio
 	 */
 	async _get_viewport_ratio(target_id: string): Promise<number> {
-		// TODO: Implement chrome.scripting.executeScript to get devicePixelRatio
-		// For now, return default value
-		return window.devicePixelRatio || 1;
+		const tab_id = this.browser_session.tab_id;
+		if (!tab_id) {
+			this.logger?.warn('No tab ID, returning default devicePixelRatio');
+			return 1;
+		}
+
+		try {
+			// Send message to content script to get viewport info
+			const response = await chrome.tabs.sendMessage(tab_id, {
+				type: 'GET_VIEWPORT_INFO'
+			});
+
+			if (response && response.devicePixelRatio) {
+				return response.devicePixelRatio;
+			}
+
+			// Fallback to default
+			return 1;
+		} catch (error) {
+			this.logger?.warn('Failed to get viewport ratio from content script: ' + (error as Error).message);
+			// Return default value
+			return 1;
+		}
 	}
 
 	/**
@@ -169,73 +264,246 @@ export class DomService {
 
 	/**
 	 * Get accessibility tree for all frames - replaces CDP Accessibility.getFullAXTree()
-	 * Uses chrome.debugger API or ARIA fallback
+	 * Uses ARIA fallback since chrome.accessibility API not available for web content
 	 */
 	async _get_ax_tree_for_all_frames(target_id: string): Promise<Map<string, any>> {
 		const ax_trees = new Map<string, any>();
 
-		// TODO: Implement chrome.debugger API call or ARIA parsing fallback
-		// For now, return empty map
+		// Since we can't access the full Accessibility API in Chrome extensions,
+		// we rely on ARIA attributes extracted during DOM capture
+		// The ARIA information is already included in the snapshot from content script
 
-		// Main frame
+		// Main frame - will be populated from snapshot data
 		ax_trees.set(target_id, { nodes: [] });
 
-		// Get iframe accessibility trees if cross_origin_iframes is enabled
+		// Get iframe accessibility trees if enabled
 		if (this.cross_origin_iframes) {
-			// TODO: Iterate through iframes and get their AX trees
+			// ARIA data for iframes will also come from snapshot
+			// Cross-origin iframes won't have ARIA data due to security restrictions
+			this.logger?.warn('Cross-origin iframe ARIA data may be incomplete');
 		}
+
+		// Note: Actual ARIA nodes will be attached during _convert_to_enhanced_tree
+		// when we process the snapshot data from the content script
 
 		return ax_trees;
 	}
 
 	/**
 	 * Get all trees (DOM, AX, snapshot) for a target - replaces multiple CDP calls
+	 * Delegates to content script for DOM traversal and snapshot capture
 	 */
 	async _get_all_trees(target_id: string): Promise<TargetAllTrees> {
 		const start_time = Date.now();
 		const cdp_timing: { [key: string]: number } = {};
 
+		const tab_id = this.browser_session.tab_id;
+		if (!tab_id) {
+			throw new DOMServiceError(
+				DOMServiceErrorCode.TAB_NOT_FOUND,
+				'Tab ID is required to get DOM trees',
+				{ target_id }
+			);
+		}
+
 		// Get device pixel ratio
 		const device_pixel_ratio = await this._get_viewport_ratio(target_id);
 		cdp_timing['viewport_ratio'] = Date.now() - start_time;
 
-		// Get DOM tree - replaces CDP DOM.getDocument()
-		// TODO: Implement custom DOM traversal in content script
-		const dom_tree_start = Date.now();
-		const dom_tree: GetDocumentReturns = {
-			root: {
+		// Request DOM capture from content script
+		const snapshot_start = Date.now();
+
+		try {
+			// Send message to content script to capture DOM
+			const response = await chrome.tabs.sendMessage(tab_id, {
+				type: 'DOM_CAPTURE_REQUEST',
+				options: {
+					includeShadowDOM: true,
+					includeIframes: true,
+					maxIframeDepth: this.max_iframe_depth,
+					maxIframeCount: this.max_iframes,
+					skipHiddenElements: true
+				}
+			});
+
+			if (!response || !response.snapshot) {
+				throw new DOMServiceError(
+					DOMServiceErrorCode.INVALID_RESPONSE,
+					'Invalid response from content script',
+					{ tab_id, response }
+				);
+			}
+
+			const snapshot: CaptureSnapshotReturns = response.snapshot;
+			cdp_timing['snapshot'] = Date.now() - snapshot_start;
+
+			// Build DOM tree from snapshot
+			const dom_tree_start = Date.now();
+			const dom_tree = this._build_dom_tree_from_snapshot(snapshot);
+			cdp_timing['dom_tree'] = Date.now() - dom_tree_start;
+
+			// Build AX tree from snapshot (ARIA data included)
+			const ax_tree_start = Date.now();
+			const ax_tree = this._build_ax_tree_from_snapshot(snapshot);
+			cdp_timing['ax_tree'] = Date.now() - ax_tree_start;
+
+			return {
+				snapshot,
+				dom_tree,
+				ax_tree,
+				device_pixel_ratio,
+				cdp_timing
+			};
+		} catch (error) {
+			this.logger?.error('Failed to get DOM trees: ' + (error as Error).message);
+
+			const errorMessage = (error as Error).message.toLowerCase();
+
+			// Check if error is due to content script not loaded
+			if (errorMessage.includes('could not establish connection') ||
+			    errorMessage.includes('receiving end does not exist')) {
+				throw new DOMServiceError(
+					DOMServiceErrorCode.CONTENT_SCRIPT_NOT_LOADED,
+					'Content script not injected in tab',
+					{ tab_id, original_error: (error as Error).message }
+				);
+			}
+
+			// Check for timeout
+			if (errorMessage.includes('timeout')) {
+				throw new DOMServiceError(
+					DOMServiceErrorCode.TIMEOUT,
+					'DOM capture timed out',
+					{ tab_id, original_error: (error as Error).message }
+				);
+			}
+
+			// Check for permission errors
+			if (errorMessage.includes('permission')) {
+				throw new DOMServiceError(
+					DOMServiceErrorCode.PERMISSION_DENIED,
+					'Permission denied to access tab',
+					{ tab_id, original_error: (error as Error).message }
+				);
+			}
+
+			// Generic error
+			throw new DOMServiceError(
+				DOMServiceErrorCode.UNKNOWN_ERROR,
+				'Failed to capture DOM',
+				{ tab_id, original_error: (error as Error).message }
+			);
+		}
+	}
+
+	/**
+	 * Build GetDocumentReturns from snapshot data
+	 */
+	private _build_dom_tree_from_snapshot(snapshot: CaptureSnapshotReturns): GetDocumentReturns {
+		// Get main document from snapshot
+		const mainDoc = snapshot.documents[0];
+
+		if (!mainDoc || !mainDoc.nodes || mainDoc.nodes.length === 0) {
+			// Return minimal document node
+			return {
+				root: {
+					nodeId: 1,
+					backendNodeId: 1,
+					nodeType: NodeType.DOCUMENT_NODE,
+					nodeName: '#document',
+					nodeValue: ''
+				}
+			};
+		}
+
+		// Build DOM tree from snapshot nodes
+		const root = this._build_node_tree(mainDoc.nodes, 0, snapshot.strings);
+
+		return { root };
+	}
+
+	/**
+	 * Build node tree from snapshot nodes
+	 */
+	private _build_node_tree(
+		nodes: any[],
+		nodeIndex: number,
+		strings: string[]
+	): any {
+		const node = nodes[nodeIndex];
+
+		if (!node) {
+			return {
 				nodeId: 1,
 				backendNodeId: 1,
 				nodeType: NodeType.DOCUMENT_NODE,
 				nodeName: '#document',
 				nodeValue: ''
+			};
+		}
+
+		// Restore string values from string pool
+		const nodeName = typeof node.nodeName === 'number'
+			? strings[node.nodeName]
+			: node.nodeName;
+
+		const builtNode: any = {
+			nodeId: nodeIndex + 1,
+			backendNodeId: node.backendNodeId || nodeIndex + 1,
+			nodeType: node.nodeType,
+			nodeName: nodeName,
+			nodeValue: node.nodeValue || '',
+			attributes: []
+		};
+
+		// Convert attributes object to array format
+		if (node.attributes) {
+			for (const [key, value] of Object.entries(node.attributes)) {
+				// Restore string values
+				const attrKey = typeof key === 'number' ? strings[key as any] : key;
+				const attrValue = typeof value === 'number' ? strings[value as any] : value;
+				builtNode.attributes.push(attrKey, attrValue);
 			}
-		};
-		cdp_timing['dom_tree'] = Date.now() - dom_tree_start;
+		}
 
-		// Get AX tree - replaces CDP Accessibility.getFullAXTree()
-		const ax_tree_start = Date.now();
-		const ax_tree: GetFullAXTreeReturns = {
-			nodes: []
-		};
-		cdp_timing['ax_tree'] = Date.now() - ax_tree_start;
+		// Build children recursively
+		if (node.childIndices && node.childIndices.length > 0) {
+			builtNode.children = node.childIndices.map((childIndex: number) =>
+				this._build_node_tree(nodes, childIndex, strings)
+			);
+		}
 
-		// Get snapshot - replaces CDP DOMSnapshot.captureSnapshot()
-		// TODO: Implement custom snapshot capture
-		const snapshot_start = Date.now();
-		const snapshot: CaptureSnapshotReturns = {
-			documents: [],
-			strings: []
-		};
-		cdp_timing['snapshot'] = Date.now() - snapshot_start;
+		return builtNode;
+	}
 
-		return {
-			snapshot,
-			dom_tree,
-			ax_tree,
-			device_pixel_ratio,
-			cdp_timing
-		};
+	/**
+	 * Build GetFullAXTreeReturns from snapshot data
+	 */
+	private _build_ax_tree_from_snapshot(snapshot: CaptureSnapshotReturns): GetFullAXTreeReturns {
+		const axNodes: AXNode[] = [];
+
+		// Extract AX nodes from all documents in snapshot
+		for (const doc of snapshot.documents) {
+			if (!doc.nodes) continue;
+
+			for (const node of doc.nodes) {
+				// Only process nodes with ARIA data
+				if (node.axNode) {
+					axNodes.push({
+						nodeId: node.axNode.ax_node_id,
+						ignored: node.axNode.ignored,
+						role: node.axNode.role ? { value: node.axNode.role } : undefined,
+						name: node.axNode.name ? { value: node.axNode.name } : undefined,
+						description: node.axNode.description ? { value: node.axNode.description } : undefined,
+						properties: node.axNode.properties || undefined,
+						childIds: node.axNode.child_ids || undefined,
+						backendDOMNodeId: node.backendNodeId
+					});
+				}
+			}
+		}
+
+		return { nodes: axNodes };
 	}
 
 	/**
