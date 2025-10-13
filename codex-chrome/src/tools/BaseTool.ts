@@ -566,11 +566,16 @@ export abstract class BaseTool {
    * Log debug information (can be overridden by subclasses)
    */
   protected log(level: 'debug' | 'info' | 'warn' | 'error', message: string, data?: any): void {
-    const logData = data ? { data } : {};
     const toolName = this.toolDefinition.type === 'function'
       ? this.toolDefinition.function.name
       : this.toolDefinition.type;
-    console[level](`[${toolName}] ${message}`, logData);
+
+    // Don't log data to avoid circular reference issues with DOM nodes
+    if (data) {
+      console[level](`[${toolName}] ${message} [data omitted to prevent circular references]`);
+    } else {
+      console[level](`[${toolName}] ${message}`);
+    }
   }
 
   /**
