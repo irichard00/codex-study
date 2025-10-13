@@ -591,22 +591,17 @@ export class DomService {
 		// Get the full DOM tree
 		const dom_tree = await this.get_dom_tree(target_id);
 
-		// Instantiate serializer with the DOM tree and configuration
+		// CORRECT: Create serializer with all required parameters
 		const serializer = new DOMTreeSerializer(
-			dom_tree,
-			previous_cached_state || null,
-			true, // enable_bbox_filtering
-			null, // containment_threshold (use default)
-			this.paint_order_filtering
+			dom_tree,                        // root_node (REQUIRED)
+			previous_cached_state || null,   // previous state for caching
+			true,                            // enable_bbox_filtering
+			null,                            // containment_threshold (use default)
+			this.paint_order_filtering       // from service config
 		);
 
-		// Serialize the tree
-		const [serialized, timing_info] = serializer.serialize_accessible_elements();
-
-		// Log timing info if logger available
-		if (this.logger) {
-			this.logger.log(`Serialization timing: ${JSON.stringify(timing_info)}`);
-		}
+		// Call instance method (returns tuple)
+		const [serialized, timing] = serializer.serialize_accessible_elements();
 
 		return serialized;
 	}
