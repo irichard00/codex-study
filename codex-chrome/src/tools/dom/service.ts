@@ -37,7 +37,6 @@ export class DomService {
 	private paint_order_filtering: boolean;
 	private max_iframes: number;
 	private max_iframe_depth: number;
-	private serializer: DOMTreeSerializer;
 
 	constructor(
 		browser_session: BrowserSession,
@@ -53,7 +52,6 @@ export class DomService {
 		this.paint_order_filtering = paint_order_filtering;
 		this.max_iframes = max_iframes;
 		this.max_iframe_depth = max_iframe_depth;
-		this.serializer = new DOMTreeSerializer();
 	}
 
 	/**
@@ -325,12 +323,17 @@ export class DomService {
 		// Get the full DOM tree
 		const dom_tree = await this.get_dom_tree(target_id);
 
-		// Serialize the tree
-		const serialized = this.serializer.serialize_accessible_elements(
-			dom_tree,
-			this.paint_order_filtering,
-			previous_cached_state
+		// CORRECT: Create serializer with all required parameters
+		const serializer = new DOMTreeSerializer(
+			dom_tree,                        // root_node (REQUIRED)
+			previous_cached_state || null,   // previous state for caching
+			true,                            // enable_bbox_filtering
+			null,                            // containment_threshold (use default)
+			this.paint_order_filtering       // from service config
 		);
+
+		// Call instance method (returns tuple)
+		const [serialized, timing] = serializer.serialize_accessible_elements();
 
 		return serialized;
 	}
