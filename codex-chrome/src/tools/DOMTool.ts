@@ -15,7 +15,7 @@ import type {
   DOMCaptureRequest,
   DOMCaptureResponse,
   SerializedDOMState
-} from '../../../specs/020-refactor-dom-tool/contracts/dom-tool-api';
+} from '../types/domTool';
 import { MessageType } from '../core/MessageRouter';
 import type { DOMCaptureRequestMessage, DOMCaptureResponseMessage, toContentOptions } from '../types/domMessages';
 

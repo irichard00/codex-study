@@ -5,7 +5,7 @@
  * during DOM capture operations.
  */
 
-import type { DOMCaptureRequest } from '../../../specs/020-refactor-dom-tool/contracts/dom-tool-api';
+import type { DOMCaptureRequest } from './domTool';
 import type { CaptureSnapshotReturns, ViewportInfo } from '../content/domCaptureHandler';
 
 /**
