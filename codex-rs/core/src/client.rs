@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use crate::AuthManager;
 use crate::auth::CodexAuth;
+use crate::client_common::tools;
 use crate::error::RetryLimitReachedError;
 use crate::error::UnexpectedResponseError;
 use bytes::Bytes;
@@ -238,10 +239,12 @@ impl ModelClient {
         };
 
         let mut payload_json = serde_json::to_value(&payload)?;
-        // test >>
+        // test>>
         let input_json = serde_json::to_value(&input_with_instructions)?;
         let input_json_str = serde_json::to_string_pretty(&input_json)?;
-        // test <<
+        let tools_json_test = serde_json::to_value(&tools_json)?;
+        let tools_json_str = serde_json::to_string_pretty(&tools_json_test)?;
+        // test<<
         if azure_workaround {
             attach_item_ids(&mut payload_json, &input_with_instructions);
         }
