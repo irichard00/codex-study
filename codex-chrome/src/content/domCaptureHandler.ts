@@ -297,6 +297,7 @@ export function handleDOMCaptureRequest(options: DOMCaptureOptions): {
     totalTime: number;
   };
 } {
+  console.log('starting dom capture with options', options);
   const startTime = performance.now();
 
   // Capture DOM snapshot
@@ -308,7 +309,7 @@ export function handleDOMCaptureRequest(options: DOMCaptureOptions): {
   const viewport = captureViewportInfo();
 
   const totalTime = performance.now() - startTime;
-
+  console.log('dom capture completed with snapshot', snapshot);
   return {
     snapshot,
     viewport,

@@ -116,11 +116,21 @@ function setupMessageHandlers(): void {
 
   // Handle DOM Capture requests (v2.0)
   router.on(MessageType.DOM_CAPTURE_REQUEST, async (message) => {
+    console.log('received dom capture request', message);
     try {
       const requestMessage = message.payload as DOMCaptureRequestMessage;
 
+      // Convert request options to content-compatible format
+      const contentOptions = {
+        includeShadowDOM: requestMessage.options.include_shadow_dom,
+        includeIframes: requestMessage.options.include_iframes,
+        maxIframeDepth: requestMessage.options.max_iframe_depth,
+        maxIframeCount: requestMessage.options.max_iframe_count,
+        skipHiddenElements: requestMessage.options.bbox_filtering,
+      };
+
       // Call DOM capture handler
-      const captureResult = handleDOMCaptureRequest(requestMessage.options);
+      const captureResult = handleDOMCaptureRequest(contentOptions);
 
       // Build response message
       const response: DOMCaptureResponseMessage = {
@@ -135,6 +145,7 @@ function setupMessageHandlers(): void {
       return response;
     } catch (error) {
       // Build error response
+      console.error('error during dom capture', error);
       const errorResponse: DOMCaptureResponseMessage = {
         type: 'DOM_CAPTURE_RESPONSE',
         request_id: (message.payload as DOMCaptureRequestMessage).request_id,
@@ -1028,16 +1039,18 @@ function getTabId(): number | undefined {
 }
 
 /**
- * Cleanup on unload
+ * Cleanup on page hide (replaces deprecated 'unload' event)
+ * Uses 'pagehide' which is the modern replacement for 'unload'
+ * and is not blocked by Permissions Policy
  */
-window.addEventListener('unload', () => {
+window.addEventListener('pagehide', () => {
   // Disconnect observers
   const observers = (window as any).__codexObservers as Map<string, MutationObserver>;
   if (observers) {
     observers.forEach(observer => observer.disconnect());
     observers.clear();
   }
-  
+
   // Clean up router
   if (router) {
     router.cleanup();

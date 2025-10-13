@@ -305,7 +305,7 @@ export interface TargetAllTrees {
   dom_tree: GetDocumentReturns;
   ax_tree: GetFullAXTreeReturns;
   device_pixel_ratio: number;
-  cdp_timing: { [key: string]: number };
+  dom_tool_timing: { [key: string]: number };
 }
 
 /**

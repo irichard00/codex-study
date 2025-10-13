@@ -11,12 +11,11 @@ import { BaseTool, createToolDefinition, type BaseToolRequest, type BaseToolOpti
  * Tab tool request interface
  */
 export interface TabToolRequest extends BaseToolRequest {
-  action: 'create' | 'close' | 'update' | 'query' | 'activate' | 'screenshot' | 'duplicate';
+  action: 'create' | 'close' | 'update' | 'query' | 'activate' | 'duplicate';
   tabId?: number;
   url?: string;
   properties?: TabProperties;
   query?: TabQuery;
-  screenshotOptions?: ScreenshotOptions;
 }
 
 /**
@@ -45,15 +44,6 @@ export interface TabQuery {
 }
 
 /**
- * Screenshot options
- */
-export interface ScreenshotOptions {
-  format?: 'jpeg' | 'png';
-  quality?: number;
-  fromSurface?: boolean;
-}
-
-/**
  * Tab information
  */
 export interface TabInfo {
@@ -77,7 +67,6 @@ export interface TabToolResponse {
   tabs?: TabInfo[];
   tab?: TabInfo;
   tabId?: number;
-  screenshot?: string; // Base64 encoded image
   duplicatedTab?: TabInfo;
 }
 
@@ -89,12 +78,12 @@ export interface TabToolResponse {
 export class TabTool extends BaseTool {
   protected toolDefinition: ToolDefinition = createToolDefinition(
     'browser_tab',
-    'Manage browser tabs - create, close, update, query, activate, and screenshot',
+    'Manage browser tabs - create, close, update, query, activate, and duplicate',
     {
       action: {
         type: 'string',
         description: 'The action to perform on tabs',
-        enum: ['create', 'close', 'update', 'query', 'activate', 'screenshot', 'duplicate'],
+        enum: ['create', 'close', 'update', 'query', 'activate', 'duplicate'],
       },
       tabId: {
         type: 'number',
@@ -129,23 +118,14 @@ export class TabTool extends BaseTool {
           status: { type: 'string', enum: ['loading', 'complete'], description: 'Filter by loading status' },
         },
       },
-      screenshotOptions: {
-        type: 'object',
-        description: 'Options for taking screenshots',
-        properties: {
-          format: { type: 'string', enum: ['jpeg', 'png'], default: 'png', description: 'Screenshot format' },
-          quality: { type: 'number', description: 'JPEG quality (0-100)' },
-          fromSurface: { type: 'boolean', default: false, description: 'Capture from surface instead of DOM' },
-        },
-      },
     },
     {
       required: ['action'],
       category: 'browser',
       version: '1.0.0',
       metadata: {
-        capabilities: ['tab_management', 'screenshot', 'navigation'],
-        permissions: ['tabs', 'activeTab'],
+        capabilities: ['tab_management', 'navigation'],
+        permissions: ['tabs'],
       },
     }
   );
@@ -177,9 +157,6 @@ export class TabTool extends BaseTool {
 
       case 'activate':
         return this.activateTab(request);
-
-      case 'screenshot':
-        return this.takeScreenshot(request);
 
       case 'duplicate':
         return this.duplicateTab(request);
@@ -360,55 +337,6 @@ export class TabTool extends BaseTool {
       };
     } catch (error) {
       throw new Error(`Failed to activate tab ${request.tabId}: ${error}`);
-    }
-  }
-
-  /**
-   * Take a screenshot of a tab
-   */
-  private async takeScreenshot(request: TabToolRequest): Promise<TabToolResponse> {
-    const tabId = request.tabId;
-
-    try {
-      // If no tab ID provided, use active tab
-      const targetTab = tabId ? await this.validateTabId(tabId) : await this.getActiveTab();
-
-      // Validate screenshot permissions
-      await this.validatePermissions(['activeTab']);
-
-      const options: chrome.tabs.CaptureVisibleTabOptions = {
-        format: request.screenshotOptions?.format || 'png',
-        quality: request.screenshotOptions?.quality,
-      };
-
-      // Remove undefined properties
-      if (options.quality === undefined) {
-        delete options.quality;
-      }
-
-      // Ensure tab is active for screenshot
-      if (!targetTab.active) {
-        await chrome.tabs.update(targetTab.id!, { active: true });
-        // Wait a moment for the tab to become fully active
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
-
-      const screenshotDataUrl = await chrome.tabs.captureVisibleTab(
-        targetTab.windowId,
-        options
-      );
-
-      const tabInfo = this.convertTabToInfo(targetTab);
-
-      this.log('info', `Captured screenshot of tab ${targetTab.id}`);
-
-      return {
-        tab: tabInfo,
-        tabId: targetTab.id,
-        screenshot: screenshotDataUrl,
-      };
-    } catch (error) {
-      throw new Error(`Failed to take screenshot: ${error}`);
     }
   }
 

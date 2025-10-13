@@ -508,8 +508,12 @@ export class DOMTool extends BaseTool {
     // Try to ping existing content script
     for (let attempt = 0; attempt < maxRetries; attempt++) {
       try {
-        const response = await chrome.tabs.sendMessage(tabId, { type: 'PING' });
-        if (response && response.type === 'PONG') {
+        const response = await chrome.tabs.sendMessage(tabId, {
+          type: MessageType.PING,
+          payload: {},
+          timestamp: Date.now()
+        });
+        if (response && response.success && response.data && response.data.type === MessageType.PONG) {
           this.log('debug', `Content script ready in tab ${tabId}`);
           return;
         }
