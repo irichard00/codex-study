@@ -51,12 +51,12 @@ export interface CapturedDocument {
  */
 export interface CapturedNode {
   nodeType: number;
-  nodeName: string;
+  nodeName: number;  // String pool index
   nodeValue: string | null;
   backendNodeId: number;
   parentIndex: number | null;
   childIndices: number[];
-  attributes: Record<string, string>;
+  attributes: Record<number, number>;  // Both key and value are string pool indices
   snapshot?: ElementSnapshot;
   axNode?: EnhancedAXNode;
 }
@@ -166,33 +166,25 @@ function captureDocument(
     skipHiddenElements: options.skipHiddenElements
   });
 
-  // Collect all element nodes
-  const elements: Element[] = [];
-  const elementIndices: Map<Element, number> = new Map();
+  // Collect elements from element map with metadata
+  const elementMetadata: Array<{ backendNodeId: number; element: Element }> = [];
 
-  for (let i = 0; i < traversalResult.nodes.length; i++) {
-    const node = traversalResult.nodes[i];
-    if (node.nodeType === 1) { // ELEMENT_NODE
-      // Get actual element from DOM
-      const element = getElementByPath(doc.documentElement, i, traversalResult);
-      if (element) {
-        elements.push(element);
-        elementIndices.set(element, i);
-      }
-    }
+  for (const [index, element] of traversalResult.elementMap.entries()) {
+    elementMetadata.push({
+      backendNodeId: index + 1,
+      element
+    });
   }
 
-  // Batch capture snapshots for all elements
-  const snapshots = batchCaptureSnapshots(elements);
-
-  // Batch extract ARIA information
-  const axNodes = batchExtractARIA(elements);
+  // Batch capture snapshots and ARIA data
+  const snapshots = batchCaptureSnapshots(elementMetadata);
+  const axNodes = batchExtractARIA(elementMetadata);
 
   // Build captured nodes
   const nodes: CapturedNode[] = traversalResult.nodes.map((node, index) => {
     const capturedNode: CapturedNode = {
       nodeType: node.nodeType,
-      nodeName: stringPool.internString(node.nodeName) as any,
+      nodeName: stringPool.internString(node.nodeName),  // Returns number
       nodeValue: node.nodeValue,
       backendNodeId: index + 1,
       parentIndex: node.parentIndex,
@@ -200,20 +192,20 @@ function captureDocument(
       attributes: {}
     };
 
-    // Add snapshot and ARIA data for element nodes
+    // Attach snapshot and ARIA data if element node
     if (node.nodeType === 1) {
-      const element = elements[elementIndices.size - elements.length + Array.from(elementIndices.values()).indexOf(index)];
+      const element = traversalResult.elementMap.get(index);
       if (element) {
         capturedNode.snapshot = snapshots.get(element);
-        capturedNode.axNode = axNodes.get(index);
+        capturedNode.axNode = axNodes.get(element);
 
-        // Intern attribute names and values
+        // Intern attributes
         if (capturedNode.snapshot) {
-          const internedAttrs: Record<string, string> = {};
+          const internedAttrs: Record<number, number> = {};
           for (const [key, value] of Object.entries(capturedNode.snapshot.attributes)) {
-            const internedKey = stringPool.internString(key);
-            const internedValue = stringPool.internString(value);
-            internedAttrs[internedKey as any] = internedValue as any;
+            const keyIndex = stringPool.internString(key);
+            const valueIndex = stringPool.internString(value);
+            internedAttrs[keyIndex] = valueIndex;
           }
           capturedNode.attributes = internedAttrs;
         }
@@ -237,32 +229,6 @@ function captureDocument(
     frameId,
     nodes
   };
-}
-
-/**
- * Get element by traversal index
- *
- * Helper to map traversal index back to actual DOM element.
- *
- * @param root - Root element
- * @param index - Traversal index
- * @param traversalResult - Traversal result
- * @returns Element or null
- */
-function getElementByPath(
-  root: Element,
-  index: number,
-  traversalResult: TraversalResult
-): Element | null {
-  // Simplified implementation - in production, maintain a map during traversal
-  const node = traversalResult.nodes[index];
-  if (node.nodeType !== 1) {
-    return null;
-  }
-
-  // For now, return root as placeholder
-  // TODO: Implement proper element lookup
-  return root;
 }
 
 /**

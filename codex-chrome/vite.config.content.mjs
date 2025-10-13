@@ -18,12 +18,14 @@ export default defineConfig({
       output: {
         extend: true,
         // Ensure no external dependencies - bundle everything
-        inlineDynamicImports: true
+        inlineDynamicImports: true,
+        sourcemap: true,  // NEW: Ensure Rollup generates source map
+        sourcemapExcludeSources: false  // NEW: Include sources in map
       }
     },
     outDir: 'dist',
     emptyOutDir: false,  // Don't clear dist (main build runs first)
-    sourcemap: true,
+    sourcemap: 'external',  // CHANGED: Explicit external (not just true)
     minify: true
   },
   resolve: {
