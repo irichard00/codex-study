@@ -114,6 +114,7 @@ export function captureDOMSnapshot(options: DOMCaptureOptions = {}): CaptureSnap
     { includeShadowDOM, skipHiddenElements },
     stringPool
   );
+  console.log("The captured main doc:", mainDocument)
 
   const documents: CapturedDocument[] = [mainDocument];
 
@@ -133,6 +134,7 @@ export function captureDOMSnapshot(options: DOMCaptureOptions = {}): CaptureSnap
         { includeShadowDOM, skipHiddenElements },
         stringPool
       );
+      console.log("The captured iframe doc:", capturedDoc)
       documents.push(capturedDoc);
     }
   }
@@ -165,6 +167,7 @@ function captureDocument(
     includeComments: false,
     skipHiddenElements: options.skipHiddenElements
   });
+  console.log("traverse dom result: ", traversalResult);
 
   // Collect elements from element map with metadata
   const elementMetadata: Array<{ backendNodeId: number; element: Element }> = [];
@@ -175,10 +178,13 @@ function captureDocument(
       element
     });
   }
+  console.log("elementMetadata: ", elementMetadata);
 
   // Batch capture snapshots and ARIA data
   const snapshots = batchCaptureSnapshots(elementMetadata);
+  console.log("snapshots: ", snapshots);
   const axNodes = batchExtractARIA(elementMetadata);
+  console.log("axNodes: ", axNodes);
 
   // Build captured nodes
   const nodes: CapturedNode[] = traversalResult.nodes.map((node, index) => {
@@ -211,6 +217,8 @@ function captureDocument(
         }
       }
     }
+
+    console.log("the capturedNode", capturedNode);
 
     return capturedNode;
   });

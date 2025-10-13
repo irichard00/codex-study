@@ -377,7 +377,15 @@ export class DOMTool extends BaseTool {
    * Handle capture errors
    */
   private handleCaptureError(error: any, request: DOMCaptureRequest): DOMCaptureResponse {
-    this.log('error', `DOM capture failed: ${error.message}`);
+    // Safely extract error message to avoid circular reference issues
+    let errorMessage = 'Unknown error';
+    try {
+      errorMessage = error?.message || String(error);
+    } catch (e) {
+      errorMessage = 'Error with circular references';
+    }
+
+    this.log('error', `DOM capture failed: ${errorMessage}`);
 
     // Map DOMServiceError to DOMCaptureError
     if (error instanceof DOMServiceError) {
@@ -396,8 +404,8 @@ export class DOMTool extends BaseTool {
       success: false,
       error: {
         code: 'UNKNOWN_ERROR',
-        message: error.message || 'Failed to capture DOM',
-        details: { original_error: String(error) }
+        message: errorMessage,
+        details: { error_type: error?.constructor?.name || 'unknown' }
       }
     };
   }

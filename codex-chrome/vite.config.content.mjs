@@ -25,7 +25,7 @@ export default defineConfig({
     },
     outDir: 'dist',
     emptyOutDir: false,  // Don't clear dist (main build runs first)
-    sourcemap: 'external',  // CHANGED: Explicit external (not just true)
+    sourcemap: true,  //
     minify: true
   },
   resolve: {

@@ -520,7 +520,7 @@ export class EnhancedDOMTreeNodeImpl implements EnhancedDOMTreeNode {
 	static from(data: EnhancedDOMTreeNode): EnhancedDOMTreeNodeImpl {
 		const node = new EnhancedDOMTreeNodeImpl(data);
 
-		// Recursively convert children
+		// Recursively convert children (top-down traversal only)
 		if (data.children_nodes) {
 			node.children_nodes = data.children_nodes.map(child =>
 				child instanceof EnhancedDOMTreeNodeImpl ? child : EnhancedDOMTreeNodeImpl.from(child)
@@ -541,10 +541,9 @@ export class EnhancedDOMTreeNodeImpl implements EnhancedDOMTreeNode {
 				: EnhancedDOMTreeNodeImpl.from(data.content_document);
 		}
 
-		// Convert parent
-		if (data.parent_node && !(data.parent_node instanceof EnhancedDOMTreeNodeImpl)) {
-			node.parent_node = EnhancedDOMTreeNodeImpl.from(data.parent_node);
-		}
+		// DON'T convert parent - this causes stack overflow with circular references!
+		// Just keep the reference as-is from the original tree
+		node.parent_node = data.parent_node;
 
 		return node;
 	}
