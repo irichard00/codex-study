@@ -5,16 +5,20 @@ import {
 	EnhancedDOMTreeNode,
 	SerializedDOMState,
 	TargetInfo,
-	CaptureSnapshotReturns,
+	ContentScriptCaptureReturns,
 	GetDocumentReturns,
 	GetFullAXTreeReturns,
 	AXNode,
 	NodeType,
 	DOMRect,
-	EnhancedSnapshotNode
+	EnhancedSnapshotNode,
+	type NodeTreeSnapshot,
+	type CapturedNode
 } from './views';
 import { DOMTreeSerializer } from './serializer/serializer';
 import { build_snapshot_lookup } from './enhancedSnapshot';
+import { MessageType } from '../../core/MessageRouter';
+import { EnhancedDOMTreeNodeImpl } from './enhancedDOMTreeNode';
 
 /**
  * DOM Service error codes
@@ -182,7 +186,7 @@ export class DomService {
 	}
 
 	/**
-	 * Get viewport ratio - replaces CDP Page.getLayoutMetrics()
+	 * Get viewport ratio
 	 * Uses content script to get devicePixelRatio
 	 */
 	async _get_viewport_ratio(target_id: string): Promise<number> {
@@ -288,12 +292,12 @@ export class DomService {
 	}
 
 	/**
-	 * Get all trees (DOM, AX, snapshot) for a target - replaces multiple CDP calls
+	 * Get all trees (DOM, AX, snapshot) for a target
 	 * Delegates to content script for DOM traversal and snapshot capture
 	 */
 	async _get_all_trees(target_id: string): Promise<TargetAllTrees> {
 		const start_time = Date.now();
-		const cdp_timing: { [key: string]: number } = {};
+		const dom_tool_timing: { [key: string]: number } = {};
 
 		const tab_id = this.browser_session.tab_id;
 		if (!tab_id) {
@@ -306,25 +310,38 @@ export class DomService {
 
 		// Get device pixel ratio
 		const device_pixel_ratio = await this._get_viewport_ratio(target_id);
-		cdp_timing['viewport_ratio'] = Date.now() - start_time;
+		dom_tool_timing['viewport_ratio'] = Date.now() - start_time;
 
 		// Request DOM capture from content script
 		const snapshot_start = Date.now();
 
 		try {
-			// Send message to content script to capture DOM
-			const response = await chrome.tabs.sendMessage(tab_id, {
-				type: 'DOM_CAPTURE_REQUEST',
-				options: {
-					includeShadowDOM: true,
-					includeIframes: true,
-					maxIframeDepth: this.max_iframe_depth,
-					maxIframeCount: this.max_iframes,
-					skipHiddenElements: true
-				}
-			});
+			// Send message to content script to capture DOM using MessageRouter format
+			// IMPORTANT: Send only to main frame (frameId: 0) to avoid multiple responses from iframes
+			const requestId = `dom_capture_${tab_id}_${Date.now()}`;
+			const response = await chrome.tabs.sendMessage(
+				tab_id,
+				{
+					type: MessageType.DOM_CAPTURE_REQUEST,
+					payload: {
+						type: 'DOM_CAPTURE_REQUEST',
+						request_id: requestId,
+						tab_id: tab_id,
+						options: {
+							include_shadow_dom: true,
+							include_iframes: true,
+							max_iframe_depth: this.max_iframe_depth,
+							max_iframe_count: this.max_iframes,
+							bbox_filtering: true
+						}
+					},
+					timestamp: Date.now()
+				},
+				{ frameId: 0 }  // Send only to main frame
+			);
 
-			if (!response || !response.snapshot) {
+			// Response comes in MessageRouter format: { success: boolean, data: DOMCaptureResponseMessage }
+			if (!response || !response.success || !response.data) {
 				throw new DOMServiceError(
 					DOMServiceErrorCode.INVALID_RESPONSE,
 					'Invalid response from content script',
@@ -332,25 +349,35 @@ export class DomService {
 				);
 			}
 
-			const snapshot: CaptureSnapshotReturns = response.snapshot;
-			cdp_timing['snapshot'] = Date.now() - snapshot_start;
+			const captureResponse = response.data;
+
+			if (!captureResponse.success || !captureResponse.snapshot) {
+				throw new DOMServiceError(
+					DOMServiceErrorCode.INVALID_RESPONSE,
+					captureResponse.error?.message || 'Content script returned error',
+					{ tab_id, error: captureResponse.error }
+				);
+			}
+
+			const snapshot: ContentScriptCaptureReturns = captureResponse.snapshot;
+			dom_tool_timing['snapshot'] = Date.now() - snapshot_start;
 
 			// Build DOM tree from snapshot
 			const dom_tree_start = Date.now();
 			const dom_tree = this._build_dom_tree_from_snapshot(snapshot);
-			cdp_timing['dom_tree'] = Date.now() - dom_tree_start;
+			dom_tool_timing['dom_tree'] = Date.now() - dom_tree_start;
 
 			// Build AX tree from snapshot (ARIA data included)
 			const ax_tree_start = Date.now();
 			const ax_tree = this._build_ax_tree_from_snapshot(snapshot);
-			cdp_timing['ax_tree'] = Date.now() - ax_tree_start;
+			dom_tool_timing['ax_tree'] = Date.now() - ax_tree_start;
 
 			return {
 				snapshot,
 				dom_tree,
 				ax_tree,
 				device_pixel_ratio,
-				cdp_timing
+				dom_tool_timing
 			};
 		} catch (error) {
 			this.logger?.error('Failed to get DOM trees: ' + (error as Error).message);
@@ -397,11 +424,11 @@ export class DomService {
 	/**
 	 * Build GetDocumentReturns from snapshot data
 	 */
-	private _build_dom_tree_from_snapshot(snapshot: CaptureSnapshotReturns): GetDocumentReturns {
+	private _build_dom_tree_from_snapshot(snapshot: ContentScriptCaptureReturns): GetDocumentReturns {
 		// Get main document from snapshot
 		const mainDoc = snapshot.documents[0];
 
-		if (!mainDoc || !mainDoc.nodes || mainDoc.nodes.length === 0) {
+		if (!mainDoc || !mainDoc.nodes) {
 			// Return minimal document node
 			return {
 				root: {
@@ -424,7 +451,7 @@ export class DomService {
 	 * Build node tree from snapshot nodes
 	 */
 	private _build_node_tree(
-		nodes: any[],
+		nodes: CapturedNode[],
 		nodeIndex: number,
 		strings: string[]
 	): any {
@@ -477,7 +504,7 @@ export class DomService {
 	/**
 	 * Build GetFullAXTreeReturns from snapshot data
 	 */
-	private _build_ax_tree_from_snapshot(snapshot: CaptureSnapshotReturns): GetFullAXTreeReturns {
+	private _build_ax_tree_from_snapshot(snapshot: ContentScriptCaptureReturns): GetFullAXTreeReturns {
 		const axNodes: AXNode[] = [];
 
 		// Extract AX nodes from all documents in snapshot
@@ -591,9 +618,12 @@ export class DomService {
 		// Get the full DOM tree
 		const dom_tree = await this.get_dom_tree(target_id);
 
+		// Convert plain object to EnhancedDOMTreeNodeImpl to get computed properties
+		const dom_tree_impl = EnhancedDOMTreeNodeImpl.from(dom_tree);
+
 		// CORRECT: Create serializer with all required parameters
 		const serializer = new DOMTreeSerializer(
-			dom_tree,                        // root_node (REQUIRED)
+			dom_tree_impl,                   // root_node (REQUIRED) - now with computed properties
 			previous_cached_state || null,   // previous state for caching
 			true,                            // enable_bbox_filtering
 			null,                            // containment_threshold (use default)
@@ -613,7 +643,7 @@ export class DomService {
 		node: any, // CDP Node type
 		parent: EnhancedDOMTreeNode | null,
 		ax_tree_map: Map<number, EnhancedAXNode>,
-		snapshot_lookup: Map<number, EnhancedSnapshotNode>,
+		snapshot_lookup: Record<number, EnhancedSnapshotNode>,
 		target_id: string,
 		html_frames: Map<string, any>,
 		total_frame_offset: { x: number; y: number },
@@ -639,7 +669,7 @@ export class DomService {
 			parent_node: parent,
 			children_nodes: null,
 			ax_node: ax_tree_map.get(node.backendNodeId) || null,
-			snapshot_node: snapshot_lookup.get(node.backendNodeId) || null,
+			snapshot_node: snapshot_lookup[node.backendNodeId] || null,
 			element_index: null,
 			_compound_children: [],
 			uuid: crypto.randomUUID()

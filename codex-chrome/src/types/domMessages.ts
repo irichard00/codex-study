@@ -6,7 +6,7 @@
  */
 
 import type { DOMCaptureRequest } from './domTool';
-import type { CaptureSnapshotReturns, ViewportInfo } from '../content/domCaptureHandler';
+import type { ContentScriptCaptureReturns, ViewportInfo } from '../tools/dom/views';
 
 /**
  * DOM Capture Request Message
@@ -29,7 +29,7 @@ export interface DOMCaptureResponseMessage {
   type: 'DOM_CAPTURE_RESPONSE';
   request_id: string;
   success: boolean;
-  snapshot?: CaptureSnapshotReturns;
+  snapshot?: ContentScriptCaptureReturns;
   viewport?: ViewportInfo;
   timing?: {
     startTime: number;

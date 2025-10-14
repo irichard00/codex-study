@@ -10,6 +10,7 @@
  * Enhanced accessibility node information
  */
 export interface EnhancedAXNode {
+  backendNodeId: number;
   ax_node_id: string;
   ignored: boolean;
   role: string | null;
@@ -75,12 +76,13 @@ const INPUT_TYPE_ROLES: Record<string, string> = {
  * Extract accessibility information from an element
  *
  * @param element - Element to extract from
- * @param index - Unique index for this element
+ * @param backendNodeId - Backend node identifier
  * @returns Enhanced accessibility node
  */
-export function extractARIA(element: Element, index: number): EnhancedAXNode {
+export function extractARIA(element: Element, backendNodeId: number): EnhancedAXNode {
   const axNode: EnhancedAXNode = {
-    ax_node_id: `ax-${index}`,
+    backendNodeId,
+    ax_node_id: `ax-${backendNodeId}`,
     ignored: false,
     role: null,
     name: null,
@@ -379,15 +381,17 @@ function shouldIgnoreElement(element: Element): boolean {
 /**
  * Batch extract ARIA information for multiple elements
  *
- * @param elements - Elements to extract from
- * @returns Map of element index to ARIA node
+ * @param elementData - Array of elements with metadata
+ * @returns Map of element to ARIA node
  */
-export function batchExtractARIA(elements: Element[]): Map<number, EnhancedAXNode> {
-  const axNodes = new Map<number, EnhancedAXNode>();
+export function batchExtractARIA(
+  elementData: Array<{ backendNodeId: number; element: Element }>
+): Map<Element, EnhancedAXNode> {
+  const axNodes = new Map<Element, EnhancedAXNode>();
 
-  for (let i = 0; i < elements.length; i++) {
-    const axNode = extractARIA(elements[i], i);
-    axNodes.set(i, axNode);
+  for (const { backendNodeId, element } of elementData) {
+    const axNode = extractARIA(element, backendNodeId);
+    axNodes.set(element, axNode);
   }
 
   return axNodes;
