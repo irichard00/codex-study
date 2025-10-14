@@ -10,12 +10,15 @@
 
 import { BaseTool, createToolDefinition, type BaseToolRequest, type BaseToolOptions, type ToolDefinition } from './BaseTool';
 import { DomService, DOMServiceError, DOMServiceErrorCode } from './dom/service';
+import { DOMTreeSerializer } from './dom/serializer/serializer';
+import { DEFAULT_INCLUDE_ATTRIBUTES } from './dom/views';
 import { z } from 'zod';
 import type {
   DOMCaptureRequest,
   DOMCaptureResponse,
   SerializedDOMState
 } from '../types/domTool';
+import { DOMErrorCode } from '../types/domTool';
 import { MessageType } from '../core/MessageRouter';
 import type { DOMCaptureRequestMessage, DOMCaptureResponseMessage, toContentOptions } from '../types/domMessages';
 
@@ -228,20 +231,41 @@ export class DOMTool extends BaseTool {
 
       // Add timing if requested
       if (validatedRequest.include_timing) {
-        serializedState.timing = {
-          ...serializedState.timing,
+        (serializedState as any).timing = {
+          ...(serializedState as any).timing,
           total_ms: totalTime
         };
       }
 
-      // Cache the result
-      if (validatedRequest.use_cache !== false) {
-        this.cacheState(tabId, targetTab.url || '', serializedState);
-      }
+      const serialized_tree = DOMTreeSerializer.serialize_tree(
+        (serializedState as any)._root || null,
+        DEFAULT_INCLUDE_ATTRIBUTES
+      );
 
       return {
         success: true,
-        dom_state: serializedState
+        dom_state: {
+          serialized_tree,
+          selector_map: (serializedState as any).selector_map || {},
+          metadata: {
+            capture_timestamp: Date.now(),
+            page_url: targetTab.url || '',
+            page_title: targetTab.title || '',
+            viewport: {
+              width: 0,
+              height: 0,
+              device_pixel_ratio: 1,
+              scroll_x: 0,
+              scroll_y: 0,
+              visible_width: 0,
+              visible_height: 0
+            },
+            total_nodes: 0,
+            interactive_elements: Object.keys((serializedState as any).selector_map || {}).length,
+            iframe_count: 0,
+            max_depth: 0
+          }
+        }
       };
     } catch (error) {
       throw error; // Will be handled by handleCaptureError
@@ -403,7 +427,7 @@ export class DOMTool extends BaseTool {
     return {
       success: false,
       error: {
-        code: 'UNKNOWN_ERROR',
+        code: DOMErrorCode.UNKNOWN_ERROR,
         message: errorMessage,
         details: { error_type: error?.constructor?.name || 'unknown' }
       }
@@ -413,17 +437,17 @@ export class DOMTool extends BaseTool {
   /**
    * Map DOMServiceErrorCode to public error code
    */
-  private mapServiceErrorCode(code: DOMServiceErrorCode): string {
-    const mapping: Record<DOMServiceErrorCode, string> = {
-      [DOMServiceErrorCode.TAB_NOT_FOUND]: 'TAB_NOT_FOUND',
-      [DOMServiceErrorCode.CONTENT_SCRIPT_NOT_LOADED]: 'CONTENT_SCRIPT_NOT_LOADED',
-      [DOMServiceErrorCode.TIMEOUT]: 'TIMEOUT',
-      [DOMServiceErrorCode.PERMISSION_DENIED]: 'PERMISSION_DENIED',
-      [DOMServiceErrorCode.INVALID_RESPONSE]: 'INVALID_RESPONSE',
-      [DOMServiceErrorCode.UNKNOWN_ERROR]: 'UNKNOWN_ERROR'
+  private mapServiceErrorCode(code: DOMServiceErrorCode): DOMErrorCode {
+    const mapping: Record<DOMServiceErrorCode, DOMErrorCode> = {
+      [DOMServiceErrorCode.TAB_NOT_FOUND]: DOMErrorCode.TAB_NOT_FOUND,
+      [DOMServiceErrorCode.CONTENT_SCRIPT_NOT_LOADED]: DOMErrorCode.CONTENT_SCRIPT_NOT_LOADED,
+      [DOMServiceErrorCode.TIMEOUT]: DOMErrorCode.TIMEOUT,
+      [DOMServiceErrorCode.PERMISSION_DENIED]: DOMErrorCode.PERMISSION_DENIED,
+      [DOMServiceErrorCode.INVALID_RESPONSE]: DOMErrorCode.UNKNOWN_ERROR,
+      [DOMServiceErrorCode.UNKNOWN_ERROR]: DOMErrorCode.UNKNOWN_ERROR
     };
 
-    return mapping[code] || 'UNKNOWN_ERROR';
+    return mapping[code] || DOMErrorCode.UNKNOWN_ERROR;
   }
 
   /**

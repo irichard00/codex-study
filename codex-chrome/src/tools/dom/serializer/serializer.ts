@@ -2,18 +2,15 @@
  * Serializes enhanced DOM trees to string format for LLM consumption
  */
 
-import {
+import type {
 	EnhancedDOMTreeNode,
-	NodeType,
 	SerializedDOMState,
 	SimplifiedNode,
 	DOMSelectorMap,
 	PropagatingBounds,
-	DOMRect,
-	DISABLED_ELEMENTS,
-	PROPAGATING_ELEMENTS,
-	DEFAULT_CONTAINMENT_THRESHOLD
+	DOMRect
 } from '../views';
+import { NodeType, DISABLED_ELEMENTS, PROPAGATING_ELEMENTS, DEFAULT_CONTAINMENT_THRESHOLD } from '../views';
 import { ClickableElementDetector } from './clickableElements';
 import { PaintOrderRemover } from './paintOrder';
 import { cap_text_length } from '../utils';
@@ -399,7 +396,17 @@ export class DOMTreeSerializer {
 
 		if (node.node_type === NodeType.DOCUMENT_FRAGMENT_NODE) {
 			// ENHANCED shadow DOM processing - always include shadow content
-			const simplified: SimplifiedNode = { original_node: node, children: [] };
+			const simplified: SimplifiedNode = {
+				original_node: node,
+				children: [],
+				should_display: true,
+				interactive_index: null,
+				is_new: false,
+				ignored_by_paint_order: false,
+				excluded_by_parent: false,
+				is_shadow_host: false,
+				is_compound_component: false
+			};
 			for (const child of node.children_and_shadow_roots) {
 				const simplified_child = this._create_simplified_tree(child, depth + 1);
 				if (simplified_child) {
@@ -408,7 +415,20 @@ export class DOMTreeSerializer {
 			}
 
 			// Always return shadow DOM fragments, even if children seem empty
-			return simplified.children.length > 0 ? simplified : { original_node: node, children: [] };
+			if (simplified.children.length > 0) {
+				return simplified;
+			}
+			return {
+				original_node: node,
+				children: [],
+				should_display: true,
+				interactive_index: null,
+				is_new: false,
+				ignored_by_paint_order: false,
+				excluded_by_parent: false,
+				is_shadow_host: false,
+				is_compound_component: false
+			};
 		} else if (node.node_type === NodeType.ELEMENT_NODE) {
 			// Skip non-content elements
 			if (DISABLED_ELEMENTS.includes(node.node_name.toLowerCase())) {
@@ -417,7 +437,17 @@ export class DOMTreeSerializer {
 
 			if (node.node_name === 'IFRAME' || node.node_name === 'FRAME') {
 				if (node.content_document) {
-					const simplified: SimplifiedNode = { original_node: node, children: [] };
+				const simplified: SimplifiedNode = {
+					original_node: node,
+					children: [],
+					should_display: true,
+					interactive_index: null,
+					is_new: false,
+					ignored_by_paint_order: false,
+					excluded_by_parent: false,
+					is_shadow_host: false,
+					is_compound_component: false
+				};
 					for (const child of node.content_document.children_nodes || []) {
 						const simplified_child = this._create_simplified_tree(child, depth + 1);
 						if (simplified_child !== null) {
@@ -453,7 +483,13 @@ export class DOMTreeSerializer {
 				const simplified: SimplifiedNode = {
 					original_node: node,
 					children: [],
-					is_shadow_host
+					should_display: true,
+					interactive_index: null,
+					is_new: false,
+					ignored_by_paint_order: false,
+					excluded_by_parent: false,
+					is_shadow_host,
+					is_compound_component: false
 				};
 
 				// Process ALL children including shadow roots
@@ -486,7 +522,17 @@ export class DOMTreeSerializer {
 				node.node_value.trim() &&
 				node.node_value.trim().length > 1
 			) {
-				return { original_node: node, children: [] };
+				return {
+					original_node: node,
+					children: [],
+					should_display: true,
+					interactive_index: null,
+					is_new: false,
+					ignored_by_paint_order: false,
+					excluded_by_parent: false,
+					is_shadow_host: false,
+					is_compound_component: false
+				};
 			}
 		}
 
@@ -589,13 +635,15 @@ export class DOMTreeSerializer {
 	): void {
 		// Check if this is a propagating element
 		let current_active_bounds = active_bounds;
-		if (node.original_node.node_type === NodeType.ELEMENT_NODE && node.original_node.attributes) {
-			if (this._is_propagating_element(node.original_node.attributes)) {
+		if (node.original_node.node_type === NodeType.ELEMENT_NODE) {
+			if (this._is_propagating_element(node.original_node)) {
 				// This element propagates its bounds to children
 				if (node.original_node.snapshot_node?.bounds) {
 					current_active_bounds = {
+						tag: node.original_node.tag_name,
 						bounds: node.original_node.snapshot_node.bounds,
-						source_xpath: node.original_node.xpath
+						node_id: node.original_node.node_id,
+						depth
 					};
 				}
 			}
@@ -630,7 +678,7 @@ export class DOMTreeSerializer {
 		}
 
 		// Don't filter interactive elements that aren't ignored by paint order
-		if (node.interactive_index !== undefined && node.interactive_index !== null && !node.ignored_by_paint_order) {
+		if (node.interactive_index != null && !node.ignored_by_paint_order) {
 			return false;
 		}
 
@@ -669,9 +717,9 @@ export class DOMTreeSerializer {
 		return containment_ratio >= threshold;
 	}
 
-	private _is_propagating_element(attributes: Record<string, string | null>): boolean {
-		const tag = attributes['tag_name']?.toLowerCase();
-		const role = attributes['role']?.toLowerCase();
+	private _is_propagating_element(node: EnhancedDOMTreeNode): boolean {
+		const tag = node.tag_name?.toLowerCase();
+		const role = node.attributes?.role?.toLowerCase();
 
 		for (const config of PROPAGATING_ELEMENTS) {
 			if (config.tag === tag) {
@@ -701,8 +749,8 @@ export class DOMTreeSerializer {
 			let text = '';
 			if (node.original_node.ax_node?.name) {
 				text = node.original_node.ax_node.name;
-			} else if (node.original_node.ax_node?.value) {
-				text = String(node.original_node.ax_node.value);
+			} else if (node.original_node.ax_node?.description) {
+				text = node.original_node.ax_node.description;
 			} else {
 				text = node.original_node.get_all_children_text() || '';
 			}

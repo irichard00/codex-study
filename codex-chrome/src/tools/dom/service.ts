@@ -5,13 +5,15 @@ import {
 	EnhancedDOMTreeNode,
 	SerializedDOMState,
 	TargetInfo,
-	CaptureSnapshotReturns,
+	ContentScriptCaptureReturns,
 	GetDocumentReturns,
 	GetFullAXTreeReturns,
 	AXNode,
 	NodeType,
 	DOMRect,
-	EnhancedSnapshotNode
+	EnhancedSnapshotNode,
+	type NodeTreeSnapshot,
+	type CapturedNode
 } from './views';
 import { DOMTreeSerializer } from './serializer/serializer';
 import { build_snapshot_lookup } from './enhancedSnapshot';
@@ -315,22 +317,28 @@ export class DomService {
 
 		try {
 			// Send message to content script to capture DOM using MessageRouter format
+			// IMPORTANT: Send only to main frame (frameId: 0) to avoid multiple responses from iframes
 			const requestId = `dom_capture_${tab_id}_${Date.now()}`;
-			const response = await chrome.tabs.sendMessage(tab_id, {
-				type: MessageType.DOM_CAPTURE_REQUEST,
-				payload: {
-					type: 'DOM_CAPTURE_REQUEST',
-					request_id: requestId,
-					options: {
-						include_shadow_dom: true,
-						include_iframes: true,
-						max_iframe_depth: this.max_iframe_depth,
-						max_iframe_count: this.max_iframes,
-						bbox_filtering: true
-					}
+			const response = await chrome.tabs.sendMessage(
+				tab_id,
+				{
+					type: MessageType.DOM_CAPTURE_REQUEST,
+					payload: {
+						type: 'DOM_CAPTURE_REQUEST',
+						request_id: requestId,
+						tab_id: tab_id,
+						options: {
+							include_shadow_dom: true,
+							include_iframes: true,
+							max_iframe_depth: this.max_iframe_depth,
+							max_iframe_count: this.max_iframes,
+							bbox_filtering: true
+						}
+					},
+					timestamp: Date.now()
 				},
-				timestamp: Date.now()
-			});
+				{ frameId: 0 }  // Send only to main frame
+			);
 
 			// Response comes in MessageRouter format: { success: boolean, data: DOMCaptureResponseMessage }
 			if (!response || !response.success || !response.data) {
@@ -351,7 +359,7 @@ export class DomService {
 				);
 			}
 
-			const snapshot: CaptureSnapshotReturns = captureResponse.snapshot;
+			const snapshot: ContentScriptCaptureReturns = captureResponse.snapshot;
 			dom_tool_timing['snapshot'] = Date.now() - snapshot_start;
 
 			// Build DOM tree from snapshot
@@ -416,7 +424,7 @@ export class DomService {
 	/**
 	 * Build GetDocumentReturns from snapshot data
 	 */
-	private _build_dom_tree_from_snapshot(snapshot: CaptureSnapshotReturns): GetDocumentReturns {
+	private _build_dom_tree_from_snapshot(snapshot: ContentScriptCaptureReturns): GetDocumentReturns {
 		// Get main document from snapshot
 		const mainDoc = snapshot.documents[0];
 
@@ -443,7 +451,7 @@ export class DomService {
 	 * Build node tree from snapshot nodes
 	 */
 	private _build_node_tree(
-		nodes: any[],
+		nodes: CapturedNode[],
 		nodeIndex: number,
 		strings: string[]
 	): any {
@@ -496,7 +504,7 @@ export class DomService {
 	/**
 	 * Build GetFullAXTreeReturns from snapshot data
 	 */
-	private _build_ax_tree_from_snapshot(snapshot: CaptureSnapshotReturns): GetFullAXTreeReturns {
+	private _build_ax_tree_from_snapshot(snapshot: ContentScriptCaptureReturns): GetFullAXTreeReturns {
 		const axNodes: AXNode[] = [];
 
 		// Extract AX nodes from all documents in snapshot

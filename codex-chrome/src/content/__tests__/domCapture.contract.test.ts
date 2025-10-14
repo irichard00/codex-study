@@ -6,12 +6,12 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest';
+import { captureDOMSnapshot } from '../domCaptureHandler';
 import {
-  captureDOMSnapshot,
-  type CaptureSnapshotReturns,
+  type ContentScriptCaptureReturns,
   type CapturedDocument,
   type CapturedNode
-} from '../domCaptureHandler';
+} from '../../tools/dom/views';
 import { traverseDOM } from '../../tools/dom/chrome/domTraversal';
 
 describe('DOM Capture Contract', () => {

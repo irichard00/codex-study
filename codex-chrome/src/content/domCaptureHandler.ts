@@ -11,7 +11,7 @@
 import { traverseDOM, getInteractiveElements, type TraversalResult } from '../tools/dom/chrome/domTraversal';
 import { captureElementSnapshot, batchCaptureSnapshots, type ElementSnapshot } from '../tools/dom/chrome/snapshotCapture';
 import { StringPool } from '../tools/dom/chrome/stringInterning';
-import { extractARIA, batchExtractARIA, type EnhancedAXNode } from '../tools/dom/chrome/ariaExtraction';
+import { extractARIA, batchExtractARIA } from '../tools/dom/chrome/ariaExtraction';
 import {
   getAccessibleIframeDocuments,
   type IframePlaceholder,
@@ -23,64 +23,14 @@ import {
   mergeWithShadowDOM,
   type ShadowRootInfo
 } from '../tools/dom/chrome/shadowDOMTraversal';
-
-/**
- * DOM capture options
- */
-export interface DOMCaptureOptions {
-  includeShadowDOM?: boolean;
-  includeIframes?: boolean;
-  maxIframeDepth?: number;
-  maxIframeCount?: number;
-  skipHiddenElements?: boolean;
-}
-
-/**
- * Captured DOM document structure (CDP-compatible)
- */
-export interface CapturedDocument {
-  documentURL: string;
-  baseURL: string;
-  title: string;
-  frameId: string;
-  nodes: CapturedNode[];
-}
-
-/**
- * Captured node structure (CDP-compatible)
- */
-export interface CapturedNode {
-  nodeType: number;
-  nodeName: number;  // String pool index
-  nodeValue: string | null;
-  backendNodeId: number;
-  parentIndex: number | null;
-  childIndices: number[];
-  attributes: Record<number, number>;  // Both key and value are string pool indices
-  snapshot?: ElementSnapshot;
-  axNode?: EnhancedAXNode;
-}
-
-/**
- * Complete capture result (CDP-compatible format)
- */
-export interface CaptureSnapshotReturns {
-  documents: CapturedDocument[];
-  strings: string[];
-}
-
-/**
- * Capture viewport information
- */
-export interface ViewportInfo {
-  width: number;
-  height: number;
-  devicePixelRatio: number;
-  scrollX: number;
-  scrollY: number;
-  visibleWidth: number;
-  visibleHeight: number;
-}
+import {
+  type DOMCaptureOptions,
+  type CapturedDocument,
+  type CapturedNode,
+  type ContentScriptCaptureReturns,
+  type ViewportInfo,
+  type EnhancedAXNode
+} from '../tools/dom/views';
 
 /**
  * Main DOM capture handler
@@ -95,7 +45,7 @@ export interface ViewportInfo {
  * @param options - Capture options
  * @returns Capture result with documents and string pool
  */
-export function captureDOMSnapshot(options: DOMCaptureOptions = {}): CaptureSnapshotReturns {
+export function captureDOMSnapshot(options: DOMCaptureOptions = {}): ContentScriptCaptureReturns {
   const {
     includeShadowDOM = true,
     includeIframes = true,
@@ -139,6 +89,7 @@ export function captureDOMSnapshot(options: DOMCaptureOptions = {}): CaptureSnap
     }
   }
 
+  console.log("the length of documents:", documents.length)
   return {
     documents,
     strings: stringPool.export()
@@ -167,7 +118,7 @@ function captureDocument(
     includeComments: false,
     skipHiddenElements: options.skipHiddenElements
   });
-  console.log("traverse dom result: ", traversalResult);
+  // console.log("traverse dom result: ", traversalResult);
 
   // Collect elements from element map with metadata
   const elementMetadata: Array<{ backendNodeId: number; element: Element }> = [];
@@ -178,13 +129,13 @@ function captureDocument(
       element
     });
   }
-  console.log("elementMetadata: ", elementMetadata);
+  // console.log("elementMetadata: ", elementMetadata);
 
   // Batch capture snapshots and ARIA data
   const snapshots = batchCaptureSnapshots(elementMetadata);
-  console.log("snapshots: ", snapshots);
+  // console.log("snapshots: ", snapshots);
   const axNodes = batchExtractARIA(elementMetadata);
-  console.log("axNodes: ", axNodes);
+  // console.log("axNodes: ", axNodes);
 
   // Build captured nodes
   const nodes: CapturedNode[] = traversalResult.nodes.map((node, index) => {
@@ -218,7 +169,7 @@ function captureDocument(
       }
     }
 
-    console.log("the capturedNode", capturedNode);
+    // console.log("the capturedNode", capturedNode);
 
     return capturedNode;
   });
@@ -263,7 +214,7 @@ export function captureViewportInfo(): ViewportInfo {
  * @returns Complete capture result including viewport
  */
 export function handleDOMCaptureRequest(options: DOMCaptureOptions): {
-  snapshot: CaptureSnapshotReturns;
+  snapshot: ContentScriptCaptureReturns;
   viewport: ViewportInfo;
   timing: {
     startTime: number;

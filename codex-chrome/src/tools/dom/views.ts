@@ -29,7 +29,8 @@ export enum NodeType {
 // TYPE ALIASES
 // =============================================================================
 
-export type DOMSelectorMap = { [key: number]: EnhancedDOMTreeNode };
+// Maps XPath (string) to interactive element index (number)
+export type DOMSelectorMap = { [xpath: string]: number };
 export type TargetID = string;
 export type SessionID = string;
 export type ShadowRootType = 'open' | 'closed' | 'user-agent';
@@ -64,7 +65,10 @@ export const REQUIRED_COMPUTED_STYLES = [
 ];
 
 /** Propagating elements from serializer.py */
-export const PROPAGATING_ELEMENTS = ['a', 'button'];
+export const PROPAGATING_ELEMENTS: Array<{ tag: string; role?: string | null }> = [
+  { tag: 'a', role: null },
+  { tag: 'button', role: null }
+];
 
 /** Default containment threshold */
 export const DEFAULT_CONTAINMENT_THRESHOLD = 0.99;
@@ -299,9 +303,10 @@ export interface CurrentPageTargets {
 
 /**
  * All trees for a target
+ * Note: In Chrome extension context, uses ContentScriptCaptureReturns instead of CDP CaptureSnapshotReturns
  */
 export interface TargetAllTrees {
-  snapshot: CaptureSnapshotReturns;
+  snapshot: ContentScriptCaptureReturns;  // Content script format (not CDP format)
   dom_tree: GetDocumentReturns;
   ax_tree: GetFullAXTreeReturns;
   device_pixel_ratio: number;
@@ -406,6 +411,28 @@ export interface EnhancedDOMTreeNode {
 
   // Unique identifier
   uuid: string;
+
+  // Computed properties and helpers (implemented by EnhancedDOMTreeNodeImpl)
+  // These are widely used by serializer and detectors; declare them on the interface
+  readonly parent: EnhancedDOMTreeNode | null;
+  readonly children: EnhancedDOMTreeNode[];
+  readonly children_and_shadow_roots: EnhancedDOMTreeNode[];
+  readonly tag_name: string;
+  readonly xpath: string;
+  readonly is_actually_scrollable: boolean;
+  readonly should_show_scroll_info: boolean;
+  readonly scroll_info: { [key: string]: any } | null;
+  readonly element_hash: number;
+
+  _get_element_position(element: EnhancedDOMTreeNode): number;
+  __json__(): object;
+  get_all_children_text(max_depth?: number): string;
+  llm_representation(max_text_length?: number): string;
+  get_meaningful_text_for_llm(): string;
+  _find_html_in_content_document(): EnhancedDOMTreeNode | null;
+  get_scroll_info_text(): string;
+  parent_branch_hash(): number;
+  _get_parent_branch_path(): string[];
 }
 
 /**
@@ -621,6 +648,69 @@ export interface IClickableElementDetector {
 }
 
 // =============================================================================
+// CONTENT SCRIPT CAPTURE TYPES
+// =============================================================================
+
+/**
+ * DOM capture options for content script
+ */
+export interface DOMCaptureOptions {
+  includeShadowDOM?: boolean;
+  includeIframes?: boolean;
+  maxIframeDepth?: number;
+  maxIframeCount?: number;
+  skipHiddenElements?: boolean;
+}
+
+/**
+ * Captured DOM document structure (content script format)
+ */
+export interface CapturedDocument {
+  documentURL: string;
+  baseURL: string;
+  title: string;
+  frameId: string;
+  nodes: CapturedNode[];
+}
+
+/**
+ * Captured node structure (content script format)
+ */
+export interface CapturedNode {
+  nodeType: number;
+  nodeName: number;  // String pool index
+  nodeValue: string | null;
+  backendNodeId: number;
+  parentIndex: number | null;
+  childIndices: number[];
+  attributes: Record<number, number>;  // Both key and value are string pool indices
+  snapshot?: any;  // ElementSnapshot type from snapshotCapture
+  axNode?: EnhancedAXNode;
+}
+
+/**
+ * Complete capture result (content script format)
+ * Note: This differs from CDP CaptureSnapshotReturns which uses DocumentSnapshot[]
+ */
+export interface ContentScriptCaptureReturns {
+  documents: CapturedDocument[];
+  strings: string[];
+}
+
+/**
+ * Viewport information captured by content script
+ */
+export interface ViewportInfo {
+  width: number;
+  height: number;
+  devicePixelRatio: number;
+  scrollX: number;
+  scrollY: number;
+  visibleWidth: number;
+  visibleHeight: number;
+}
+
+// =============================================================================
 // UTILITY FUNCTIONS
 // =============================================================================
 
@@ -637,12 +727,14 @@ export function cap_text_length(text: string, max_length: number = 100): string 
 /**
  * Enhanced snapshot utility functions
  */
+// Note: This function is implemented in enhancedSnapshot.ts
+// Signature kept here for reference - actual implementation uses CDP format
 export function build_snapshot_lookup(
-  snapshot: CaptureSnapshotReturns,
+  snapshot: CaptureSnapshotReturns,  // CDP format only
   device_pixel_ratio: number
-): Map<number, EnhancedSnapshotNode> {
-  // Implementation would go here
-  return new Map();
+): Record<number, EnhancedSnapshotNode> {
+  // Implementation in enhancedSnapshot.ts
+  throw new Error('Use import from enhancedSnapshot.ts');
 }
 
 export function _parse_rare_boolean_data(

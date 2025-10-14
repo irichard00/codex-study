@@ -115,8 +115,9 @@ function setupMessageHandlers(): void {
   });
 
   // Handle DOM Capture requests (v2.0)
+  // Note: Message is sent with frameId: 0, so only main frame receives it
   router.on(MessageType.DOM_CAPTURE_REQUEST, async (message) => {
-    console.log('received dom capture request', message);
+    console.log('[DOM Capture] Processing request in main frame');
     try {
       const requestMessage = message.payload as DOMCaptureRequestMessage;
 
@@ -142,6 +143,7 @@ function setupMessageHandlers(): void {
         timing: captureResult.timing,
       };
 
+      console.log('[DOM Capture] Returning response with snapshot:', response.snapshot !== undefined);
       return response;
     } catch (error) {
       // Build error response
