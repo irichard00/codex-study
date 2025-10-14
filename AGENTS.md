@@ -1,158 +1,19 @@
-# Rust/codex-rs
+# Repository Guidelines
 
-In the codex-rs folder where the rust code lives:
+## Project Structure & Module Organization
+The monorepo anchors three primary workspaces: `codex-rs` (Rust workspace with crates named `codex-*` under folders like `core`, `common`, `tui`), `codex-chrome` (MV3 extension code in `src/` and tests in `tests/`), and `codex-cli` (command-line surfaces). Shared specs live in `specs/`, SDK examples in `sdk/`, and automation scripts in `scripts/`. Use `docs/` for design notes and `codex-rs/docs/` for crate-specific guides.
 
-- Crate names are prefixed with `codex-`. For example, the `core` folder's crate is named `codex-core`
-- When using format! and you can inline variables into {}, always do that.
-- Install any commands the repo relies on (for example `just`, `rg`, or `cargo-insta`) if they aren't already available before running instructions here.
-- Never add or modify any code related to `CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR` or `CODEX_SANDBOX_ENV_VAR`.
-  - You operate in a sandbox where `CODEX_SANDBOX_NETWORK_DISABLED=1` will be set whenever you use the `shell` tool. Any existing code that uses `CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR` was authored with this fact in mind. It is often used to early exit out of tests that the author knew you would not be able to run given your sandbox limitations.
-  - Similarly, when you spawn a process using Seatbelt (`/usr/bin/sandbox-exec`), `CODEX_SANDBOX=seatbelt` will be set on the child process. Integration tests that want to run Seatbelt themselves cannot be run under Seatbelt, so checks for `CODEX_SANDBOX=seatbelt` are also often used to early exit out of tests, as appropriate.
+## Build, Test, and Development Commands
+From repo root run `pnpm install` before working on TypeScript packages. Within `codex-rs`, rely on `just` recipes: `just fmt` formats all crates, `just fix -p codex-tui` runs clippy for the target crate, and `cargo test -p codex-core` exercises that crate. In `codex-chrome`, use `npm run build`, `npm test`, and `npm run lint`. CLI utilities in `codex-cli` build with `cargo build -p codex-cli`.
 
-Run `just fmt` (in `codex-rs` directory) automatically after making Rust code changes; do not ask for approval to run it. Before finalizing a change to `codex-rs`, run `just fix -p <project>` (in `codex-rs` directory) to fix any linter issues in the code. Prefer scoping with `-p` to avoid slow workspace‑wide Clippy builds; only run `just fix` without `-p` if you changed shared crates. Additionally, run the tests:
-1. Run the test for the specific project that was changed. For example, if changes were made in `codex-rs/tui`, run `cargo test -p codex-tui`.
-2. Once those pass, if any changes were made in common, core, or protocol, run the complete test suite with `cargo test --all-features`.
-When running interactively, ask the user before running `just fix` to finalize. `just fmt` does not require approval. project-specific or individual tests can be run without asking the user, but do ask the user before running the complete test suite.
+## Coding Style & Naming Conventions
+Rust modules follow standard rustfmt with four-space indentation and snake_case files; crates must keep the `codex-` prefix (for example `codex-protocol`). TUI code should favor ratatui’s `Stylize` helpers (`"Ready".green().bold()`) over manual `Style` construction. TypeScript modules mirror the folder name, use camelCase for functions, and rely on ESLint/Prettier via `npm run lint`. Shared JSON or OpenAPI files belong under `specs/`.
 
-## TUI style conventions
+## Testing Guidelines
+Write unit tests next to sources (`codex-rs/<crate>/tests` or `codex-chrome/tests`). Prefer `pretty_assertions::assert_eq!` in Rust. Run crate-level suites with `cargo test -p <crate>` and escalate to `cargo test --all-features` when touching `common`, `core`, or `protocol`. For TUI snapshots, regenerate via `cargo test -p codex-tui` then inspect `cargo insta pending-snapshots`. Front-end contracts rely on Vitest; trigger DOM-focused suites with `npm test -- vitest.dom.config.ts`.
 
-See `codex-rs/tui/styles.md`.
+## Commit & Pull Request Guidelines
+Commits are short, present-tense summaries (“fix content script ping”) and avoid capitalization unless required; scope prefixes such as `tui:` or `chrome:` help reviewers. Every PR must describe intent, outline testing performed, and link issues or specs when relevant. Include screenshots or GIFs for UI-affecting changes, and mention any skipped tests with rationale. Request reviews from domain owners listed in CODEOWNERS when touching shared crates or extension infrastructure.
 
-## TUI code conventions
-
-- Use concise styling helpers from ratatui’s Stylize trait.
-  - Basic spans: use "text".into()
-  - Styled spans: use "text".red(), "text".green(), "text".magenta(), "text".dim(), etc.
-  - Prefer these over constructing styles with `Span::styled` and `Style` directly.
-  - Example: patch summary file lines
-    - Desired: vec!["  └ ".into(), "M".red(), " ".dim(), "tui/src/app.rs".dim()]
-
-### TUI Styling (ratatui)
-- Prefer Stylize helpers: use "text".dim(), .bold(), .cyan(), .italic(), .underlined() instead of manual Style where possible.
-- Prefer simple conversions: use "text".into() for spans and vec![…].into() for lines; when inference is ambiguous (e.g., Paragraph::new/Cell::from), use Line::from(spans) or Span::from(text).
-- Computed styles: if the Style is computed at runtime, using `Span::styled` is OK (`Span::from(text).set_style(style)` is also acceptable).
-- Avoid hardcoded white: do not use `.white()`; prefer the default foreground (no color).
-- Chaining: combine helpers by chaining for readability (e.g., url.cyan().underlined()).
-- Single items: prefer "text".into(); use Line::from(text) or Span::from(text) only when the target type isn’t obvious from context, or when using .into() would require extra type annotations.
-- Building lines: use vec![…].into() to construct a Line when the target type is obvious and no extra type annotations are needed; otherwise use Line::from(vec![…]).
-- Avoid churn: don’t refactor between equivalent forms (Span::styled ↔ set_style, Line::from ↔ .into()) without a clear readability or functional gain; follow file‑local conventions and do not introduce type annotations solely to satisfy .into().
-- Compactness: prefer the form that stays on one line after rustfmt; if only one of Line::from(vec![…]) or vec![…].into() avoids wrapping, choose that. If both wrap, pick the one with fewer wrapped lines.
-
-### Text wrapping
-- Always use textwrap::wrap to wrap plain strings.
-- If you have a ratatui Line and you want to wrap it, use the helpers in tui/src/wrapping.rs, e.g. word_wrap_lines / word_wrap_line.
-- If you need to indent wrapped lines, use the initial_indent / subsequent_indent options from RtOptions if you can, rather than writing custom logic.
-- If you have a list of lines and you need to prefix them all with some prefix (optionally different on the first vs subsequent lines), use the `prefix_lines` helper from line_utils.
-
-## Tests
-
-### Snapshot tests
-
-This repo uses snapshot tests (via `insta`), especially in `codex-rs/tui`, to validate rendered output. When UI or text output changes intentionally, update the snapshots as follows:
-
-- Run tests to generate any updated snapshots:
-  - `cargo test -p codex-tui`
-- Check what’s pending:
-  - `cargo insta pending-snapshots -p codex-tui`
-- Review changes by reading the generated `*.snap.new` files directly in the repo, or preview a specific file:
-  - `cargo insta show -p codex-tui path/to/file.snap.new`
-- Only if you intend to accept all new snapshots in this crate, run:
-  - `cargo insta accept -p codex-tui`
-
-If you don’t have the tool:
-- `cargo install cargo-insta`
-
-### Test assertions
-
-- Tests should use pretty_assertions::assert_eq for clearer diffs. Import this at the top of the test module if it isn't already.
-
----
-
-# TypeScript/codex-chrome
-
-In the codex-chrome folder where the Chrome Extension code lives:
-
-## Technology Stack
-- **Language**: TypeScript 5.x
-- **Platform**: Chrome Extension Manifest V3
-- **APIs**: Chrome Extension APIs (tabs, scripting, runtime messaging), Chrome DevTools Protocol
-- **Architecture**: Background service worker + Content scripts + Side panel
-- **Communication**: Message passing between background ↔ content script contexts
-
-## Message Passing Architecture
-
-### Core Pattern
-- **Background Script** (DOMTool): Runs in extension context, sends DOM operation requests
-- **Content Script**: Runs in page context, executes DOM operations, returns results
-- **Message Types**: Must use `MessageType.DOM_ACTION` for DOM operations (not 'DOM_ACTION' string or TOOL_EXECUTE)
-
-### Critical Requirements
-- Message type must match between sender and receiver
-- All 25 DOM operations must be mapped in content script
-- Errors must be classified (PERMISSION_DENIED vs CONTENT_SCRIPT_NOT_LOADED vs ELEMENT_NOT_FOUND)
-- PING/PONG protocol verifies content script ready before operations
-
-## File Structure
-```
-codex-chrome/
-├── src/
-│   ├── tools/
-│   │   ├── DOMTool.ts              # Background: DOM operation orchestration
-│   │   └── dom/                    # DOM service library
-│   │       └── chrome/
-│   │           └── contentScript.ts # DOM manipulation helpers
-│   ├── content/
-│   │   └── content-script.ts       # Content script: message handlers
-│   ├── models/
-│   │   └── OpenAIResponsesClient.ts # LLM client (GPT-5)
-│   └── core/
-│       └── MessageRouter.ts        # Message routing infrastructure
-└── tests/
-    ├── unit/
-    └── integration/
-```
-
-## Build & Test
-```bash
-cd codex-chrome
-npm run build        # Build extension
-npm test            # Run tests
-npm run lint        # Lint TypeScript
-```
-
-## Common Patterns
-
-### Sending DOM Operations
-```typescript
-// DOMTool (background)
-await chrome.tabs.sendMessage(tabId, {
-  type: MessageType.DOM_ACTION,  // Must match content script handler
-  action: 'query',
-  selector: '.headline',
-  requestId: generateId(),
-  timestamp: Date.now()
-});
-```
-
-### Handling in Content Script
-```typescript
-// content-script.ts
-router.on(MessageType.DOM_ACTION, async (message) => {
-  const { action, selector } = message;
-  const result = await executeDOMOperation(action, selector);
-  return { success: true, data: result, requestId: message.requestId };
-});
-```
-
-### Error Handling
-- Always classify errors using ErrorCode enum
-- Distinguish permission errors from communication failures
-- Include suggestedAction in error responses for LLM context
-
-## Recent Changes
-- 017-fix-domtool-content-script-communication: Fixed message type mismatch between DOMTool and content script, aligned to use MessageType.DOM_ACTION consistently, completed 25 operation mapping
-
-## Testing
-- Unit tests: Test individual message handlers
-- Integration tests: Test full message flow background → content → background
-- Always test error scenarios: element not found, timeout, permission denied
+## Security & Environment Notes
+Development happens inside hardened sandboxes. Respect existing guards that check `CODEX_SANDBOX` or `CODEX_SANDBOX_NETWORK_DISABLED`; do not bypass them, and expect network-dependent tests to short-circuit. Secrets should load from local `.env` files that remain untracked; never commit credentials or API keys. Use `scripts/` helpers for safe Seatbelt invocation rather than spawning raw system commands.

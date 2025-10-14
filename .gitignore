@@ -31,6 +31,7 @@ result
 CLAUDE.md
 .claude/
 .specify/
+.codex/
 
 # caches
 .cache/
