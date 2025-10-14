@@ -11,7 +11,7 @@
 import { traverseDOM, getInteractiveElements, type TraversalResult } from '../tools/dom/chrome/domTraversal';
 import { captureElementSnapshot, batchCaptureSnapshots, type ElementSnapshot } from '../tools/dom/chrome/snapshotCapture';
 import { StringPool } from '../tools/dom/chrome/stringInterning';
-import { extractARIA, batchExtractARIA, type EnhancedAXNode } from '../tools/dom/chrome/ariaExtraction';
+import { extractARIA, batchExtractARIA } from '../tools/dom/chrome/ariaExtraction';
 import {
   getAccessibleIframeDocuments,
   type IframePlaceholder,
@@ -23,64 +23,14 @@ import {
   mergeWithShadowDOM,
   type ShadowRootInfo
 } from '../tools/dom/chrome/shadowDOMTraversal';
-
-/**
- * DOM capture options
- */
-export interface DOMCaptureOptions {
-  includeShadowDOM?: boolean;
-  includeIframes?: boolean;
-  maxIframeDepth?: number;
-  maxIframeCount?: number;
-  skipHiddenElements?: boolean;
-}
-
-/**
- * Captured DOM document structure (CDP-compatible)
- */
-export interface CapturedDocument {
-  documentURL: string;
-  baseURL: string;
-  title: string;
-  frameId: string;
-  nodes: CapturedNode[];
-}
-
-/**
- * Captured node structure (CDP-compatible)
- */
-export interface CapturedNode {
-  nodeType: number;
-  nodeName: string;
-  nodeValue: string | null;
-  backendNodeId: number;
-  parentIndex: number | null;
-  childIndices: number[];
-  attributes: Record<string, string>;
-  snapshot?: ElementSnapshot;
-  axNode?: EnhancedAXNode;
-}
-
-/**
- * Complete capture result (CDP-compatible format)
- */
-export interface CaptureSnapshotReturns {
-  documents: CapturedDocument[];
-  strings: string[];
-}
-
-/**
- * Capture viewport information
- */
-export interface ViewportInfo {
-  width: number;
-  height: number;
-  devicePixelRatio: number;
-  scrollX: number;
-  scrollY: number;
-  visibleWidth: number;
-  visibleHeight: number;
-}
+import {
+  type DOMCaptureOptions,
+  type CapturedDocument,
+  type CapturedNode,
+  type ContentScriptCaptureReturns,
+  type ViewportInfo,
+  type EnhancedAXNode
+} from '../tools/dom/views';
 
 /**
  * Main DOM capture handler
@@ -95,7 +45,7 @@ export interface ViewportInfo {
  * @param options - Capture options
  * @returns Capture result with documents and string pool
  */
-export function captureDOMSnapshot(options: DOMCaptureOptions = {}): CaptureSnapshotReturns {
+export function captureDOMSnapshot(options: DOMCaptureOptions = {}): ContentScriptCaptureReturns {
   const {
     includeShadowDOM = true,
     includeIframes = true,
@@ -114,6 +64,7 @@ export function captureDOMSnapshot(options: DOMCaptureOptions = {}): CaptureSnap
     { includeShadowDOM, skipHiddenElements },
     stringPool
   );
+  console.log("The captured main doc:", mainDocument)
 
   const documents: CapturedDocument[] = [mainDocument];
 
@@ -133,10 +84,12 @@ export function captureDOMSnapshot(options: DOMCaptureOptions = {}): CaptureSnap
         { includeShadowDOM, skipHiddenElements },
         stringPool
       );
+      console.log("The captured iframe doc:", capturedDoc)
       documents.push(capturedDoc);
     }
   }
 
+  console.log("the length of documents:", documents.length)
   return {
     documents,
     strings: stringPool.export()
@@ -165,34 +118,30 @@ function captureDocument(
     includeComments: false,
     skipHiddenElements: options.skipHiddenElements
   });
+  // console.log("traverse dom result: ", traversalResult);
 
-  // Collect all element nodes
-  const elements: Element[] = [];
-  const elementIndices: Map<Element, number> = new Map();
+  // Collect elements from element map with metadata
+  const elementMetadata: Array<{ backendNodeId: number; element: Element }> = [];
 
-  for (let i = 0; i < traversalResult.nodes.length; i++) {
-    const node = traversalResult.nodes[i];
-    if (node.nodeType === 1) { // ELEMENT_NODE
-      // Get actual element from DOM
-      const element = getElementByPath(doc.documentElement, i, traversalResult);
-      if (element) {
-        elements.push(element);
-        elementIndices.set(element, i);
-      }
-    }
+  for (const [index, element] of traversalResult.elementMap.entries()) {
+    elementMetadata.push({
+      backendNodeId: index + 1,
+      element
+    });
   }
+  // console.log("elementMetadata: ", elementMetadata);
 
-  // Batch capture snapshots for all elements
-  const snapshots = batchCaptureSnapshots(elements);
-
-  // Batch extract ARIA information
-  const axNodes = batchExtractARIA(elements);
+  // Batch capture snapshots and ARIA data
+  const snapshots = batchCaptureSnapshots(elementMetadata);
+  // console.log("snapshots: ", snapshots);
+  const axNodes = batchExtractARIA(elementMetadata);
+  // console.log("axNodes: ", axNodes);
 
   // Build captured nodes
   const nodes: CapturedNode[] = traversalResult.nodes.map((node, index) => {
     const capturedNode: CapturedNode = {
       nodeType: node.nodeType,
-      nodeName: stringPool.internString(node.nodeName) as any,
+      nodeName: stringPool.internString(node.nodeName),  // Returns number
       nodeValue: node.nodeValue,
       backendNodeId: index + 1,
       parentIndex: node.parentIndex,
@@ -200,25 +149,27 @@ function captureDocument(
       attributes: {}
     };
 
-    // Add snapshot and ARIA data for element nodes
+    // Attach snapshot and ARIA data if element node
     if (node.nodeType === 1) {
-      const element = elements[elementIndices.size - elements.length + Array.from(elementIndices.values()).indexOf(index)];
+      const element = traversalResult.elementMap.get(index);
       if (element) {
         capturedNode.snapshot = snapshots.get(element);
-        capturedNode.axNode = axNodes.get(index);
+        capturedNode.axNode = axNodes.get(element);
 
-        // Intern attribute names and values
+        // Intern attributes
         if (capturedNode.snapshot) {
-          const internedAttrs: Record<string, string> = {};
+          const internedAttrs: Record<number, number> = {};
           for (const [key, value] of Object.entries(capturedNode.snapshot.attributes)) {
-            const internedKey = stringPool.internString(key);
-            const internedValue = stringPool.internString(value);
-            internedAttrs[internedKey as any] = internedValue as any;
+            const keyIndex = stringPool.internString(key);
+            const valueIndex = stringPool.internString(value);
+            internedAttrs[keyIndex] = valueIndex;
           }
           capturedNode.attributes = internedAttrs;
         }
       }
     }
+
+    // console.log("the capturedNode", capturedNode);
 
     return capturedNode;
   });
@@ -237,32 +188,6 @@ function captureDocument(
     frameId,
     nodes
   };
-}
-
-/**
- * Get element by traversal index
- *
- * Helper to map traversal index back to actual DOM element.
- *
- * @param root - Root element
- * @param index - Traversal index
- * @param traversalResult - Traversal result
- * @returns Element or null
- */
-function getElementByPath(
-  root: Element,
-  index: number,
-  traversalResult: TraversalResult
-): Element | null {
-  // Simplified implementation - in production, maintain a map during traversal
-  const node = traversalResult.nodes[index];
-  if (node.nodeType !== 1) {
-    return null;
-  }
-
-  // For now, return root as placeholder
-  // TODO: Implement proper element lookup
-  return root;
 }
 
 /**
@@ -289,7 +214,7 @@ export function captureViewportInfo(): ViewportInfo {
  * @returns Complete capture result including viewport
  */
 export function handleDOMCaptureRequest(options: DOMCaptureOptions): {
-  snapshot: CaptureSnapshotReturns;
+  snapshot: ContentScriptCaptureReturns;
   viewport: ViewportInfo;
   timing: {
     startTime: number;
@@ -297,6 +222,7 @@ export function handleDOMCaptureRequest(options: DOMCaptureOptions): {
     totalTime: number;
   };
 } {
+  console.log('starting dom capture with options', options);
   const startTime = performance.now();
 
   // Capture DOM snapshot
@@ -308,7 +234,7 @@ export function handleDOMCaptureRequest(options: DOMCaptureOptions): {
   const viewport = captureViewportInfo();
 
   const totalTime = performance.now() - startTime;
-
+  console.log('dom capture completed with snapshot', snapshot);
   return {
     snapshot,
     viewport,
