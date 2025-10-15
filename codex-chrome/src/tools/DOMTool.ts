@@ -194,17 +194,28 @@ export class DOMTool extends BaseTool {
       '=== Regions ===',
       `Regions: ${pageModel.regions.join(', ')}`,
       '',
-      '=== Interactive Controls ===',
-      ...pageModel.controls.map((ctrl: any) => {
-        const states = [];
-        if (ctrl.states.disabled) states.push('disabled');
-        if (ctrl.states.checked) states.push('checked');
-        if (ctrl.states.required) states.push('required');
-        const stateStr = states.length > 0 ? ` [${states.join(', ')}]` : '';
-        const region = ctrl.region ? ` (in ${ctrl.region})` : '';
-        return `${ctrl.id}: ${ctrl.role} "${ctrl.name}"${stateStr}${region}`;
-      })
     ];
+
+    // Add text content if available
+    if (pageModel.textContent && pageModel.textContent.length > 0) {
+      serializedLines.push('=== Text Content ===');
+      pageModel.textContent.forEach((text: string, i: number) => {
+        serializedLines.push(`[${i + 1}] ${text}`);
+        serializedLines.push(''); // Empty line between blocks
+      });
+    }
+
+    // Add interactive controls
+    serializedLines.push('=== Interactive Controls ===');
+    serializedLines.push(...pageModel.controls.map((ctrl: any) => {
+      const states = [];
+      if (ctrl.states.disabled) states.push('disabled');
+      if (ctrl.states.checked) states.push('checked');
+      if (ctrl.states.required) states.push('required');
+      const stateStr = states.length > 0 ? ` [${states.join(', ')}]` : '';
+      const region = ctrl.region ? ` (in ${ctrl.region})` : '';
+      return `${ctrl.id}: ${ctrl.role} "${ctrl.name}"${stateStr}${region}`;
+    }));
 
     // Build selector map from aimap
     const selectorMap: { [index: number]: any } = {};

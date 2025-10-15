@@ -28,6 +28,9 @@ export interface PageModel {
 
   /** Mapping of stable IDs to CSS selectors */
   aimap: SelectorMap;
+
+  /** Visible text content from article-like containers (paragraphs, divs, article elements) */
+  textContent?: string[];
 }
 
 /**
@@ -278,4 +281,13 @@ export const CONSTRAINTS = {
 
   /** Capture timeout (milliseconds) */
   CAPTURE_TIMEOUT_MS: 30000,
+
+  /** Max text content blocks to extract */
+  MAX_TEXT_CONTENT_BLOCKS: 100,
+
+  /** Min characters per text block (filter out short text) */
+  MIN_TEXT_BLOCK_LENGTH: 20,
+
+  /** Max characters per text block */
+  MAX_TEXT_BLOCK_LENGTH: 2000,
 } as const;

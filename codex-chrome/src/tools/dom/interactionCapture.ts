@@ -23,6 +23,7 @@ import { extractStates, normalizeHref } from './stateExtractor';
 import { extractHeadings } from './headingExtractor';
 import { detectRegions, getMostSpecificRegion } from './regionDetector';
 import { processIframes } from './iframeHandler';
+import { extractTextContent } from './textContentExtractor';
 
 /**
  * Captures interaction content from HTML string
@@ -100,6 +101,9 @@ async function captureInteractionContentInternal(
   // Detect landmark regions
   const regions = detectRegions(doc);
 
+  // Extract text content from article-like containers
+  const textContent = extractTextContent(doc, windowContext);
+
   // Collect interactive elements
   let interactiveElements = collectInteractiveElements(doc);
 
@@ -131,6 +135,7 @@ async function captureInteractionContentInternal(
     regions,
     controls,
     aimap,
+    textContent: textContent.length > 0 ? textContent : undefined,
   };
 
   return pageModel;
