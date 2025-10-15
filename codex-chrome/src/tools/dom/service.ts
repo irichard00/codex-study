@@ -19,7 +19,6 @@ import { DOMTreeSerializer } from './serializer/serializer';
 import { build_snapshot_lookup } from './enhancedSnapshot';
 import { MessageType } from '../../core/MessageRouter';
 import { EnhancedDOMTreeNodeImpl } from './enhancedDOMTreeNode';
-import { captureInteractionContent as capture } from './interactionCapture.js';
 import type { CaptureRequest, PageModel } from './pageModel.js';
 
 /**
