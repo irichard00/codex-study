@@ -637,6 +637,68 @@ export class DomService {
 	}
 
 	/**
+	 * Capture interaction content from current page
+	 *
+	 * Feature: 038-implement-captureinteractioncontent-request
+	 *
+	 * @param options - Capture configuration options
+	 * @returns PageModel with interactive elements
+	 */
+	async captureInteractionContent(options: import('./pageModel').CaptureRequest = {}): Promise<import('./pageModel').PageModel> {
+		const { captureInteractionContent: capture } = await import('./interactionCapture');
+
+		const tab_id = this.browser_session.tab_id;
+		if (!tab_id) {
+			throw new DOMServiceError(
+				DOMServiceErrorCode.TAB_NOT_FOUND,
+				'Tab ID is required to capture interaction content',
+				{}
+			);
+		}
+
+		try {
+			// Get current tab's HTML via content script
+			const response = await chrome.tabs.sendMessage(tab_id, {
+				type: 'GET_PAGE_HTML'
+			}, { frameId: 0 });
+
+			if (!response || !response.html) {
+				throw new DOMServiceError(
+					DOMServiceErrorCode.INVALID_RESPONSE,
+					'Failed to get page HTML from content script',
+					{ tab_id }
+				);
+			}
+
+			// Get current URL as baseUrl if not provided
+			const tab = await chrome.tabs.get(tab_id);
+			const baseUrl = options.baseUrl || tab.url;
+
+			// Capture interaction content
+			const pageModel = await capture(response.html, {
+				...options,
+				baseUrl,
+			});
+
+			return pageModel;
+		} catch (error) {
+			this.logger?.error('Failed to capture interaction content: ' + (error as Error).message);
+
+			// Re-throw DOMServiceError as-is
+			if (error instanceof DOMServiceError) {
+				throw error;
+			}
+
+			// Wrap other errors
+			throw new DOMServiceError(
+				DOMServiceErrorCode.UNKNOWN_ERROR,
+				'Failed to capture interaction content',
+				{ tab_id, original_error: (error as Error).message }
+			);
+		}
+	}
+
+	/**
 	 * Helper method to convert CDP DOM node to enhanced tree node
 	 */
 	private _convert_to_enhanced_tree(
