@@ -657,30 +657,38 @@ export class DomService {
 		}
 
 		try {
-			// Get current tab's HTML via content script
-			const response = await chrome.tabs.sendMessage(tab_id, {
-				type: 'GET_PAGE_HTML'
-			}, { frameId: 0 });
-
-			if (!response || !response.html) {
-				throw new DOMServiceError(
-					DOMServiceErrorCode.INVALID_RESPONSE,
-					'Failed to get page HTML from content script',
-					{ tab_id }
-				);
-			}
-
 			// Get current URL as baseUrl if not provided
 			const tab = await chrome.tabs.get(tab_id);
 			const baseUrl = options.baseUrl || tab.url;
 
-			// Capture interaction content
-			const pageModel = await capture(response.html, {
-				...options,
-				baseUrl,
-			});
+			// Call captureInteractionContent in the content script
+			// This avoids DOMParser issues since content script has full DOM access
+			const response = await chrome.tabs.sendMessage(
+				tab_id,
+				{
+					type: MessageType.TAB_COMMAND,
+					payload: {
+						command: 'capture-interaction-content',
+						args: {
+							...options,
+							baseUrl
+						}
+					},
+					timestamp: Date.now()
+				},
+				{ frameId: 0 }
+			);
 
-			return pageModel;
+			// Response comes in MessageRouter format: { success: boolean, data: PageModel }
+			if (!response || !response.success || !response.data) {
+				throw new DOMServiceError(
+					DOMServiceErrorCode.INVALID_RESPONSE,
+					'Failed to capture interaction content from content script',
+					{ tab_id, response }
+				);
+			}
+
+			return response.data;
 		} catch (error) {
 			this.logger?.error('Failed to capture interaction content: ' + (error as Error).message);
 

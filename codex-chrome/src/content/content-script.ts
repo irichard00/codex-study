@@ -6,6 +6,8 @@
 import { MessageRouter, MessageType } from '../core/MessageRouter';
 import { handleDOMCaptureRequest } from './domCaptureHandler';
 import type { DOMCaptureRequestMessage, DOMCaptureResponseMessage } from '../types/domMessages';
+import { captureInteractionContent } from '../tools/dom/interactionCapture';
+import type { CaptureRequest } from '../tools/dom/pageModel';
 
 // Router instance
 let router: MessageRouter | null = null;
@@ -165,8 +167,28 @@ function setupMessageHandlers(): void {
     }
   });
 
-  // Note: GET_PAGE_HTML is handled via direct chrome.runtime.onMessage below
-  // Cannot use router.on() for non-MessageRouter formatted messages
+}
+
+/**
+ * Capture interaction content directly in the page context
+ * This runs in the content script where DOMParser is available
+ */
+async function captureInteractionContentInPage(options: CaptureRequest) {
+  try {
+    // Get the current page HTML
+    const html = document.documentElement.outerHTML;
+
+    // Call the capture function with live document
+    const pageModel = await captureInteractionContent(html, {
+      ...options,
+      baseUrl: options.baseUrl || window.location.href
+    });
+
+    return pageModel;
+  } catch (error) {
+    console.error('[Content Script] Failed to capture interaction content:', error);
+    throw error;
+  }
 }
 
 /**
@@ -176,40 +198,49 @@ function executeCommand(command: string, args?: any): any {
   switch (command) {
     case 'get-context':
       return getPageContext();
-      
+
+    case 'get-page-html':
+      return {
+        html: document.documentElement.outerHTML,
+        success: true
+      };
+
+    case 'capture-interaction-content':
+      return captureInteractionContentInPage(args);
+
     case 'select':
       return selectElements(args.selector);
-      
+
     case 'click':
       return clickElement(args.selector);
-      
+
     case 'type':
       return typeInElement(args.selector, args.text);
-      
+
     case 'extract':
       return extractData(args.selector, args.attributes);
-      
+
     case 'screenshot-element':
       return screenshotElement(args.selector);
-      
+
     case 'highlight':
       return highlightElements(args.selector, args.style);
-      
+
     case 'remove-highlight':
       return removeHighlights();
-      
+
     case 'scroll-to':
       return scrollToElement(args.selector);
-      
+
     case 'get-form-data':
       return getFormData(args.selector);
-      
+
     case 'fill-form':
       return fillForm(args.selector, args.data);
-      
+
     case 'observe':
       return observeElement(args.selector, args.options);
-      
+
     default:
       throw new Error(`Unknown command: ${command}`);
   }
@@ -1064,20 +1095,6 @@ window.addEventListener('pagehide', () => {
 
 // Initialize content script
 initialize();
-
-// Direct message listener for GET_PAGE_HTML (bypasses MessageRouter)
-// This is needed because service.ts sends a plain message, not in MessageRouter format
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type === 'GET_PAGE_HTML') {
-    console.log('[Content Script] GET_PAGE_HTML request received');
-    sendResponse({
-      html: document.documentElement.outerHTML,
-      success: true
-    });
-    return true; // Keep channel open for async response
-  }
-  // Let other messages pass through to MessageRouter
-});
 
 // NOTE: Enhancement script injection is DISABLED due to CSP violations
 // Content Security Policy blocks inline script execution in Chrome extensions
