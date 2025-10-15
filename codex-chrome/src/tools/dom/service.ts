@@ -1,4 +1,4 @@
-import {
+import type {
 	CurrentPageTargets,
 	TargetAllTrees,
 	EnhancedAXNode,
@@ -12,13 +12,15 @@ import {
 	NodeType,
 	DOMRect,
 	EnhancedSnapshotNode,
-	type NodeTreeSnapshot,
-	type CapturedNode
+	NodeTreeSnapshot,
+	CapturedNode
 } from './views';
 import { DOMTreeSerializer } from './serializer/serializer';
 import { build_snapshot_lookup } from './enhancedSnapshot';
 import { MessageType } from '../../core/MessageRouter';
 import { EnhancedDOMTreeNodeImpl } from './enhancedDOMTreeNode';
+import { captureInteractionContent as capture } from './interactionCapture.js';
+import type { CaptureRequest, PageModel } from './pageModel.js';
 
 /**
  * DOM Service error codes
@@ -644,9 +646,7 @@ export class DomService {
 	 * @param options - Capture configuration options
 	 * @returns PageModel with interactive elements
 	 */
-	async captureInteractionContent(options: import('./pageModel').CaptureRequest = {}): Promise<import('./pageModel').PageModel> {
-		const { captureInteractionContent: capture } = await import('./interactionCapture');
-
+	async captureInteractionContent(options: CaptureRequest = {}): Promise<PageModel> {
 		const tab_id = this.browser_session.tab_id;
 		if (!tab_id) {
 			throw new DOMServiceError(

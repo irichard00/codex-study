@@ -164,6 +164,9 @@ function setupMessageHandlers(): void {
       return errorResponse;
     }
   });
+
+  // Note: GET_PAGE_HTML is handled via direct chrome.runtime.onMessage below
+  // Cannot use router.on() for non-MessageRouter formatted messages
 }
 
 /**
@@ -1061,6 +1064,20 @@ window.addEventListener('pagehide', () => {
 
 // Initialize content script
 initialize();
+
+// Direct message listener for GET_PAGE_HTML (bypasses MessageRouter)
+// This is needed because service.ts sends a plain message, not in MessageRouter format
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.type === 'GET_PAGE_HTML') {
+    console.log('[Content Script] GET_PAGE_HTML request received');
+    sendResponse({
+      html: document.documentElement.outerHTML,
+      success: true
+    });
+    return true; // Keep channel open for async response
+  }
+  // Let other messages pass through to MessageRouter
+});
 
 // NOTE: Enhancement script injection is DISABLED due to CSP violations
 // Content Security Policy blocks inline script execution in Chrome extensions

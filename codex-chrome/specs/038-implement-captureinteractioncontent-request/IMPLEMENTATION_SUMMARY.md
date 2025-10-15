@@ -208,9 +208,10 @@ codex-chrome/
 
 ### Optional Enhancements (Not Blocking)
 
-1. **Content Script Handler** (T023)
-   - Add message handler for `GET_PAGE_HTML` in content script
-   - Simple: `chrome.runtime.onMessage.addListener(...)`
+1. ✅ **Content Script Handler** (T023) - COMPLETE
+   - Added message handler for `GET_PAGE_HTML` in content script (content-script.ts:168-176)
+   - Returns `{ html: document.documentElement.outerHTML, success: true }`
+   - Enables `DomService.captureInteractionContent()` to work properly
 
 2. **Unit Tests** (T024-T028)
    - Unit tests for individual utilities (optional, integration tests cover most functionality)

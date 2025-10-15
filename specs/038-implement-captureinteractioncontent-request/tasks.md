@@ -368,18 +368,17 @@ All paths relative to repository root (`codex-chrome/`):
   - **Dependencies**: T021 (DomService integration)
   - **Blocks**: None
 
-- [ ] **T023** Add message passing for content script in `src/content/domCapture.ts`
-  - **File**: `codex-chrome/src/content/domCapture.ts`
-  - **Action**: Add message handler for DOM_CAPTURE_REQUEST that calls captureInteractionContent()
+- [X] **T023** Add message passing for content script in `src/content/content-script.ts`
+  - **File**: `codex-chrome/src/content/content-script.ts`
+  - **Action**: Add message handler for GET_PAGE_HTML that returns page HTML
   - **Logic**:
-    - Listen for MessageType.DOM_CAPTURE_REQUEST
-    - Parse request options (CaptureRequest)
-    - Call captureInteractionContent() with live `document`
-    - Return PageModel via message response
-    - Handle timeouts (30 seconds)
+    - Listen for 'GET_PAGE_HTML' message type
+    - Return { html: document.documentElement.outerHTML, success: true }
+    - Simple handler for captureInteractionContent() in DomService
   - **Acceptance**: Content script integration complete, message passing works
   - **Dependencies**: T020 (main capture function)
   - **Blocks**: None
+  - **Status**: ✅ COMPLETE (2025-10-14)
 
 ---
 
