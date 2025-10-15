@@ -1,4 +1,4 @@
-import {
+import type {
 	CurrentPageTargets,
 	TargetAllTrees,
 	EnhancedAXNode,
@@ -12,13 +12,14 @@ import {
 	NodeType,
 	DOMRect,
 	EnhancedSnapshotNode,
-	type NodeTreeSnapshot,
-	type CapturedNode
+	NodeTreeSnapshot,
+	CapturedNode
 } from './views';
 import { DOMTreeSerializer } from './serializer/serializer';
 import { build_snapshot_lookup } from './enhancedSnapshot';
 import { MessageType } from '../../core/MessageRouter';
 import { EnhancedDOMTreeNodeImpl } from './enhancedDOMTreeNode';
+import type { CaptureRequest, PageModel } from './pageModel.js';
 
 /**
  * DOM Service error codes
@@ -634,6 +635,74 @@ export class DomService {
 		const [serialized, timing] = serializer.serialize_accessible_elements();
 
 		return serialized;
+	}
+
+	/**
+	 * Capture interaction content from current page
+	 *
+	 * Feature: 038-implement-captureinteractioncontent-request
+	 *
+	 * @param options - Capture configuration options
+	 * @returns PageModel with interactive elements
+	 */
+	async captureInteractionContent(options: CaptureRequest = {}): Promise<PageModel> {
+		const tab_id = this.browser_session.tab_id;
+		if (!tab_id) {
+			throw new DOMServiceError(
+				DOMServiceErrorCode.TAB_NOT_FOUND,
+				'Tab ID is required to capture interaction content',
+				{}
+			);
+		}
+
+		try {
+			// Get current URL as baseUrl if not provided
+			const tab = await chrome.tabs.get(tab_id);
+			const baseUrl = options.baseUrl || tab.url;
+
+			// Call captureInteractionContent in the content script
+			// This avoids DOMParser issues since content script has full DOM access
+			const response = await chrome.tabs.sendMessage(
+				tab_id,
+				{
+					type: MessageType.TAB_COMMAND,
+					payload: {
+						command: 'capture-interaction-content',
+						args: {
+							...options,
+							baseUrl
+						}
+					},
+					timestamp: Date.now()
+				},
+				{ frameId: 0 }
+			);
+
+			// Response comes in MessageRouter format: { success: boolean, data: PageModel }
+			if (!response || !response.success || !response.data) {
+				throw new DOMServiceError(
+					DOMServiceErrorCode.INVALID_RESPONSE,
+					'Failed to capture interaction content from content script',
+					{ tab_id, response }
+				);
+			}
+
+			return response.data;
+		} catch (error) {
+			this.logger?.error('Failed to capture interaction content: ' + (error as Error).message);
+
+			// Re-throw DOMServiceError as-is
+			if (error instanceof DOMServiceError) {
+				throw error;
+			}
+
+			// Wrap other errors
+			throw new DOMServiceError(
+				DOMServiceErrorCode.UNKNOWN_ERROR,
+				'Failed to capture interaction content',
+				{ tab_id, original_error: (error as Error).message }
+			);
+		}
 	}
 
 	/**

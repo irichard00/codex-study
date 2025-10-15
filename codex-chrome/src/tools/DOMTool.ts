@@ -111,7 +111,7 @@ export class DOMTool extends BaseTool {
   }
 
   /**
-   * Execute DOM tool action - now only supports captureDOM
+   * Execute DOM tool action - now uses captureInteractionContent
    */
   protected async executeImpl(request: DOMCaptureRequest, options?: BaseToolOptions): Promise<DOMCaptureResponse> {
     // Validate Chrome context
@@ -120,13 +120,151 @@ export class DOMTool extends BaseTool {
     // Validate required permissions
     await this.validatePermissions(['activeTab', 'scripting']);
 
-    this.log('debug', 'Executing captureDOM', request);
+    this.log('debug', 'Executing captureInteractionContent', request);
 
     try {
-      return await this.captureDOM(request);
+      // Use new implementation
+      return await this.captureInteractionContent(request);
+
+      // Old implementation (commented out)
+      // return await this.captureDOM(request);
     } catch (error) {
       return this.handleCaptureError(error, request);
     }
+  }
+
+  /**
+   * Capture page interaction content using new captureInteractionContent() method
+   *
+   * This method uses the privacy-first, LLM-optimized interaction capture system
+   * instead of the legacy full DOM tree capture.
+   */
+  private async captureInteractionContent(request: DOMCaptureRequest): Promise<DOMCaptureResponse> {
+    // Get target tab
+    const targetTab = request.tab_id
+      ? await this.validateTabId(request.tab_id)
+      : await this.getActiveTab();
+
+    const tabId = targetTab.id!;
+
+    // Ensure content script is injected
+    await this.ensureContentScriptInjected(tabId);
+
+    // Create DomService instance for this tab
+    this.domService = new DomService(
+      { tab_id: tabId },
+      {
+        log: (msg: string) => this.log('info', msg),
+        error: (msg: string) => this.log('error', msg),
+        warn: (msg: string) => this.log('warn', msg)
+      },
+      false, // cross_origin_iframes
+      request.paint_order_filtering !== false,
+      request.max_iframe_count || 15,
+      request.max_iframe_depth || 3
+    );
+
+    // Capture interaction content
+    const pageModel = await this.domService.captureInteractionContent({
+      maxControls: 400,
+      maxHeadings: 30,
+      includeValues: false,
+      maxIframeDepth: request.max_iframe_depth || 1
+    });
+
+    // Convert PageModel to DOMCaptureResponse format
+    return this.convertPageModelToResponse(pageModel, targetTab);
+  }
+
+  /**
+   * Convert PageModel to DOMCaptureResponse format
+   *
+   * Transforms the LLM-optimized PageModel into the expected DOMCaptureResponse
+   * format used by the DOMTool interface.
+   */
+  private convertPageModelToResponse(pageModel: any, targetTab: chrome.tabs.Tab): DOMCaptureResponse {
+    // Build serialized tree as a formatted string
+    const serializedLines = [
+      `Page: ${pageModel.title}`,
+      `URL: ${pageModel.url || 'unknown'}`,
+      '',
+      '=== Headings ===',
+      ...pageModel.headings.map((h: string, i: number) => `${i + 1}. ${h}`),
+      '',
+      '=== Regions ===',
+      `Regions: ${pageModel.regions.join(', ')}`,
+      '',
+    ];
+
+    // Add text content if available
+    if (pageModel.textContent && pageModel.textContent.length > 0) {
+      serializedLines.push('=== Text Content ===');
+      pageModel.textContent.forEach((text: string, i: number) => {
+        serializedLines.push(`[${i + 1}] ${text}`);
+        serializedLines.push(''); // Empty line between blocks
+      });
+    }
+
+    // Add interactive controls
+    serializedLines.push('=== Interactive Controls ===');
+    serializedLines.push(...pageModel.controls.map((ctrl: any) => {
+      const states = [];
+      if (ctrl.states.disabled) states.push('disabled');
+      if (ctrl.states.checked) states.push('checked');
+      if (ctrl.states.required) states.push('required');
+      const stateStr = states.length > 0 ? ` [${states.join(', ')}]` : '';
+      const region = ctrl.region ? ` (in ${ctrl.region})` : '';
+      return `${ctrl.id}: ${ctrl.role} "${ctrl.name}"${stateStr}${region}`;
+    }));
+
+    // Build selector map from aimap
+    const selectorMap: { [index: number]: any } = {};
+    for (const [id, selector] of Object.entries(pageModel.aimap)) {
+      const control = pageModel.controls.find((c: any) => c.id === id);
+      if (control) {
+        const index = parseInt(id.split('_')[1]);
+        selectorMap[index] = {
+          backend_node_id: index,
+          node_name: control.role.toUpperCase(),
+          attributes: {
+            selector: selector,
+            name: control.name,
+            role: control.role,
+            ...(control.states.placeholder && { placeholder: control.states.placeholder }),
+            ...(control.states.href && { href: control.states.href })
+          },
+          absolute_position: control.boundingBox || { x: 0, y: 0, width: 0, height: 0 },
+          is_visible: control.visible
+        };
+      }
+    }
+
+    // Return formatted response
+    return {
+      success: true,
+      dom_state: {
+        serialized_tree: serializedLines.join('\n'),
+        selector_map: selectorMap,
+        metadata: {
+          capture_timestamp: Date.now(),
+          page_url: pageModel.url || targetTab.url || '',
+          page_title: pageModel.title,
+          viewport: {
+            width: 0,
+            height: 0,
+            device_pixel_ratio: 1,
+            scroll_x: 0,
+            scroll_y: 0,
+            visible_width: 0,
+            visible_height: 0
+          },
+          total_nodes: pageModel.controls.length,
+          interactive_elements: pageModel.controls.length,
+          iframe_count: 0,
+          max_depth: 0
+        }
+      }
+    };
   }
 
   /**
